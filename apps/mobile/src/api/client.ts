@@ -1,4 +1,8 @@
 import type {
+  AlertCreate,
+  AlertEvaluation,
+  AlertRule,
+  AlertState,
   AssistantReply,
   AuthResponse,
   AutoSettle,
@@ -17,6 +21,10 @@ import type {
   League,
   Market,
   Meta,
+  Notification,
+  NotificationList,
+  NotificationPreferences,
+  NotificationPreferencesUpdate,
   NoVigResult,
   OddsComparison,
   ParlayRequest,
@@ -25,6 +33,7 @@ import type {
   PropBoardRow,
   PropSplit,
   PropWindow,
+  StakeReminder,
   SyncConnection,
   SyncDelete,
   SyncProvider,
@@ -104,7 +113,7 @@ async function parseError(response: Response): Promise<ApiError> {
 }
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   query?: Query;
   body?: unknown;
   signal?: AbortSignal;
@@ -348,6 +357,80 @@ export function deleteSyncConnection(connectionId: string): Promise<SyncDelete> 
     method: 'DELETE',
     auth: 'required',
     query: { delete_data: true },
+  });
+}
+
+// Alerts and notifications. In-app only: there is no push, and no background worker. The API evaluates the
+// user's alert rules when the app reads the notifications or the unread count, or calls `evaluateAlerts`.
+
+export async function getAlerts(state?: AlertState | null, signal?: AbortSignal): Promise<AlertRule[]> {
+  return (await apiRequest<{ items: AlertRule[] }>('/v1/alerts', { auth: 'required', query: { state }, signal })).items;
+}
+
+/** 201 for a new rule; 200 with the existing rule when an identical active one is already there. */
+export function createAlert(rule: AlertCreate): Promise<AlertRule> {
+  return apiRequest<AlertRule>('/v1/alerts', { auth: 'required', body: rule });
+}
+
+/** `paused` pauses an active rule. `active` resumes a paused rule or sets a triggered one again. */
+export function updateAlert(alertId: string, state: 'active' | 'paused'): Promise<AlertRule> {
+  return apiRequest<AlertRule>(`/v1/alerts/${id(alertId)}`, { method: 'PATCH', auth: 'required', body: { state } });
+}
+
+export function deleteAlert(alertId: string): Promise<void> {
+  return apiRequest<void>(`/v1/alerts/${id(alertId)}`, { method: 'DELETE', auth: 'required' });
+}
+
+export function evaluateAlerts(): Promise<AlertEvaluation> {
+  return apiRequest<AlertEvaluation>('/v1/alerts/evaluate', { method: 'POST', auth: 'required', body: {} });
+}
+
+export function getNotifications(
+  filters: { unread?: boolean; limit?: number; before?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<NotificationList> {
+  return apiRequest<NotificationList>('/v1/notifications', {
+    auth: 'required',
+    query: { unread: filters.unread, limit: filters.limit, before: filters.before },
+    signal,
+  });
+}
+
+export async function getUnreadCount(signal?: AbortSignal): Promise<number> {
+  return (await apiRequest<{ unread_count: number }>('/v1/notifications/unread-count', { auth: 'required', signal })).unread_count;
+}
+
+export function markNotificationRead(notificationId: string): Promise<Notification> {
+  return apiRequest<Notification>(`/v1/notifications/${id(notificationId)}/read`, { method: 'POST', auth: 'required', body: {} });
+}
+
+export function markAllNotificationsRead(): Promise<{ updated: number }> {
+  return apiRequest<{ updated: number }>('/v1/notifications/read-all', { method: 'POST', auth: 'required', body: {} });
+}
+
+export function deleteNotification(notificationId: string): Promise<void> {
+  return apiRequest<void>(`/v1/notifications/${id(notificationId)}`, { method: 'DELETE', auth: 'required' });
+}
+
+export function getNotificationPreferences(signal?: AbortSignal): Promise<NotificationPreferences> {
+  return apiRequest<NotificationPreferences>('/v1/me/notification-preferences', { auth: 'required', signal });
+}
+
+/** Sends only the kinds that changed; the API leaves the others alone. */
+export function updateNotificationPreferences(update: NotificationPreferencesUpdate): Promise<NotificationPreferences> {
+  return apiRequest<NotificationPreferences>('/v1/me/notification-preferences', { method: 'PUT', auth: 'required', body: update });
+}
+
+export function getStakeReminder(signal?: AbortSignal): Promise<StakeReminder> {
+  return apiRequest<StakeReminder>('/v1/me/stake-reminder', { auth: 'required', signal });
+}
+
+/** A weekly amount, or `null` to turn the reminder off. A reminder, never a limit: bets are always saved. */
+export function setStakeReminder(weeklyStakeThreshold: number | null): Promise<StakeReminder> {
+  return apiRequest<StakeReminder>('/v1/me/stake-reminder', {
+    method: 'PUT',
+    auth: 'required',
+    body: { weekly_stake_threshold: weeklyStakeThreshold },
   });
 }
 

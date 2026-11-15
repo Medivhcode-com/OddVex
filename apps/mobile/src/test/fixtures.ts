@@ -1,14 +1,17 @@
 import type {
+  AlertRule,
   AuthResponse,
   Bet,
   BetLeg,
   BookRow,
   EventSummary,
   GameLogEntry,
+  Notification,
   OddsComparison,
   Outcome,
   PriceT,
   PropAnalysis,
+  StakeReminder,
   User,
 } from '@/api/types';
 
@@ -221,3 +224,93 @@ export const propAnalysis: PropAnalysis = {
     { sportsbook: { key: 'book_d', name: 'Delta Lines' }, status: 'unavailable', is_stale: false, is_best_over: false, is_best_under: false },
   ],
 };
+
+export const upcomingEvent: EventSummary = { ...liveEvent, id: 'evt_2', status: 'upcoming', status_detail: null, score: null, start_time: '2026-11-16T18:00:00Z' };
+
+/** The spread on `upcomingEvent`: Gulls −3.5 best at Northstar, Forge +3.5 best at Beacon. */
+export const spread: OddsComparison = {
+  ...moneyline,
+  event: upcomingEvent,
+  market: 'spread',
+  books: [
+    {
+      ...openBook,
+      outcomes: [
+        outcome('away', 'Iron Valley Forge', price(-112, 1.89, 0.5283), { line: 3.5 }),
+        outcome('home', 'Harbor City Gulls', price(-108, 1.93, 0.5192), { line: -3.5, is_best: true }),
+      ],
+    },
+    {
+      ...staleBook,
+      is_stale: false,
+      outcomes: [
+        outcome('away', 'Iron Valley Forge', price(-105, 1.95, 0.5122), { line: 3.5, is_best: true }),
+        outcome('home', 'Harbor City Gulls', price(-115, 1.87, 0.5349), { line: -3.5 }),
+      ],
+    },
+  ],
+  best: [
+    { outcome_key: 'away', sportsbook_key: 'book_b', price: price(-105, 1.95, 0.5122), line: 3.5 },
+    { outcome_key: 'home', sportsbook_key: 'book_a', price: price(-108, 1.93, 0.5192), line: -3.5 },
+  ],
+};
+
+function notification(id: string, kind: Notification['kind'], title: string, body: string, extra: Partial<Notification> = {}): Notification {
+  return { id, kind, title, body, data: {}, created_at: '2026-11-15T19:54:00Z', read_at: null, ...extra };
+}
+
+export const priceNotification = notification(
+  'ntf_1',
+  'price_alert',
+  'Price reached +120',
+  'Iron Valley Forge spread +3.5 is +120 at Cedar Book, at or above your +115 alert.',
+  { href: '/app/games/evt_2?market=spread' },
+);
+export const finalNotification = notification('ntf_2', 'game_final', 'Final: IVF 14, HCG 17', 'Final score: Iron Valley Forge 14, Harbor City Gulls 17.', {
+  href: '/app/games/evt_1',
+  read_at: '2026-11-15T19:00:00Z',
+});
+export const stakeNotification = notification(
+  'ntf_3',
+  'stake_reminder',
+  'Weekly staking reminder',
+  'You have staked $250.00 this week, at or above the $200.00 reminder you set.',
+  { href: '/terms' },
+);
+export const settledNotification = notification('ntf_4', 'bet_settled', 'Bet settled: won', 'Harbor City Gulls ML settled as won from the final score.', {
+  href: '/app/tracker',
+});
+
+function rule(id: string, state: AlertRule['state'], summary: string, extra: Partial<AlertRule> = {}): AlertRule {
+  return {
+    id,
+    kind: 'price_at_least',
+    state,
+    summary,
+    label: 'Iron Valley Forge at Harbor City Gulls',
+    event_id: 'evt_2',
+    market: 'moneyline',
+    available: true,
+    created_at: '2026-11-15T18:00:00Z',
+    updated_at: '2026-11-15T18:00:00Z',
+    ...extra,
+  };
+}
+
+export const activeRule = rule('alr_1', 'active', 'Iron Valley Forge moneyline at +130 or higher');
+export const triggeredRule = rule('alr_2', 'triggered', 'Harbor City Gulls moneyline at -120 or higher');
+export const pausedRule = rule('alr_3', 'paused', 'Each Harbor City Gulls game, 60 minutes before the start', {
+  kind: 'game_start',
+  event_id: null,
+  team_id: 't_home',
+  market: null,
+  label: 'Harbor City Gulls',
+});
+export const expiredRule = rule('alr_4', 'expired', 'Iron Valley Forge at Harbor City Gulls spread line moves 1 point or more from 3.5', {
+  kind: 'line_move',
+  market: 'spread',
+  available: false,
+});
+
+export const reminderOff: StakeReminder = { weekly_stake_threshold: null, staked_this_week: 190, week_start: '2026-11-09T00:00:00Z', exceeded: false };
+export const reminderExceeded: StakeReminder = { weekly_stake_threshold: 200, staked_this_week: 250, week_start: '2026-11-09T00:00:00Z', exceeded: true };

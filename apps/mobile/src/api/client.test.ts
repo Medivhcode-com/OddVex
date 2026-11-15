@@ -15,6 +15,7 @@ import {
   getMeta,
   withQuery,
 } from '@/api/client';
+import * as client from '@/api/client';
 
 const fetchMock = jest.fn();
 
@@ -245,5 +246,83 @@ describe('describeError', () => {
       'American odds cannot be between -100 and 100.',
     );
     expect(describeError(new Error('boom'), 'The bet was not saved. Try again.')).toBe('The bet was not saved. Try again.');
+  });
+});
+
+describe('alerts and notifications', () => {
+  const calls = () =>
+    fetchMock.mock.calls.map(([url, init]) => ({
+      method: init.method,
+      path: String(url).replace(client.API_URL, ''),
+      auth: init.headers.authorization,
+      body: init.body === undefined ? undefined : JSON.parse(init.body),
+    }));
+
+  beforeEach(() => setAuthToken('token-1'));
+  afterEach(() => setAuthToken(null));
+
+  it('refuses every one of them without a token, before any request', async () => {
+    setAuthToken(null);
+    for (const call of [
+      () => client.getAlerts(),
+      () => client.evaluateAlerts(),
+      () => client.getNotifications(),
+      () => client.getUnreadCount(),
+      () => client.markAllNotificationsRead(),
+      () => client.getNotificationPreferences(),
+      () => client.setStakeReminder(100),
+    ]) {
+      await expect(call()).rejects.toMatchObject({ status: 401, code: 'not_logged_in' });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('unwraps the alert list and the unread count, and builds the notification query', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'alr_1' }] }))
+      .mockResolvedValueOnce(jsonResponse({ unread_count: 3 }))
+      .mockResolvedValue(jsonResponse({ items: [], unread_count: 0, next_before: null }));
+
+    await expect(client.getAlerts('active')).resolves.toEqual([{ id: 'alr_1' }]);
+    await expect(client.getUnreadCount()).resolves.toBe(3);
+    await client.getNotifications();
+    await client.getNotifications({ unread: true, limit: 30, before: 'abc/1' });
+
+    expect(calls().map(({ method, path, auth }) => `${method} ${path} ${auth}`)).toEqual([
+      'GET /v1/alerts?state=active Bearer token-1',
+      'GET /v1/notifications/unread-count Bearer token-1',
+      'GET /v1/notifications Bearer token-1',
+      'GET /v1/notifications?unread=true&limit=30&before=abc%2F1 Bearer token-1',
+    ]);
+  });
+
+  it('uses the method and body each write needs', async () => {
+    fetchMock.mockImplementation(async (_url: string, init: { method: string }) =>
+      init.method === 'DELETE' ? { ok: true, status: 204, json: async () => undefined } : jsonResponse({}),
+    );
+
+    await client.createAlert({ kind: 'game_final', event_id: 'evt_1' });
+    await client.updateAlert('alr_1', 'paused');
+    await client.deleteAlert('alr 1');
+    await client.evaluateAlerts();
+    await client.markNotificationRead('ntf_1');
+    await client.markAllNotificationsRead();
+    await client.deleteNotification('ntf_1');
+    await client.updateNotificationPreferences({ in_app: { line_move: false } });
+    await client.setStakeReminder(250);
+    await client.setStakeReminder(null);
+
+    expect(calls().map(({ method, path, body }) => [`${method} ${path}`, body])).toEqual([
+      ['POST /v1/alerts', { kind: 'game_final', event_id: 'evt_1' }],
+      ['PATCH /v1/alerts/alr_1', { state: 'paused' }],
+      ['DELETE /v1/alerts/alr%201', undefined],
+      ['POST /v1/alerts/evaluate', {}],
+      ['POST /v1/notifications/ntf_1/read', {}],
+      ['POST /v1/notifications/read-all', {}],
+      ['DELETE /v1/notifications/ntf_1', undefined],
+      ['PUT /v1/me/notification-preferences', { in_app: { line_move: false } }],
+      ['PUT /v1/me/stake-reminder', { weekly_stake_threshold: 250 }],
+      ['PUT /v1/me/stake-reminder', { weekly_stake_threshold: null }],
+    ]);
   });
 });

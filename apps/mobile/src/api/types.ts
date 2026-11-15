@@ -68,6 +68,27 @@ export type SyncConnection = Schemas['SyncConnectionOut'];
 export type SyncRun = Schemas['SyncRunOut'];
 export type SyncDelete = Schemas['SyncConnectionDeleteOut'];
 
+export type AlertRule = Schemas['AlertRuleOut'];
+export type AlertState = AlertRule['state'];
+export type AlertKind = AlertRule['kind'];
+export type AlertOutcomeKey = NonNullable<AlertRule['outcome_key']>;
+/** One of the four rule shapes `POST /v1/alerts` accepts, told apart by `kind`. */
+export type AlertCreate =
+  | Defaulted<Schemas['PriceAtLeastAlertCreate'], 'odds_format'>
+  | Schemas['LineMoveAlertCreate']
+  | Schemas['GameStartAlertCreate']
+  | Schemas['GameFinalAlertCreate'];
+export type AlertUpdate = Schemas['AlertUpdate'];
+export type AlertEvaluation = Schemas['AlertEvaluationOut'];
+
+export type Notification = Schemas['NotificationOut'];
+export type NotificationKind = Notification['kind'];
+export type NotificationList = Schemas['NotificationListOut'];
+export type NotificationPreferences = Schemas['NotificationPreferencesOut'];
+/** A partial update: kinds left out keep their value. */
+export type NotificationPreferencesUpdate = { in_app: Partial<Record<NotificationKind, boolean>> };
+export type StakeReminder = Schemas['StakeReminderOut'];
+
 export type Market = Schemas['EventOddsOut']['market'];
 export const MARKETS: readonly { value: Market; label: string }[] = [
   { value: 'moneyline', label: 'Moneyline' },

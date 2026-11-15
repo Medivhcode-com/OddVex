@@ -24,7 +24,9 @@ const reply: AssistantReply = {
 describe('suggestionRoute', () => {
   it.each([
     ['/app/games/evt_1', { pathname: '/event/[id]', params: { id: 'evt_1' } }],
-    ['/app/games/evt_1?market=spread', { pathname: '/event/[id]', params: { id: 'evt_1' } }],
+    ['/app/games/evt_1?market=spread', { pathname: '/event/[id]', params: { id: 'evt_1', market: 'spread' } }],
+    ['/app/notifications', '/notifications'],
+    ['/app/alerts', { pathname: '/notifications', params: { tab: 'alerts' } }],
     ['/app/games', '/'],
     ['/app/odds', '/'],
     ['/app', '/'],

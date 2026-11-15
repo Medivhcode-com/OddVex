@@ -5,11 +5,13 @@ import { getBets, getBetSummary, getLeagues, getSyncConnections, getSyncProvider
 import type { Bet, League } from '@/api/types';
 import { AutoSettleButton } from '@/components/auto-settle';
 import { BetCard } from '@/components/bet-card';
+import { StakeReminderNotice } from '@/components/notification-settings';
 import { Screen } from '@/components/screen';
 import { Button, EmptyState, ErrorState, Notice, Panel, PanelHeading, SkeletonCards, Stat, StatGrid } from '@/components/states';
 import { SyncPanel } from '@/components/sync-panel';
 import { Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
+import { useStakeReminder } from '@/hooks/use-notifications';
 import { useResource } from '@/hooks/use-resource';
 import { openLogin, useSession } from '@/providers/session';
 import { leagueLabel } from '@/screens/games';
@@ -76,12 +78,15 @@ function SignedIn({ userId }: { userId: string }) {
   const leagues = useResource('leagues', getLeagues);
   const providers = useResource(`sync-providers:${userId}`, getSyncProviders);
   const connections = useResource(`sync-connections:${userId}`, getSyncConnections, revision.bets);
+  // Extra to the tracker: if it fails to load, the tracker simply shows no reminder notice.
+  const reminder = useStakeReminder(userId);
 
   const onChanged = () => changed('bets');
   const refresh = () => {
     summary.reload();
     bets.reload();
     connections.reload();
+    reminder.reload();
     if (leagues.status === 'error') leagues.reload();
     if (providers.status === 'error') providers.reload();
   };
@@ -96,6 +101,7 @@ function SignedIn({ userId }: { userId: string }) {
 
   return (
     <Screen refreshing={bets.refreshing || summary.refreshing} onRefresh={refresh}>
+      {reminder.data ? <StakeReminderNotice reminder={reminder.data} /> : null}
       <Txt variant="secondary" tone="muted">
         Results you enter yourself are self-reported. Past results don&apos;t predict future ones.
       </Txt>

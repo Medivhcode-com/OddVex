@@ -12,6 +12,7 @@ import { useResource } from '@/hooks/use-resource';
 import { useTheme } from '@/hooks/use-theme';
 import { fontSize, radius, space, touchTarget } from '@/theme';
 import { formatAge } from '@/utils/format';
+import { appRoute } from '@/utils/routes';
 
 export const ASSISTANT_INTRO =
   "Answers come only from OddVex data and its calculation engine, with sources listed. It doesn't make picks or predict outcomes.";
@@ -29,35 +30,8 @@ export function examplePrompts(events: readonly EventSummary[], props: readonly 
   ].filter((example): example is string => Boolean(example));
 }
 
-/**
- * Turns one of the assistant's web links into the matching screen in this app, or null when there is none.
- * `/app/games/{id}` is the game, `/app/props/{id}` the prop analyzer (with its `market`), and the section
- * roots go to their tabs. The odds board on the web is the Games tab here.
- */
-export function suggestionRoute(href: string): Href | null {
-  const [path, query = ''] = href.split('#')[0].split('?');
-  const market = query
-    .split('&')
-    .map((pair) => pair.split('='))
-    .find(([key]) => key === 'market')?.[1];
-  const parts = path.replace(/\/+$/, '').split('/').filter(Boolean);
-  if (parts[0] !== 'app') return null;
-  const [, section, id] = parts;
-  if (section === undefined) return '/';
-  if (section === 'games' || section === 'odds') {
-    return id ? { pathname: '/event/[id]', params: { id: decodeURIComponent(id) } } : '/';
-  }
-  if (section === 'props') {
-    if (!id) return '/props';
-    return { pathname: '/player/[id]', params: market ? { id: decodeURIComponent(id), market: decodeURIComponent(market) } : { id: decodeURIComponent(id) } };
-  }
-  if (section === 'tools') return '/tools';
-  if (section === 'parlay') return '/parlay';
-  if (section === 'tracker') return '/tracker';
-  if (section === 'settings') return '/settings';
-  if (section === 'assistant') return '/assistant';
-  return null;
-}
+/** The assistant's web links open the matching screen in this app. The mapping is shared with notifications. */
+export const suggestionRoute = appRoute;
 
 /** "Sources: Odds board (synthetic data, updated 42s ago)", or the line saying no data was used. */
 export function sourcesText(reply: Pick<AssistantReply, 'sources'>, now: Date): string {

@@ -5,7 +5,7 @@ import { setAuthToken } from '@/api/client';
 import { GameDetailScreen } from '@/screens/game-detail';
 import { Watchlist } from '@/screens/games';
 import { installFetch, jsonResponse } from '@/test/api';
-import { liveEvent, moneyline } from '@/test/fixtures';
+import { liveEvent, moneyline, spread, upcomingEvent } from '@/test/fixtures';
 import { fakeSession, WithSession } from '@/test/session';
 
 const detail = { ...liveEvent, available_markets: ['moneyline', 'spread'], league_name: 'NFL', has_draw: false, players: [], as_of: moneyline.as_of, data_mode: 'synthetic' };
@@ -42,6 +42,43 @@ describe('GameDetailScreen', () => {
     expect(screen.getByRole('button', { name: 'Follow this game' })).not.toBeSelected();
     await fireEvent.press(screen.getByRole('button', { name: 'Follow Harbor City Gulls' }));
     expect(router.push).toHaveBeenCalledTimes(2);
+
+    expect(screen.getByText('Set an alert')).toBeOnTheScreen();
+    expect(screen.getByText('Log in to set an alert for this game.')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Save alert' })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Log in to set an alert' }));
+    expect(router.push).toHaveBeenCalledTimes(3);
+    expect(router.push).toHaveBeenLastCalledWith('/login');
+  });
+
+  it('opens on the market a notification link names and offers the alert form there', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    const upcoming = { ...detail, ...upcomingEvent };
+    serve(fetchMock, { '/v1/events/evt_2': upcoming, '/v1/events/evt_2/odds?market=spread': spread, '/v1/watchlist': { items: [] } });
+    await render(
+      <WithSession value={fakeSession()}>
+        <GameDetailScreen eventId="evt_2" initialMarket="spread" />
+      </WithSession>,
+    );
+
+    expect(await screen.findByText('Set an alert')).toBeOnTheScreen();
+    expect(screen.getByRole('radio', { name: 'Spread' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Alert me when: Price reaches' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Side, on the spread market: Iron Valley Forge +3.5, best now −105 at Beacon Bets' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Save alert' })).toBeOnTheScreen();
+  });
+
+  it('falls back to the moneyline for a market it does not know', async () => {
+    const { fetchMock } = installFetch();
+    serve(fetchMock, { '/v1/events/evt_1': detail, '/v1/events/evt_1/odds?market=moneyline': moneyline });
+    await render(
+      <WithSession value={fakeSession({ user: null })}>
+        <GameDetailScreen eventId="evt_1" initialMarket="first_half" />
+      </WithSession>,
+    );
+    expect(await screen.findByText('Track a bet on this game')).toBeOnTheScreen();
+    expect(screen.getByRole('radio', { name: 'Moneyline' })).toBeChecked();
   });
 
   it('shows the quick-bet form and what is already followed when signed in', async () => {
@@ -78,6 +115,7 @@ describe('GameDetailScreen', () => {
     expect(await screen.findByText('This game is over')).toBeOnTheScreen();
     await screen.findByText('No-vig consensus');
     expect(screen.queryByText('Track a bet on this game')).toBeNull();
+    expect(screen.queryByText('Set an alert')).toBeNull();
   });
 });
 
