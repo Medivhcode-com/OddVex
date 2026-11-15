@@ -387,6 +387,147 @@ test.describe("accounts and tracking", () => {
   });
 });
 
+test.describe("layout", () => {
+  test("signed-in screens never scroll sideways", async ({ page, request }) => {
+    await signUp(page, "layout");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    const props = await (await request.get(`${API}/v1/props`)).json();
+    for (const path of ["/app", "/app/games", `/app/games/${events[0].id}`, "/app/odds", "/app/props", `/app/props/${props[0].player.id}`, "/app/tracker", "/app/alerts", "/app/tools", "/app/parlay", "/app/assistant", "/app/settings"]) {
+      await page.goto(path);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, path).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
+test.describe("alerts and notifications", () => {
+  test("signed-out visitors are asked to log in", async ({ page }) => {
+    await page.goto("/app/alerts");
+    await expect(page.getByText("Log in to set alerts")).toBeVisible();
+  });
+
+  test("a price alert that is already met fires once, can be read, set again and deleted", async ({ page, request }) => {
+    await signUp(page, "alert");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    await page.goto(`/app/games/${events[0].id}`);
+    const panel = page.getByRole("region", { name: "Set an alert" });
+    await panel.getByLabel("Price at or above").fill("-5000"); // far below any real price, so it is met at once
+    await panel.getByRole("button", { name: "Save alert" }).click();
+    await expect(panel.getByText(/Alert saved\./)).toBeVisible();
+
+    await page.goto("/app/alerts");
+    const notifications = page.getByRole("region", { name: "Notifications" });
+    await expect(notifications.getByText("1 unread")).toBeVisible();
+    await expect(notifications.getByText("New", { exact: true })).toBeVisible();
+    await expect(notifications.getByText("Price alert", { exact: true })).toBeVisible();
+    await expect(page.getByRole("banner").getByText("1 unread")).toBeAttached();
+    // Alert copy reports a fact; it never tells anyone to bet.
+    const text = (await notifications.innerText()).toLowerCase();
+    for (const banned of ["bet now", "hurry", "don't miss", "lock", "guaranteed", "act fast"]) expect(text).not.toContain(banned);
+
+    // Loading the page again must not notify twice.
+    await page.reload();
+    await expect(notifications.getByText("1 unread")).toBeVisible();
+    await notifications.getByRole("button", { name: /^Mark as read/ }).click();
+    await expect(notifications.getByText("All read")).toBeVisible();
+
+    const rules = page.getByRole("region", { name: "Your alerts" });
+    await expect(rules.getByText("Triggered", { exact: true })).toBeVisible();
+    // Setting it again re-arms it. The price is still above the threshold, so it reports that again, once.
+    await rules.getByRole("button", { name: /^Set again/ }).click();
+    await expect(notifications.getByText("1 unread")).toBeVisible();
+    await expect(notifications.getByText("Price alert", { exact: true })).toHaveCount(2);
+    await rules.getByRole("button", { name: /^Delete:/ }).click();
+    await rules.getByRole("button", { name: "Delete alert" }).click();
+    await expect(page.getByText("No alerts set")).toBeVisible();
+  });
+
+  test("game start, final score and line move alerts are saved as active", async ({ page, request }) => {
+    await signUp(page, "alertkinds");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming&league=nba`)).json();
+    const event = events[events.length - 1]; // the latest tip-off, so the start alert cannot be due yet
+    await page.goto(`/app/games/${event.id}`);
+    let panel = page.getByRole("region", { name: "Set an alert" });
+    await panel.getByText("Before the game starts").click();
+    await panel.getByLabel("How long before").selectOption("30");
+    await panel.getByRole("button", { name: "Save alert" }).click();
+    await expect(panel.getByText(/Alert saved\./)).toBeVisible();
+    await panel.getByText("When the game ends").click();
+    await panel.getByRole("button", { name: "Save alert" }).click();
+    await expect(panel.getByText(/Alert saved\./)).toBeVisible();
+
+    await page.goto(`/app/games/${event.id}?market=spread`);
+    panel = page.getByRole("region", { name: "Set an alert" });
+    await panel.getByText("Line moves").click();
+    await panel.getByLabel(/Moves by at least/).fill("1.5");
+    await panel.getByRole("button", { name: "Save alert" }).click();
+    await expect(panel.getByText(/Alert saved\./)).toBeVisible();
+
+    await page.goto("/app/alerts");
+    const rules = page.getByRole("region", { name: "Your alerts" });
+    await expect(rules.getByText("3 active")).toBeVisible();
+    await rules.getByRole("button", { name: "Check now" }).click();
+    await expect(rules.getByText(/Checked 3 alerts\. 0 fired/)).toBeVisible();
+
+    await rules.getByRole("button", { name: /^Pause/ }).first().click();
+    await expect(rules.getByText("Paused", { exact: true })).toBeVisible();
+    await expect(rules.getByText("2 active")).toBeVisible();
+    await rules.getByRole("button", { name: /^Resume/ }).click();
+    await expect(rules.getByText("3 active")).toBeVisible();
+  });
+
+  test("alert form rejects a price that is not American odds", async ({ page, request }) => {
+    await signUp(page, "alertbad");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    await page.goto(`/app/games/${events[0].id}`);
+    const panel = page.getByRole("region", { name: "Set an alert" });
+    await panel.getByLabel("Price at or above").fill("50");
+    await panel.getByRole("button", { name: "Save alert" }).click();
+    await expect(panel.getByRole("alert")).toContainText("Enter American odds");
+  });
+
+  test("weekly staking reminder: set it, pass it, see one supportive reminder", async ({ page }) => {
+    await signUp(page, "stake");
+    await page.goto("/app/settings");
+    const section = page.getByRole("region", { name: "Weekly staking reminder" });
+    await expect(section.getByText(/reminder, not a limit/)).toBeVisible();
+    await section.getByLabel("Weekly amount ($)").fill("50");
+    await section.getByRole("button", { name: "Save reminder" }).click();
+    await expect(section.getByText("Reminder set at $50.00 a week.")).toBeVisible();
+
+    await page.goto("/app/tracker");
+    await page.getByLabel("Pick").fill("Over the reminder");
+    await page.getByLabel("Odds", { exact: true }).fill("-110");
+    await page.getByLabel("Stake ($)").fill("60");
+    await page.getByRole("button", { name: "Save bet" }).click();
+    await expect(page.getByText("Bet saved.")).toBeVisible(); // the bet is still logged: this is not a limit
+    await expect(page.getByText("You've reached your weekly staking reminder")).toBeVisible();
+    await expect(page.getByRole("link", { name: "1-800-GAMBLER" }).first()).toBeVisible();
+
+    await page.goto("/app/alerts");
+    const notifications = page.getByRole("region", { name: "Notifications" });
+    await expect(notifications.getByText("Staking reminder", { exact: true })).toHaveCount(1);
+
+    await page.goto("/app/settings");
+    await page.getByRole("region", { name: "Weekly staking reminder" }).getByRole("button", { name: "Turn off" }).click();
+    await expect(page.getByText("Reminder turned off.")).toBeVisible();
+    await page.goto("/app/tracker");
+    await expect(page.getByText("You've reached your weekly staking reminder")).toHaveCount(0);
+  });
+
+  test("notification preferences persist", async ({ page }) => {
+    await signUp(page, "prefs");
+    await page.goto("/app/settings");
+    const toggle = page.getByRole("switch", { name: "Line moves" });
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await page.reload();
+    await expect(page.getByRole("switch", { name: "Line moves" })).not.toBeChecked();
+    await expect(page.getByRole("switch", { name: "Price alerts" })).toBeChecked();
+  });
+});
+
 test.describe("admin", () => {
   test("ordinary accounts and signed-out visitors see the not-found page", async ({ page }) => {
     // The page streams, so the status is 200; what matters is that no admin data is rendered.

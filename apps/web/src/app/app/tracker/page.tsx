@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AutoSettleButton } from "@/components/app/auto-settle";
 import { BetActions } from "@/components/app/bet-actions";
 import { BetForm } from "@/components/app/bet-form";
+import { StakeReminderNotice } from "@/components/app/notification-settings";
 import { SyncPanel } from "@/components/app/sync-panel";
 import type { Schemas } from "@oddvex/types";
 import { Price } from "@/components/app/odds-format";
@@ -139,6 +140,7 @@ export default async function TrackerPage() {
     );
   }
 
+  const reminder = await api<Schemas["StakeReminderOut"]>("/v1/me/stake-reminder", { auth: true }).catch(() => null);
   const [summary, bets, leagues, books, syncProviders, syncConnections] = await Promise.all([
     api<BetSummary>("/v1/bets/summary", { auth: true }),
     api<Bet[]>("/v1/bets", { auth: true }),
@@ -156,6 +158,7 @@ export default async function TrackerPage() {
     <>
       <PageHeader title="Bet tracker" description="Results you enter yourself are self-reported. Past results don't predict future ones." />
       <div className="space-y-5">
+        {reminder ? <StakeReminderNotice reminder={reminder} /> : null}
         <Panel aria-labelledby="perf-heading">
           <PanelHeader id="perf-heading" title="Performance" description={`${totals.settled_count} settled ${totals.settled_count === 1 ? "bet" : "bets"}`} />
           <dl className="grid grid-cols-2 gap-x-4 gap-y-5 p-4 sm:p-5 md:grid-cols-5">

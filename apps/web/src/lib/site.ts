@@ -22,6 +22,7 @@ export const APP_NAV = [
   { href: "/app/odds", label: "Odds", icon: "odds" },
   { href: "/app/props", label: "Props", icon: "props" },
   { href: "/app/tracker", label: "Tracker", icon: "tracker" },
+  { href: "/app/alerts", label: "Alerts", icon: "alerts" },
   { href: "/app/tools", label: "Calculators", icon: "tools" },
   { href: "/app/parlay", label: "Parlay", icon: "parlay" },
   { href: "/app/assistant", label: "OddVex AI", icon: "ai" },

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { BottomNav, SideNav } from "@/components/app/nav";
 import { OddsFormatProvider, OddsFormatToggle } from "@/components/app/odds-format";
-import { Logo } from "@/components/ui/logo";
+import { Logo, LogoMark } from "@/components/ui/logo";
 import { Badge, Button, ButtonLink } from "@/components/ui/primitives";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { api } from "@/lib/api";
@@ -20,6 +20,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     oddsFormat(),
     api<Meta>("/v1/meta").catch(() => null),
   ]);
+  const unread = user
+    ? await api<{ unread_count: number }>("/v1/notifications/unread-count", { auth: true })
+        .then((out) => out.unread_count)
+        .catch(() => 0)
+    : 0;
 
   return (
     <OddsFormatProvider initial={format}>
@@ -36,19 +41,36 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
         <div className="min-w-0">
           <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-line bg-bg/90 px-4 backdrop-blur sm:px-6">
-            <Link href="/app" aria-label="OddVex home" className="lg:hidden">
-              <Logo size={24} />
+            <Link href="/app" aria-label="OddVex home" className="shrink-0 lg:hidden">
+              <LogoMark size={28} />
             </Link>
             {meta?.data_mode === "synthetic" ? (
               <span className="hidden sm:inline">
                 <Badge tone="second">Synthetic data</Badge>
               </span>
             ) : null}
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-2">
               <OddsFormatToggle />
               <div className="hidden md:block">
                 <ThemeToggle />
               </div>
+              {user ? (
+                <Link
+                  href="/app/alerts"
+                  className="relative inline-flex min-h-9 items-center gap-1.5 rounded-cell px-2.5 text-sm text-muted hover:bg-raised hover:text-ink"
+                >
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M10 3a4.5 4.5 0 0 0-4.5 4.5c0 4-1.5 5-1.5 5h12s-1.5-1-1.5-5A4.5 4.5 0 0 0 10 3zM8.5 15.5a1.6 1.6 0 0 0 3 0" />
+                  </svg>
+                  <span className="sr-only">Notifications</span>
+                  {unread > 0 ? (
+                    <span className="num rounded-full bg-accent px-1.5 text-xs font-semibold leading-5 text-accent-ink">
+                      {unread > 99 ? "99+" : unread}
+                      <span className="sr-only"> unread</span>
+                    </span>
+                  ) : null}
+                </Link>
+              ) : null}
               {user ? (
                 <form action={logoutAction} className="flex items-center gap-2">
                   <span className="hidden max-w-32 truncate text-sm text-muted md:inline">{user.display_name}</span>

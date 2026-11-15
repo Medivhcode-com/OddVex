@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ChangePasswordForm, ExportDataButton } from "@/components/app/account-forms";
 import { DeleteAccountForm } from "@/components/app/delete-account";
+import { NotificationPreferences, StakeReminderForm } from "@/components/app/notification-settings";
+import { api } from "@/lib/api";
+import type { Schemas } from "@oddvex/types";
 import { OddsFormatToggle } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
 import { ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
@@ -12,6 +15,12 @@ export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await currentUser();
+  const [prefs, reminder] = user
+    ? await Promise.all([
+        api<Schemas["NotificationPreferencesOut"]>("/v1/me/notification-preferences", { auth: true }).catch(() => null),
+        api<Schemas["StakeReminderOut"]>("/v1/me/stake-reminder", { auth: true }).catch(() => null),
+      ])
+    : [null, null];
   return (
     <>
       <PageHeader title="Settings" />
@@ -50,6 +59,20 @@ export default async function SettingsPage() {
             )}
           </div>
         </Panel>
+
+        {prefs ? (
+          <Panel aria-labelledby="settings-notifications">
+            <PanelHeader id="settings-notifications" title="Notifications" description="Choose what OddVex tells you about." />
+            <NotificationPreferences initial={prefs.in_app} />
+          </Panel>
+        ) : null}
+
+        {reminder ? (
+          <Panel aria-labelledby="settings-stake">
+            <PanelHeader id="settings-stake" title="Weekly staking reminder" />
+            <StakeReminderForm reminder={reminder} />
+          </Panel>
+        ) : null}
 
         <Panel>
           <PanelHeader title="Play within your limits" />
