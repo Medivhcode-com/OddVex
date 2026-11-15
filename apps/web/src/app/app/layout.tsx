@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/app" aria-label="OddVex home" className="mb-6 px-3">
             <Logo />
           </Link>
-          <SideNav />
+          <SideNav admin={user?.role === "admin"} />
           <p className="mt-auto px-3 text-xs leading-relaxed text-muted">
             Information only. OddVex never takes wagers. 21+. Call or text 1-800-GAMBLER for help.
           </p>

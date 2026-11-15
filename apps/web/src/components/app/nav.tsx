@@ -30,11 +30,11 @@ function isActive(pathname: string, href: string) {
   return href === "/app" ? pathname === "/app" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function SideNav() {
+export function SideNav({ admin = false }: { admin?: boolean }) {
   const pathname = usePathname();
   return (
     <nav aria-label="App" className="flex flex-col gap-0.5">
-      {[...APP_NAV, { href: "/app/settings", label: "Settings", icon: "settings" }].map((item) => {
+      {[...APP_NAV, { href: "/app/settings", label: "Settings", icon: "settings" }, ...(admin ? [{ href: "/app/admin", label: "Admin", icon: "tools" }] : [])].map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link

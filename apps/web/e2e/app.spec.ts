@@ -387,6 +387,40 @@ test.describe("accounts and tracking", () => {
   });
 });
 
+test.describe("admin", () => {
+  test("ordinary accounts and signed-out visitors see the not-found page", async ({ page }) => {
+    // The page streams, so the status is 200; what matters is that no admin data is rendered.
+    await page.goto("/app/admin");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("off the board");
+    await expect(page.getByText("Recent audit log")).toHaveCount(0);
+    await signUp(page, "notadmin");
+    await page.goto("/app/admin");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("off the board");
+    await expect(page.getByText("Recent audit log")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  });
+
+  test("an admin account sees the service overview and audit log", async ({ page }) => {
+    // The API grants the admin role to this address through configuration, never through the client.
+    await page.goto("/signup?next=/app/admin");
+    await page.getByLabel("Name").fill("Ops Admin");
+    await page.getByLabel("Email").fill("e2e-admin@oddvex.test");
+    await page.getByLabel("Password").fill("correct-horse-battery");
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Create account" }).click();
+    if (await page.getByRole("alert").isVisible().catch(() => false)) {
+      // The account already exists from the other viewport's run: log in instead.
+      await page.goto("/login?next=/app/admin");
+      await page.getByLabel("Email").fill("e2e-admin@oddvex.test");
+      await page.getByLabel("Password").fill("correct-horse-battery");
+      await page.getByRole("button", { name: "Log in" }).click();
+    }
+    await expect(page.getByRole("heading", { level: 1, name: "Admin" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Service" }).getByText("Accounts")).toBeVisible();
+    await expect(page.getByRole("table", { name: /audit log/i })).toBeVisible();
+  });
+});
+
 test.describe("design system", () => {
   test("showcase matches the visual baseline @desktop-only", async ({ page }) => {
     await page.goto("/design");
