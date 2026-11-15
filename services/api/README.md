@@ -58,7 +58,7 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_JWT_SECRET` | dev-only value | HS256 signing secret. **Production refuses to start with the default or a secret shorter than 32 characters** |
 | `ODDVEX_JWT_TTL_MINUTES` | `60` | Access token lifetime |
 | `ODDVEX_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated CORS allowlist. `*` is rejected in production |
-| `ODDVEX_TRUST_PROXY` | `false` | Use `X-Forwarded-For` as the rate-limit client IP. Only behind a proxy that overwrites it |
+| `ODDVEX_TRUST_PROXY` | `false` | Use the last `X-Forwarded-For` entry (the one your proxy appends) as the rate-limit client IP. Only behind exactly one trusted proxy |
 | `ODDVEX_RATE_LIMIT_ENABLED` | `true` | Turn the limiter off (tests) |
 | `ODDVEX_RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Per-IP limit shared by register and login |
 | `ODDVEX_RATE_LIMIT_ASSISTANT_PER_MINUTE` | `20` | Per-IP limit on the assistant |

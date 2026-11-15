@@ -24,7 +24,10 @@ def wilson_interval(hits: int, sample_size: int, z: float = 1.96) -> tuple[float
     denominator = 1 + z2 / n
     centre = (p + z2 / (2 * n)) / denominator
     half_width = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / denominator
-    return max(0.0, centre - half_width), min(1.0, centre + half_width)
+    # At the extremes the bounds are exactly 0 and 1; avoid float residue such as 3e-18.
+    low = 0.0 if hits == 0 else max(0.0, centre - half_width)
+    high = 1.0 if hits == sample_size else min(1.0, centre + half_width)
+    return low, high
 
 
 @dataclass(frozen=True, slots=True)

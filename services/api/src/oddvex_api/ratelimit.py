@@ -47,16 +47,18 @@ class SlidingWindowRateLimiter:
 def client_ip(request: Request) -> str:
     """Client address used for rate limiting and audit rows.
 
-    The direct peer address is used unless ``ODDVEX_TRUST_PROXY=true``, in which
-    case the left-most ``X-Forwarded-For`` entry is trusted. Only enable that
-    behind a proxy that overwrites the header.
+    The direct peer address is used unless ``ODDVEX_TRUST_PROXY=true``. In that
+    case the *last* ``X-Forwarded-For`` entry is used: it is the one appended by
+    the trusted proxy directly in front of the app, whereas earlier entries are
+    supplied by the client and can be forged. Only enable this behind exactly
+    one proxy that sets the header.
     """
     settings = getattr(request.app.state, "settings", None)
     if settings is not None and settings.trust_proxy:
         forwarded = request.headers.get("x-forwarded-for", "")
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first[:64]
+        last = forwarded.split(",")[-1].strip()
+        if last:
+            return last[:64]
     return request.client.host if request.client else "unknown"
 
 

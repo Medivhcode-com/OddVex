@@ -27,6 +27,14 @@ def test_wilson_extremes_stay_inside_unit_interval() -> None:
     assert 0.69 < low < 0.75
 
 
+@pytest.mark.parametrize("n", [1, 7, 83, 1000])
+def test_wilson_bounds_are_exact_at_zero_and_all_hits(n: int) -> None:
+    assert wilson_interval(0, n)[0] == 0.0  # no float residue such as 3e-18
+    assert wilson_interval(n, n)[1] == 1.0
+    assert 0.0 < wilson_interval(0, n)[1] < 1.0
+    assert 0.0 < wilson_interval(n, n)[0] < 1.0
+
+
 def test_wilson_narrows_with_sample_size() -> None:
     small = wilson_interval(7, 10)
     large = wilson_interval(700, 1000)

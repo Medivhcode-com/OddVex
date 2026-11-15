@@ -199,7 +199,7 @@ def test_forwarded_for_is_ignored_unless_proxy_is_trusted(make_app: AppFactory) 
                 client.post(
                     "/v1/auth/login",
                     json=LOGIN,
-                    headers={"X-Forwarded-For": f"203.0.113.{i}, 10.0.0.1"},
+                    headers={"X-Forwarded-For": f"198.51.100.7, 203.0.113.{i}"},
                 ).status_code
                 for i in range(4)
             ]
@@ -221,10 +221,16 @@ def test_forwarded_for_is_ignored_unless_proxy_is_trusted(make_app: AppFactory) 
 def test_trusted_proxy_limits_per_forwarded_client(make_app: AppFactory) -> None:
     app = make_app(rate_limit_enabled=True, rate_limit_auth_per_minute=2, trust_proxy=True)
     with TestClient(app) as client:
-        same = {"X-Forwarded-For": "203.0.113.9"}
-        assert [
-            client.post("/v1/auth/login", json=LOGIN, headers=same).status_code for _ in range(3)
-        ] == [401, 401, 429]
+        # Forged client-supplied entries vary; the entry appended by the proxy does not.
+        statuses = [
+            client.post(
+                "/v1/auth/login",
+                json=LOGIN,
+                headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.9"},
+            ).status_code
+            for i in range(3)
+        ]
+        assert statuses == [401, 401, 429]
 
 
 # --------------------------------------------------------------- configuration

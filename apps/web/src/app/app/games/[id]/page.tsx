@@ -76,7 +76,7 @@ export default async function GamePage({ params, searchParams }: Props) {
       ) : (
         <div className="space-y-5">
           {event.status === "final" ? (
-            <Notice title="This game is over">Prices below are the last ones recorded before the markets closed.</Notice>
+            <Notice title="This game is over">Its markets are closed, so there are no current prices. Line movement below runs up to the close.</Notice>
           ) : null}
           <Segmented
             label="Market"
