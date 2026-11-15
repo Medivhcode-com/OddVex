@@ -22,7 +22,7 @@ Important caveats:
 | HOME-01 | Dashboard summary | Today's games, notable best-line gaps, tracker snapshot at `/app` | Free | M1 | Built in M1 | Fixtures (DATA-01) |
 | HOME-02 | Data-status indicator | "Demo data" label + global freshness | Free | M1 | Built in M1 | DATA-04 |
 | HOME-03 | Quick actions | Shortcuts to Odds, Props, Tools, Assistant | Free | M1 | Built in M1 | — |
-| HOME-04 | Personalised modules | Modules driven by favorites/watchlists | Free | M2 | Planned | GAME-05, PROP-07 |
+| HOME-04 | Personalised modules | Modules driven by favorites/watchlists | Free | M2 | Built (watchlist section on the dashboard) | GAME-05, PROP-07 |
 | HOME-05 | Movement & alerts feed | Recent line moves and triggered alerts | Free+limits | M3 | Planned | INTL-11; licensed provider |
 | HOME-06 | Onboarding checklist | First-run guidance | Free | M2 | Planned | — |
 
@@ -34,7 +34,7 @@ Important caveats:
 | GAME-02 | Live scores | Score, period/clock, "as of" (simulated in M1) | Free | M1 | Built in M1 | Fixtures; real: licensed provider |
 | GAME-03 | Game detail | Score, odds snapshot, related props | Free | M1 | Built in M1 | ODDS-01, PROP-01 |
 | GAME-04 | Game filters | Sport, league, date, status | Free | M1 | Built in M1 | — |
-| GAME-05 | Favorites | Persisted favorite teams/leagues | Free | M2 | Planned | Persistence; auth |
+| GAME-05 | Favorites | Persisted favorite teams/leagues | Free | M2 | Built (teams and games; not leagues) | Persistence; auth |
 | GAME-06 | Box score / play-by-play | Detailed in-game and team stats | Free | M2 | Planned | Needs licensed provider |
 | GAME-07 | Injuries & lineups | Availability context | Free | M3 | Planned | Needs licensed provider (coverage varies) |
 | GAME-08 | Game notifications | Start / final / score alerts | Free | M3 | Planned | NOTF-01; store notification policies |
@@ -67,7 +67,7 @@ Important caveats:
 | PROP-04 | Splits | Home/away, opponent, rest | Premium | M2 | Planned | Provider stats depth |
 | PROP-05 | Sample-size labelling | n/N display; "historical, not predictive" | Free | M1 | Built in M1 | — |
 | PROP-06 | Model projections | Projection + uncertainty + methodology | Premium | M4 | Planned | Real historical data; model validation; backtesting (INTL-10); claims review |
-| PROP-07 | Prop watchlist | Saved players/props | Free+limits | M2 | Planned | Persistence |
+| PROP-07 | Prop watchlist | Saved players/props | Free+limits | M2 | Built (players; not individual props) | Persistence |
 | PROP-08 | Prop alerts | Line/price change alerts | Premium | M3 | Planned | INTL-11, NOTF-01 |
 | PROP-09 | Mobile prop analyzer | Props in Expo app | Free | M3 | Planned | MOB-01 |
 | PROP-10 | Matchup context | Opponent/positional context | Premium | M3 | Planned | Provider stats depth |
@@ -96,9 +96,9 @@ Important caveats:
 | TRKR-01 | Manual bet entry | Book, market, selection, odds, stake, date | Free | M1 | Built in M1 | AUTH-01 |
 | TRKR-02 | Manual settlement | Win/loss/push/void/cash-out | Free | M1 | Built in M1 | TRKR-01 |
 | TRKR-03 | Performance summary | P/L, ROI, record; by sport/book/market | Free | M1 | Built in M1 | TRKR-02 |
-| TRKR-04 | Bet list management | Filter, sort, edit, delete | Free | M1 | Built in M1 (delete in UI; filter and edit in API only; no sort) | — |
+| TRKR-04 | Bet list management | Filter, sort, edit, delete | Free | M1 | Built (edit and delete in UI; filter and sort in API only) | — |
 | TRKR-05 | CLV per bet | Manual closing odds in M1 | Free | M1 | Built in M1 (average shown in UI; per-bet value in API only) | INTL-04 |
-| TRKR-06 | Auto settlement & auto closing odds | From results/odds feed | Free | M2 | Planned | Needs licensed provider; DATA-05 |
+| TRKR-06 | Auto settlement & auto closing odds | From results/odds feed | Free | M2 | Settlement built on synthetic scores; auto closing odds Planned | Needs licensed provider; DATA-05 |
 | TRKR-07 | CSV export / import | Export M2; import M3 | Free | M2/M3 | Planned | — |
 | TRKR-08 | Results-over-time chart | Cumulative net result | Free | M1 | Built in M1 | TRKR-03 |
 | TRKR-09 | Tags & notes | User annotations | Free | M2 | Planned | — |
@@ -198,7 +198,7 @@ Important caveats:
 | AUTH-03 | Sessions & logout | Session lifecycle | Free | M1 | Built in M1 | — |
 | AUTH-04 | Email verification & password reset | Via transactional email | Free | M2 | Planned | **Founder gate** (real customer email, paid email service) |
 | AUTH-05 | MFA / passkeys / social login | Stronger auth options | Free | M3 | Planned | — |
-| AUTH-06 | Account deletion & data export | Self-serve | Free | M1 / M2 | Deletion built in M1; export Planned | Required before any real user; store account-deletion rules |
+| AUTH-06 | Account deletion & data export | Self-serve | Free | M1 / M2 | Built | Required before any real user; store account-deletion rules |
 | AUTH-07 | RBAC | `user`, `admin` roles | n/a | M1 | Built in M1 | — |
 | SET-01 | Settings | Profile, odds format, time zone | Free | M1 | Built in M1 | — |
 | SET-02 | Notification preferences | Per-channel, per-type | Free | M3 | Planned | NOTF-01/02 |

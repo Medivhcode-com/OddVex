@@ -1,4 +1,4 @@
-# Milestone 1 status
+# Build status (milestone 1 and the approval-free part of milestone 2)
 
 What exists on the branch, and the evidence for it. Everything runs on synthetic data with fictional teams, players
 and sportsbooks. Nothing has been deployed, purchased or published.
@@ -7,9 +7,10 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 
 | Area | Check | Result |
 |---|---|---|
-| API | `pytest` in `services/api` | 422 passed |
+| API | `pytest` in `services/api` (SQLite) | 569 passed |
+| API | Same suite on PostgreSQL 16 | 570 passed (run once locally by the backend build; now a CI job) |
 | API | `ruff check`, `ruff format --check`, OpenAPI export `--check` | Clean |
-| Web | Playwright end to end, real API + production build, desktop and phone viewports | 81 passed |
+| Web | Playwright end to end, real API + production build, desktop and phone viewports, including automated WCAG A/AA checks in both themes | 149 passed |
 | Web | ESLint, `tsc --noEmit`, Vitest | Clean, 12 unit tests passed |
 | Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 42 tests passed |
 | Mobile | `expo export` for iOS and Android (JS bundle only) | Bundled |
@@ -27,26 +28,41 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 - **Foundation:** constitution, agent guides, CODEOWNERS, PR and issue templates, CI workflow, Docker files, ADRs,
   design system and showcase page with a visual regression baseline.
 
+## Added after milestone 1 (no approval gate involved)
+
+- **Watchlist:** follow teams, players and games; watched games appear on the dashboard.
+- **Research to tracking:** add a bet to the tracker from a game page at the best current price.
+- **Auto-settlement:** bets tied to a game and side settle from the final score, through the same payout math as
+  manual settlement. Bets entered as free text still need settling by hand.
+- **Tracker:** edit an open bet, record closing odds, settle a parlay leg by leg.
+- **Account:** change password (signs out other sessions), download your data as JSON.
+- **Refresh:** games, odds and game detail re-fetch on an interval the user can pause.
+- **Accessibility:** axe checks on every main screen in dark and light themes.
+- **Operations:** request size limit, bet list sorting and filters in the API, Docker images built and smoke-tested
+  in CI, PostgreSQL test job in CI.
+
+## Milestone 2 items that need Founder approval and are not started
+
+Licensed data provider, production infrastructure, counsel review of legal pages and age gating, closed beta, real
+email (verification, password reset), historical odds storage against a real feed.
+
 ## Not verified
 
-- CI has never run: the remote had no default branch to open a pull request against.
-- The Docker images and `docker-compose.yml` have not been built or started.
+- `docker-compose.yml` has not been started. The two images build and answer requests in CI.
 - The mobile app has not been run on a device or simulator.
-- PostgreSQL was exercised once locally by the backend build, not in CI. CI uses SQLite.
-- Accessibility has automated structure checks only. No screen reader or contrast audit has been done.
+- Accessibility has automated checks only. No screen reader or keyboard-only walkthrough has been done.
 - Competitor and provider research relied on search extracts, not direct page visits. Re-check every price.
-- Visual regression baselines were captured in this build container and may need regenerating on CI.
 
 ## Not built
 
-Real data provider, alerts and notifications, watchlists, community, premium billing and entitlements, admin console
-UI, LLM-backed assistant, model projections and backtesting, password reset, refresh tokens, data export, production
+Real data provider, alerts and notifications, community, premium billing and entitlements, admin console
+UI, LLM-backed assistant, model projections and backtesting, password reset by email, refresh tokens, production
 infrastructure, store submission, analytics instrumentation, error monitoring.
 
 ## Known gaps inside what is built
 
 - The assistant matches keywords. It handles a small set of question types and declines the rest.
-- Prices refresh on page load, not live.
-- The tracker UI cannot edit a bet or settle individual parlay legs, though the API supports both.
-- Two simultaneous syncs for one user can return a server error instead of a clean conflict.
+- Prices refresh on a timer, not by push.
+- The mobile app does not have the watchlist, tracker or calculators yet.
+- Watchlist items do not trigger alerts.
 - Legal pages are unreviewed drafts and say so. The contact page has no address until one is configured.
