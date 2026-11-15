@@ -1,0 +1,7020 @@
+{
+  "components": {
+    "schemas": {
+      "AccountExportOut": {
+        "description": "Everything OddVex stores about one account. Never contains the password hash.",
+        "properties": {
+          "audit_log": {
+            "description": "Your own audit entries, oldest first, including this export.",
+            "items": {
+              "$ref": "#/components/schemas/ExportAuditEntryOut"
+            },
+            "title": "Audit Log",
+            "type": "array"
+          },
+          "bets": {
+            "items": {
+              "$ref": "#/components/schemas/BetOut"
+            },
+            "title": "Bets",
+            "type": "array"
+          },
+          "exported_at": {
+            "format": "date-time",
+            "title": "Exported At",
+            "type": "string"
+          },
+          "format_version": {
+            "default": 1,
+            "description": "Version of this document's layout.",
+            "title": "Format Version",
+            "type": "integer"
+          },
+          "sync_connections": {
+            "items": {
+              "$ref": "#/components/schemas/SyncConnectionOut"
+            },
+            "title": "Sync Connections",
+            "type": "array"
+          },
+          "sync_runs": {
+            "items": {
+              "$ref": "#/components/schemas/SyncRunOut"
+            },
+            "title": "Sync Runs",
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "watchlist": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistItemOut"
+            },
+            "title": "Watchlist",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exported_at",
+          "user",
+          "bets",
+          "watchlist",
+          "sync_connections",
+          "sync_runs",
+          "audit_log"
+        ],
+        "title": "AccountExportOut",
+        "type": "object"
+      },
+      "AdminOverviewOut": {
+        "properties": {
+          "bet_count": {
+            "title": "Bet Count",
+            "type": "integer"
+          },
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "provider_health": {
+            "$ref": "#/components/schemas/ProviderHealthOut"
+          },
+          "recent_audit": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntryOut"
+            },
+            "title": "Recent Audit",
+            "type": "array"
+          },
+          "sync_connection_count": {
+            "title": "Sync Connection Count",
+            "type": "integer"
+          },
+          "user_count": {
+            "title": "User Count",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "environment",
+          "user_count",
+          "bet_count",
+          "sync_connection_count",
+          "provider_health",
+          "recent_audit"
+        ],
+        "title": "AdminOverviewOut",
+        "type": "object"
+      },
+      "AssistantQueryRequest": {
+        "properties": {
+          "message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "AssistantQueryRequest",
+        "type": "object"
+      },
+      "AssistantResponse": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The structured facts the answer was written from. Null when none apply.",
+            "title": "Data"
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "intent": {
+            "enum": [
+              "compare_odds",
+              "explain_ev",
+              "explain_no_vig",
+              "player_trend",
+              "line_movement",
+              "bet_summary",
+              "help",
+              "fallback"
+            ],
+            "title": "Intent",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AssistantSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/AssistantSuggestionOut"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "intent",
+          "answer",
+          "sources",
+          "suggestions",
+          "disclaimer"
+        ],
+        "title": "AssistantResponse",
+        "type": "object"
+      },
+      "AssistantSourceOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "data_mode": {
+            "description": "synthetic | calculation | user",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "as_of",
+          "data_mode"
+        ],
+        "title": "AssistantSourceOut",
+        "type": "object"
+      },
+      "AssistantSuggestionOut": {
+        "properties": {
+          "href": {
+            "description": "A web app route, e.g. /app/games/{event_id}.",
+            "title": "Href",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "href"
+        ],
+        "title": "AssistantSuggestionOut",
+        "type": "object"
+      },
+      "AuditEntryOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "action"
+        ],
+        "title": "AuditEntryOut",
+        "type": "object"
+      },
+      "AutoSettleOut": {
+        "properties": {
+          "checked": {
+            "description": "Pending bets examined.",
+            "title": "Checked",
+            "type": "integer"
+          },
+          "settled": {
+            "items": {
+              "$ref": "#/components/schemas/BetOut"
+            },
+            "title": "Settled",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/AutoSettleSkipOut"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checked",
+          "settled",
+          "skipped"
+        ],
+        "title": "AutoSettleOut",
+        "type": "object"
+      },
+      "AutoSettleSkipOut": {
+        "properties": {
+          "bet_id": {
+            "title": "Bet Id",
+            "type": "string"
+          },
+          "reason": {
+            "description": "not_gradeable: a leg has no structured selection. event_not_final: a leg's event has not finished. event_unavailable: the data provider no longer has a leg's event. manual_result_required: the bet carries its own price and a leg pushed, so the payout cannot be derived.",
+            "enum": [
+              "not_gradeable",
+              "event_not_final",
+              "event_unavailable",
+              "manual_result_required"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bet_id",
+          "reason"
+        ],
+        "title": "AutoSettleSkipOut",
+        "type": "object"
+      },
+      "AveragesOut": {
+        "properties": {
+          "away": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away"
+          },
+          "home": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Home"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          },
+          "vs_opponent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs Opponent"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean over the returned game log.",
+            "title": "Window"
+          }
+        },
+        "title": "AveragesOut",
+        "type": "object"
+      },
+      "BestMoneylineOut": {
+        "description": "Best open, non-stale moneyline price per side. ``draw`` is only set for 3-way markets.",
+        "properties": {
+          "away": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestPriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draw": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestPriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "home": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestPriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "BestMoneylineOut",
+        "type": "object"
+      },
+      "BestOutcomeOut": {
+        "properties": {
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "outcome_key": {
+            "title": "Outcome Key",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "sportsbook_key": {
+            "title": "Sportsbook Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome_key",
+          "sportsbook_key",
+          "price"
+        ],
+        "title": "BestOutcomeOut",
+        "type": "object"
+      },
+      "BestPriceOut": {
+        "description": "The best available price for one side and the sportsbook offering it.",
+        "properties": {
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          }
+        },
+        "required": [
+          "price",
+          "sportsbook"
+        ],
+        "title": "BestPriceOut",
+        "type": "object"
+      },
+      "BetCreate": {
+        "properties": {
+          "bet_type": {
+            "default": "straight",
+            "enum": [
+              "straight",
+              "parlay",
+              "sgp",
+              "future"
+            ],
+            "title": "Bet Type",
+            "type": "string"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegIn"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Legs",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional price for the whole bet, for when the book's price differs from the product of the legs (typical for same-game parlays).",
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          },
+          "placed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Defaults to now.",
+            "title": "Placed At"
+          },
+          "sportsbook": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Sportsbook",
+            "type": "string"
+          },
+          "stake": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000.0,
+            "title": "Stake",
+            "type": "number"
+          }
+        },
+        "required": [
+          "legs",
+          "stake",
+          "sportsbook"
+        ],
+        "title": "BetCreate",
+        "type": "object"
+      },
+      "BetLegIn": {
+        "properties": {
+          "closing_odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing price of the same selection, in `odds_format`.",
+            "title": "Closing Odds"
+          },
+          "closing_opposite_odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing price of the other side (enables no-vig CLV).",
+            "title": "Closing Opposite Odds"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "event_label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Label"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "nba"
+            ],
+            "title": "League"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": -100000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spread: the handicap of the selected side (home -3.5 is `-3.5`, the away side of that market is `+3.5`). Total: the points line.",
+            "title": "Line"
+          },
+          "market": {
+            "examples": [
+              "spread"
+            ],
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Market",
+            "type": "string"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "examples": [
+              -110,
+              "+150",
+              2.5,
+              "5/2"
+            ],
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          },
+          "outcome_key": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "away",
+                  "draw",
+                  "over",
+                  "under"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured selection. With `event_id`, a `market` of moneyline, spread or total and (for spread and total) `line`, the leg can be graded automatically from the final score. moneyline: home, away, or draw where the league has a 3-way market. spread: home or away. total: over or under.",
+            "title": "Outcome Key"
+          },
+          "selection": {
+            "examples": [
+              "Harbor City Tides -3.5"
+            ],
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Selection",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection",
+          "market",
+          "odds"
+        ],
+        "title": "BetLegIn",
+        "type": "object"
+      },
+      "BetLegOut": {
+        "properties": {
+          "closing_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "decimal_taken / decimal_closing - 1, as a fraction.",
+            "title": "Clv"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "event_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Label"
+          },
+          "gradeable": {
+            "default": false,
+            "description": "True when the leg has event_id, a gradeable market, outcome_key and line.",
+            "title": "Gradeable",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "outcome_key": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "away",
+                  "draw",
+                  "over",
+                  "under"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Key"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "won",
+                  "lost",
+                  "push",
+                  "void",
+                  "half_won",
+                  "half_lost"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "selection": {
+            "title": "Selection",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "position",
+          "selection",
+          "market",
+          "price"
+        ],
+        "title": "BetLegOut",
+        "type": "object"
+      },
+      "BetOut": {
+        "properties": {
+          "bet_type": {
+            "enum": [
+              "straight",
+              "parlay",
+              "sgp",
+              "future"
+            ],
+            "title": "Bet Type",
+            "type": "string"
+          },
+          "clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing line value as a fraction; null unless every leg has a closing price.",
+            "title": "Clv"
+          },
+          "combined_decimal_odds": {
+            "title": "Combined Decimal Odds",
+            "type": "number"
+          },
+          "combined_price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "external_bet_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Bet Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/BetLegOut"
+            },
+            "title": "Legs",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "odds_source": {
+            "description": "legs: product of the leg prices. override: a price supplied for the bet.",
+            "enum": [
+              "legs",
+              "override"
+            ],
+            "title": "Odds Source",
+            "type": "string"
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Amount returned once settled.",
+            "title": "Payout"
+          },
+          "placed_at": {
+            "format": "date-time",
+            "title": "Placed At",
+            "type": "string"
+          },
+          "potential_payout": {
+            "description": "Stake x combined decimal odds.",
+            "title": "Potential Payout",
+            "type": "number"
+          },
+          "potential_profit": {
+            "title": "Potential Profit",
+            "type": "number"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "won",
+                  "lost",
+                  "push",
+                  "void",
+                  "half_won",
+                  "half_lost",
+                  "cashout"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "settled_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "user: settled by hand. auto: graded from final scores by auto-settle. Null while pending and for bets that were imported already settled.",
+            "title": "Settled By"
+          },
+          "source": {
+            "enum": [
+              "manual",
+              "sync"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "sport": {
+            "description": "League shared by every leg, \"multi\", or \"unknown\".",
+            "title": "Sport",
+            "type": "string"
+          },
+          "sportsbook": {
+            "title": "Sportsbook",
+            "type": "string"
+          },
+          "stake": {
+            "title": "Stake",
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "settled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Connection Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "bet_type",
+          "status",
+          "sport",
+          "sportsbook",
+          "stake",
+          "combined_price",
+          "combined_decimal_odds",
+          "odds_source",
+          "potential_payout",
+          "potential_profit",
+          "placed_at",
+          "source",
+          "legs",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BetOut",
+        "type": "object"
+      },
+      "BetSettleRequest": {
+        "properties": {
+          "cashout_amount": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Amount returned. Required for cashout.",
+            "title": "Cashout Amount"
+          },
+          "leg_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LegResultIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-leg results. For a parlay priced from its legs the bet result and payout are derived from them (pushed and void legs drop out).",
+            "title": "Leg Results"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "won",
+                  "lost",
+                  "push",
+                  "void",
+                  "half_won",
+                  "half_lost",
+                  "cashout"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required unless `leg_results` grades every leg of a multi-leg bet.",
+            "title": "Result"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Defaults to now.",
+            "title": "Settled At"
+          }
+        },
+        "title": "BetSettleRequest",
+        "type": "object"
+      },
+      "BetSummaryOut": {
+        "properties": {
+          "by_bet_type": {
+            "items": {
+              "$ref": "#/components/schemas/BreakdownRowOut"
+            },
+            "title": "By Bet Type",
+            "type": "array"
+          },
+          "by_market": {
+            "items": {
+              "$ref": "#/components/schemas/BreakdownRowOut"
+            },
+            "title": "By Market",
+            "type": "array"
+          },
+          "by_sport": {
+            "items": {
+              "$ref": "#/components/schemas/BreakdownRowOut"
+            },
+            "title": "By Sport",
+            "type": "array"
+          },
+          "by_sportsbook": {
+            "items": {
+              "$ref": "#/components/schemas/BreakdownRowOut"
+            },
+            "title": "By Sportsbook",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "timeline": {
+            "description": "Cumulative profit by settlement date (UTC), oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/TimelinePointOut"
+            },
+            "title": "Timeline",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/BetTotalsOut"
+          }
+        },
+        "required": [
+          "totals",
+          "by_sport",
+          "by_market",
+          "by_sportsbook",
+          "by_bet_type",
+          "timeline",
+          "note"
+        ],
+        "title": "BetSummaryOut",
+        "type": "object"
+      },
+      "BetTotalsOut": {
+        "properties": {
+          "avg_clv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean CLV (fraction) over bets that have closing prices.",
+            "title": "Avg Clv"
+          },
+          "clv_sample": {
+            "description": "Bets included in avg_clv.",
+            "title": "Clv Sample",
+            "type": "integer"
+          },
+          "losses": {
+            "description": "Settled bets with a negative profit.",
+            "title": "Losses",
+            "type": "integer"
+          },
+          "pending_count": {
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "pending_exposure": {
+            "description": "Total stake on pending bets.",
+            "title": "Pending Exposure",
+            "type": "number"
+          },
+          "profit": {
+            "title": "Profit",
+            "type": "number"
+          },
+          "pushes": {
+            "description": "Settled bets with zero profit (pushes and voids).",
+            "title": "Pushes",
+            "type": "integer"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "profit / staked, as a fraction.",
+            "title": "Roi"
+          },
+          "settled_count": {
+            "title": "Settled Count",
+            "type": "integer"
+          },
+          "staked": {
+            "description": "Total staked on settled bets, void bets excluded.",
+            "title": "Staked",
+            "type": "number"
+          },
+          "wins": {
+            "description": "Settled bets with a positive profit.",
+            "title": "Wins",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "staked",
+          "profit",
+          "wins",
+          "losses",
+          "pushes",
+          "pending_count",
+          "pending_exposure",
+          "clv_sample",
+          "settled_count"
+        ],
+        "title": "BetTotalsOut",
+        "type": "object"
+      },
+      "BetUpdate": {
+        "description": "Partial update. Stake, legs, odds and bet type can only change while the bet is pending.",
+        "properties": {
+          "bet_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "straight",
+                  "parlay",
+                  "sgp",
+                  "future"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bet Type"
+          },
+          "closing_odds": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LegClosingOddsIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Record closing prices on existing legs (allowed any time).",
+            "title": "Closing Odds"
+          },
+          "legs": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BetLegIn"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legs"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          },
+          "placed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placed At"
+          },
+          "sportsbook": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sportsbook"
+          },
+          "stake": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake"
+          }
+        },
+        "title": "BetUpdate",
+        "type": "object"
+      },
+      "BookHoldOut": {
+        "properties": {
+          "hold": {
+            "description": "1 - 1/sum(implied probabilities), as a fraction.",
+            "title": "Hold",
+            "type": "number"
+          },
+          "sportsbook_key": {
+            "title": "Sportsbook Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sportsbook_key",
+          "hold"
+        ],
+        "title": "BookHoldOut",
+        "type": "object"
+      },
+      "BookOddsOut": {
+        "properties": {
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/OddsOutcomeOut"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "suspended",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sportsbook",
+          "status",
+          "is_stale",
+          "outcomes"
+        ],
+        "title": "BookOddsOut",
+        "type": "object"
+      },
+      "BreakdownRowOut": {
+        "properties": {
+          "bets": {
+            "title": "Bets",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "profit": {
+            "title": "Profit",
+            "type": "number"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roi"
+          },
+          "staked": {
+            "title": "Staked",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "bets",
+          "staked",
+          "profit"
+        ],
+        "title": "BreakdownRowOut",
+        "type": "object"
+      },
+      "CLVRequest": {
+        "properties": {
+          "closing_odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Closing price of the same selection.",
+            "title": "Closing Odds"
+          },
+          "closing_opposite_odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing price of the other side of a two-way market (enables no-vig CLV).",
+            "title": "Closing Opposite Odds"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "The price you took.",
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "odds",
+          "closing_odds"
+        ],
+        "title": "CLVRequest",
+        "type": "object"
+      },
+      "CLVResponse": {
+        "properties": {
+          "beat_close": {
+            "title": "Beat Close",
+            "type": "boolean"
+          },
+          "closing_no_vig_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing No Vig Probability"
+          },
+          "closing_price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "clv": {
+            "description": "decimal_taken / decimal_closing - 1, as a fraction.",
+            "title": "Clv",
+            "type": "number"
+          },
+          "clv_percent": {
+            "title": "Clv Percent",
+            "type": "number"
+          },
+          "ev_at_close_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EV% of your price if the no-vig close were the true probability.",
+            "title": "Ev At Close Percent"
+          },
+          "no_vig_probability_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "No-vig closing probability minus the implied probability of your price.",
+            "title": "No Vig Probability Delta"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "price",
+          "closing_price",
+          "clv",
+          "clv_percent",
+          "beat_close",
+          "steps"
+        ],
+        "title": "CLVResponse",
+        "type": "object"
+      },
+      "ConsensusOut": {
+        "properties": {
+          "books_used": {
+            "title": "Books Used",
+            "type": "integer"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most common line among open, non-stale books (home line for spread, total points for totals). Null for moneyline.",
+            "title": "Line"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ConsensusOutcomeOut"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcomes",
+          "books_used"
+        ],
+        "title": "ConsensusOut",
+        "type": "object"
+      },
+      "ConsensusOutcomeOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "no_vig_probability": {
+            "description": "Mean of each book's no-vig (proportional) probability. Not a prediction.",
+            "title": "No Vig Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "no_vig_probability"
+        ],
+        "title": "ConsensusOutcomeOut",
+        "type": "object"
+      },
+      "ConvertRequest": {
+        "properties": {
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "examples": [
+              -110,
+              "+150",
+              2.5,
+              "5/2"
+            ],
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "odds"
+        ],
+        "title": "ConvertRequest",
+        "type": "object"
+      },
+      "ConvertResponse": {
+        "properties": {
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "price",
+          "steps"
+        ],
+        "title": "ConvertResponse",
+        "type": "object"
+      },
+      "EVRequest": {
+        "properties": {
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "examples": [
+              "+150"
+            ],
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          },
+          "stake": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000.0,
+            "title": "Stake",
+            "type": "number"
+          },
+          "win_probability": {
+            "description": "Your own estimate, strictly between 0 and 1.",
+            "examples": [
+              0.45
+            ],
+            "title": "Win Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "odds",
+          "win_probability"
+        ],
+        "title": "EVRequest",
+        "type": "object"
+      },
+      "EVResponse": {
+        "properties": {
+          "breakeven_probability": {
+            "title": "Breakeven Probability",
+            "type": "number"
+          },
+          "caveat": {
+            "title": "Caveat",
+            "type": "string"
+          },
+          "edge": {
+            "description": "win_probability - breakeven_probability.",
+            "title": "Edge",
+            "type": "number"
+          },
+          "ev_per_unit": {
+            "description": "Expected profit per 1 unit staked.",
+            "title": "Ev Per Unit",
+            "type": "number"
+          },
+          "ev_percent": {
+            "title": "Ev Percent",
+            "type": "number"
+          },
+          "expected_profit": {
+            "description": "Expected profit for the stake given.",
+            "title": "Expected Profit",
+            "type": "number"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "stake": {
+            "title": "Stake",
+            "type": "number"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "win_probability": {
+            "title": "Win Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "price",
+          "win_probability",
+          "stake",
+          "ev_per_unit",
+          "ev_percent",
+          "expected_profit",
+          "breakeven_probability",
+          "edge",
+          "steps",
+          "caveat"
+        ],
+        "title": "EVResponse",
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EventDetailOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "available_markets": {
+            "items": {
+              "enum": [
+                "moneyline",
+                "spread",
+                "total"
+              ],
+              "type": "string"
+            },
+            "title": "Available Markets",
+            "type": "array"
+          },
+          "away_team": {
+            "$ref": "#/components/schemas/TeamRef"
+          },
+          "best_moneyline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestMoneylineOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "has_draw": {
+            "title": "Has Draw",
+            "type": "boolean"
+          },
+          "home_team": {
+            "$ref": "#/components/schemas/TeamRef"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "league": {
+            "enum": [
+              "nba",
+              "nfl",
+              "mlb",
+              "nhl",
+              "soccer"
+            ],
+            "title": "League",
+            "type": "string"
+          },
+          "league_name": {
+            "title": "League Name",
+            "type": "string"
+          },
+          "players": {
+            "description": "Players on either team with prop research.",
+            "items": {
+              "$ref": "#/components/schemas/PlayerOut"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_time": {
+            "format": "date-time",
+            "title": "Start Time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "live",
+              "upcoming",
+              "final"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Period / clock text for live events, \"Final\" for finished ones.",
+            "title": "Status Detail"
+          }
+        },
+        "required": [
+          "id",
+          "league",
+          "home_team",
+          "away_team",
+          "start_time",
+          "status",
+          "league_name",
+          "has_draw",
+          "available_markets",
+          "players",
+          "as_of",
+          "data_mode"
+        ],
+        "title": "EventDetailOut",
+        "type": "object"
+      },
+      "EventOddsOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "best": {
+            "items": {
+              "$ref": "#/components/schemas/BestOutcomeOut"
+            },
+            "title": "Best",
+            "type": "array"
+          },
+          "books": {
+            "items": {
+              "$ref": "#/components/schemas/BookOddsOut"
+            },
+            "title": "Books",
+            "type": "array"
+          },
+          "consensus": {
+            "$ref": "#/components/schemas/ConsensusOut"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventSummaryOut"
+          },
+          "holds": {
+            "items": {
+              "$ref": "#/components/schemas/BookHoldOut"
+            },
+            "title": "Holds",
+            "type": "array"
+          },
+          "market": {
+            "enum": [
+              "moneyline",
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "stale_after_seconds": {
+            "description": "Quotes older than this are flagged stale and excluded from best price.",
+            "title": "Stale After Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event",
+          "market",
+          "as_of",
+          "data_mode",
+          "stale_after_seconds",
+          "books",
+          "consensus",
+          "holds",
+          "best"
+        ],
+        "title": "EventOddsOut",
+        "type": "object"
+      },
+      "EventSummaryOut": {
+        "properties": {
+          "away_team": {
+            "$ref": "#/components/schemas/TeamRef"
+          },
+          "best_moneyline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestMoneylineOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "home_team": {
+            "$ref": "#/components/schemas/TeamRef"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "league": {
+            "enum": [
+              "nba",
+              "nfl",
+              "mlb",
+              "nhl",
+              "soccer"
+            ],
+            "title": "League",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_time": {
+            "format": "date-time",
+            "title": "Start Time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "live",
+              "upcoming",
+              "final"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Period / clock text for live events, \"Final\" for finished ones.",
+            "title": "Status Detail"
+          }
+        },
+        "required": [
+          "id",
+          "league",
+          "home_team",
+          "away_team",
+          "start_time",
+          "status"
+        ],
+        "title": "EventSummaryOut",
+        "type": "object"
+      },
+      "ExportAuditEntryOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "action"
+        ],
+        "title": "ExportAuditEntryOut",
+        "type": "object"
+      },
+      "GameLogEntryOut": {
+        "properties": {
+          "date": {
+            "format": "date-time",
+            "title": "Date",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "is_home": {
+            "title": "Is Home",
+            "type": "boolean"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/TeamRef"
+          },
+          "result": {
+            "description": "The stat value compared with ``hit_rate.line``.",
+            "enum": [
+              "over",
+              "under",
+              "push"
+            ],
+            "title": "Result",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "event_id",
+          "date",
+          "opponent",
+          "is_home",
+          "value",
+          "result"
+        ],
+        "title": "GameLogEntryOut",
+        "type": "object"
+      },
+      "HealthOut": {
+        "properties": {
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "server_time": {
+            "format": "date-time",
+            "title": "Server Time",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "data_mode",
+          "server_time"
+        ],
+        "title": "HealthOut",
+        "type": "object"
+      },
+      "HitRateOut": {
+        "properties": {
+          "ci_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wilson 95% interval, upper bound.",
+            "title": "Ci High"
+          },
+          "ci_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wilson 95% interval, lower bound.",
+            "title": "Ci Low"
+          },
+          "line": {
+            "description": "The line the game log was graded against.",
+            "title": "Line",
+            "type": "number"
+          },
+          "line_source": {
+            "description": "consensus: the most common line currently offered. season_median: no book is offering the market, so the half-point nearest the season median is used.",
+            "enum": [
+              "consensus",
+              "season_median"
+            ],
+            "title": "Line Source",
+            "type": "string"
+          },
+          "over_count": {
+            "title": "Over Count",
+            "type": "integer"
+          },
+          "pushes": {
+            "description": "Games that landed exactly on the line; excluded from rate.",
+            "title": "Pushes",
+            "type": "integer"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "over_count / sample_size. Historical frequency only.",
+            "title": "Rate"
+          },
+          "sample_size": {
+            "description": "Games counted in the rate (pushes excluded).",
+            "title": "Sample Size",
+            "type": "integer"
+          },
+          "under_count": {
+            "title": "Under Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "line_source",
+          "over_count",
+          "under_count",
+          "pushes",
+          "sample_size"
+        ],
+        "title": "HitRateOut",
+        "type": "object"
+      },
+      "LeagueOut": {
+        "properties": {
+          "has_draw": {
+            "description": "True when the moneyline is 3-way (home/draw/away).",
+            "title": "Has Draw",
+            "type": "boolean"
+          },
+          "key": {
+            "enum": [
+              "nba",
+              "nfl",
+              "mlb",
+              "nhl",
+              "soccer"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "markets": {
+            "items": {
+              "enum": [
+                "moneyline",
+                "spread",
+                "total"
+              ],
+              "type": "string"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prop_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prop Markets",
+            "type": "array"
+          },
+          "sport": {
+            "title": "Sport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "sport",
+          "has_draw",
+          "markets",
+          "prop_markets"
+        ],
+        "title": "LeagueOut",
+        "type": "object"
+      },
+      "LegClosingOddsIn": {
+        "properties": {
+          "closing_odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Closing Odds"
+          },
+          "closing_opposite_odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Opposite Odds"
+          },
+          "leg_id": {
+            "title": "Leg Id",
+            "type": "string"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "leg_id",
+          "closing_odds"
+        ],
+        "title": "LegClosingOddsIn",
+        "type": "object"
+      },
+      "LegResultIn": {
+        "properties": {
+          "leg_id": {
+            "title": "Leg Id",
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "won",
+              "lost",
+              "push",
+              "void",
+              "half_won",
+              "half_lost"
+            ],
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "leg_id",
+          "result"
+        ],
+        "title": "LegResultIn",
+        "type": "object"
+      },
+      "LineHistoryOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventSummaryOut"
+          },
+          "market": {
+            "enum": [
+              "moneyline",
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/LineSeriesOut"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "market",
+          "as_of",
+          "data_mode",
+          "series"
+        ],
+        "title": "LineHistoryOut",
+        "type": "object"
+      },
+      "LinePointOut": {
+        "properties": {
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "price"
+        ],
+        "title": "LinePointOut",
+        "type": "object"
+      },
+      "LineSeriesOut": {
+        "properties": {
+          "outcome_key": {
+            "title": "Outcome Key",
+            "type": "string"
+          },
+          "outcome_name": {
+            "title": "Outcome Name",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/LinePointOut"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          }
+        },
+        "required": [
+          "sportsbook",
+          "outcome_key",
+          "outcome_name",
+          "points"
+        ],
+        "title": "LineSeriesOut",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MetaOut": {
+        "properties": {
+          "data_mode": {
+            "const": "synthetic",
+            "description": "All sports data is synthetic in this build.",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "notice": {
+            "description": "Plain-language statement about the data shown.",
+            "title": "Notice",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "server_time": {
+            "format": "date-time",
+            "title": "Server Time",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_mode",
+          "provider",
+          "version",
+          "server_time",
+          "notice"
+        ],
+        "title": "MetaOut",
+        "type": "object"
+      },
+      "NoVigOutcomeOut": {
+        "properties": {
+          "fair_price": {
+            "$ref": "#/components/schemas/PriceOut",
+            "description": "The price with the margin removed."
+          },
+          "implied_probability": {
+            "title": "Implied Probability",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "no_vig_probability": {
+            "title": "No Vig Probability",
+            "type": "number"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          }
+        },
+        "required": [
+          "label",
+          "price",
+          "implied_probability",
+          "no_vig_probability",
+          "fair_price"
+        ],
+        "title": "NoVigOutcomeOut",
+        "type": "object"
+      },
+      "NoVigRequest": {
+        "properties": {
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional outcome names.",
+            "title": "Labels"
+          },
+          "odds": {
+            "description": "Every outcome of one market.",
+            "examples": [
+              [
+                -110,
+                -110
+              ]
+            ],
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Odds",
+            "type": "array"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "odds"
+        ],
+        "title": "NoVigRequest",
+        "type": "object"
+      },
+      "NoVigResponse": {
+        "properties": {
+          "hold": {
+            "description": "1 - 1/sum(implied probabilities).",
+            "title": "Hold",
+            "type": "number"
+          },
+          "method": {
+            "const": "multiplicative",
+            "title": "Method",
+            "type": "string"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/NoVigOutcomeOut"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "overround": {
+            "description": "Sum of implied probabilities minus 1.",
+            "title": "Overround",
+            "type": "number"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcomes",
+          "overround",
+          "hold",
+          "method",
+          "steps"
+        ],
+        "title": "NoVigResponse",
+        "type": "object"
+      },
+      "OddsOutcomeOut": {
+        "properties": {
+          "is_best": {
+            "description": "Best price for this outcome among open, non-stale books. For spread and total only books quoting the consensus line are compared.",
+            "title": "Is Best",
+            "type": "boolean"
+          },
+          "key": {
+            "description": "home | away | draw | over | under",
+            "title": "Key",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "price",
+          "is_best"
+        ],
+        "title": "OddsOutcomeOut",
+        "type": "object"
+      },
+      "ParlayLegIn": {
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Legs sharing an event_id are treated as correlated.",
+            "title": "Event Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Odds"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          },
+          "result": {
+            "default": "pending",
+            "description": "Pushed and void legs drop out of the parlay.",
+            "enum": [
+              "pending",
+              "won",
+              "push",
+              "void"
+            ],
+            "title": "Result",
+            "type": "string"
+          },
+          "win_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional, in (0, 1).",
+            "title": "Win Probability"
+          }
+        },
+        "required": [
+          "odds"
+        ],
+        "title": "ParlayLegIn",
+        "type": "object"
+      },
+      "ParlayLegOut": {
+        "properties": {
+          "counted": {
+            "description": "False when the leg pushed or was voided.",
+            "title": "Counted",
+            "type": "boolean"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "price",
+          "result",
+          "counted"
+        ],
+        "title": "ParlayLegOut",
+        "type": "object"
+      },
+      "ParlayRequest": {
+        "properties": {
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/ParlayLegIn"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Legs",
+            "type": "array"
+          },
+          "stake": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake"
+          }
+        },
+        "required": [
+          "legs"
+        ],
+        "title": "ParlayRequest",
+        "type": "object"
+      },
+      "ParlayResponse": {
+        "properties": {
+          "active_legs": {
+            "title": "Active Legs",
+            "type": "integer"
+          },
+          "combined_decimal": {
+            "title": "Combined Decimal",
+            "type": "number"
+          },
+          "combined_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when every leg pushed or was voided (the stake is returned)."
+          },
+          "combined_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only computed when every active leg has a win probability and all legs are from distinct events. Assumes independence.",
+            "title": "Combined Probability"
+          },
+          "correlation_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Correlation Warnings",
+            "type": "array"
+          },
+          "dropped_legs": {
+            "title": "Dropped Legs",
+            "type": "integer"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/ParlayLegOut"
+            },
+            "title": "Legs",
+            "type": "array"
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout"
+          },
+          "probability_note": {
+            "title": "Probability Note",
+            "type": "string"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "stake": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "legs",
+          "combined_price",
+          "combined_decimal",
+          "active_legs",
+          "dropped_legs",
+          "combined_probability",
+          "probability_note",
+          "correlation_warnings",
+          "steps"
+        ],
+        "title": "ParlayResponse",
+        "type": "object"
+      },
+      "PasswordChangeRequest": {
+        "properties": {
+          "current_password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 128,
+            "minLength": 10,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PlayerDetailOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "jersey_number": {
+            "title": "Jersey Number",
+            "type": "integer"
+          },
+          "league": {
+            "enum": [
+              "nba",
+              "nfl",
+              "mlb",
+              "nhl",
+              "soccer"
+            ],
+            "title": "League",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "title": "Position",
+            "type": "string"
+          },
+          "prop_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prop Markets",
+            "type": "array"
+          },
+          "team": {
+            "$ref": "#/components/schemas/TeamRef"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "league",
+          "team",
+          "position",
+          "jersey_number",
+          "prop_markets",
+          "as_of",
+          "data_mode"
+        ],
+        "title": "PlayerDetailOut",
+        "type": "object"
+      },
+      "PlayerOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "jersey_number": {
+            "title": "Jersey Number",
+            "type": "integer"
+          },
+          "league": {
+            "enum": [
+              "nba",
+              "nfl",
+              "mlb",
+              "nhl",
+              "soccer"
+            ],
+            "title": "League",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "string"
+          },
+          "prop_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prop Markets",
+            "type": "array"
+          },
+          "team": {
+            "$ref": "#/components/schemas/TeamRef"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "league",
+          "team",
+          "position",
+          "jersey_number",
+          "prop_markets"
+        ],
+        "title": "PlayerOut",
+        "type": "object"
+      },
+      "PlayerPropsOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "available_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Markets",
+            "type": "array"
+          },
+          "averages": {
+            "$ref": "#/components/schemas/AveragesOut"
+          },
+          "caveat": {
+            "title": "Caveat",
+            "type": "string"
+          },
+          "consensus_line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consensus Line"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "game_log": {
+            "items": {
+              "$ref": "#/components/schemas/GameLogEntryOut"
+            },
+            "title": "Game Log",
+            "type": "array"
+          },
+          "hit_rate": {
+            "$ref": "#/components/schemas/HitRateOut"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "next_event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/PropOfferOut"
+            },
+            "title": "Offers",
+            "type": "array"
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerOut"
+          },
+          "split": {
+            "enum": [
+              "all",
+              "home",
+              "away",
+              "vs_opponent"
+            ],
+            "title": "Split",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "5",
+              "10",
+              "20",
+              "season"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "market",
+          "available_markets",
+          "window",
+          "split",
+          "offers",
+          "game_log",
+          "hit_rate",
+          "averages",
+          "caveat",
+          "as_of",
+          "data_mode"
+        ],
+        "title": "PlayerPropsOut",
+        "type": "object"
+      },
+      "PriceOut": {
+        "description": "One price in every display format.",
+        "properties": {
+          "american": {
+            "examples": [
+              -110
+            ],
+            "title": "American",
+            "type": "integer"
+          },
+          "decimal": {
+            "examples": [
+              1.9091
+            ],
+            "title": "Decimal",
+            "type": "number"
+          },
+          "fractional": {
+            "examples": [
+              "10/11"
+            ],
+            "title": "Fractional",
+            "type": "string"
+          },
+          "implied_probability": {
+            "description": "1/decimal. Includes the bookmaker margin.",
+            "examples": [
+              0.52381
+            ],
+            "title": "Implied Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "american",
+          "decimal",
+          "fractional",
+          "implied_probability"
+        ],
+        "title": "PriceOut",
+        "type": "object"
+      },
+      "PropBoardRowOut": {
+        "properties": {
+          "best_over": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestPriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "best_under": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BestPriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consensus_line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consensus Line"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventSummaryOut"
+          },
+          "l10_hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of the last 10 games over the consensus line. Not a prediction.",
+            "title": "L10 Hit Rate"
+          },
+          "l10_over_count": {
+            "title": "L10 Over Count",
+            "type": "integer"
+          },
+          "l10_sample": {
+            "description": "Games in the last-10 rate (pushes excluded).",
+            "title": "L10 Sample",
+            "type": "integer"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PlayerOut"
+          }
+        },
+        "required": [
+          "player",
+          "event",
+          "market",
+          "l10_over_count",
+          "l10_sample"
+        ],
+        "title": "PropBoardRowOut",
+        "type": "object"
+      },
+      "PropOfferOut": {
+        "properties": {
+          "is_best_over": {
+            "title": "Is Best Over",
+            "type": "boolean"
+          },
+          "is_best_under": {
+            "title": "Is Best Under",
+            "type": "boolean"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "over": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "suspended",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "under": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sportsbook",
+          "status",
+          "is_stale",
+          "is_best_over",
+          "is_best_under"
+        ],
+        "title": "PropOfferOut",
+        "type": "object"
+      },
+      "ProviderHealthOut": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "data_mode": {
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "data_mode",
+          "status",
+          "checked_at",
+          "detail"
+        ],
+        "title": "ProviderHealthOut",
+        "type": "object"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "age_confirmed": {
+            "description": "Attestation that the user is 21 or older. Must be true.",
+            "title": "Age Confirmed",
+            "type": "boolean"
+          },
+          "display_name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 10,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "display_name",
+          "age_confirmed"
+        ],
+        "title": "RegisterRequest",
+        "type": "object"
+      },
+      "ScoreOut": {
+        "properties": {
+          "away": {
+            "title": "Away",
+            "type": "integer"
+          },
+          "home": {
+            "title": "Home",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "home",
+          "away"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
+      "SportsbookOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "SportsbookOut",
+        "type": "object"
+      },
+      "SportsbookRef": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "SportsbookRef",
+        "type": "object"
+      },
+      "SyncConnectionCreate": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "provider": {
+            "default": "mock",
+            "maxLength": 40,
+            "title": "Provider",
+            "type": "string"
+          },
+          "simulate_failures": {
+            "default": 0,
+            "description": "Mock provider only: how many upcoming fetch attempts fail with a retryable error. Lets clients and tests exercise the failure path.",
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Simulate Failures",
+            "type": "integer"
+          }
+        },
+        "title": "SyncConnectionCreate",
+        "type": "object"
+      },
+      "SyncConnectionDeleteOut": {
+        "properties": {
+          "bets_deleted": {
+            "title": "Bets Deleted",
+            "type": "integer"
+          },
+          "bets_kept": {
+            "title": "Bets Kept",
+            "type": "integer"
+          },
+          "deleted": {
+            "const": true,
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted",
+          "bets_deleted",
+          "bets_kept"
+        ],
+        "title": "SyncConnectionDeleteOut",
+        "type": "object"
+      },
+      "SyncConnectionOut": {
+        "properties": {
+          "bet_count": {
+            "description": "Bets currently linked to this connection.",
+            "title": "Bet Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_mock": {
+            "title": "Is Mock",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncRunOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_name": {
+            "title": "Provider Name",
+            "type": "string"
+          },
+          "status": {
+            "const": "active",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "provider_name",
+          "is_mock",
+          "status",
+          "label",
+          "created_at",
+          "bet_count"
+        ],
+        "title": "SyncConnectionOut",
+        "type": "object"
+      },
+      "SyncProviderOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "is_mock": {
+            "title": "Is Mock",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_credentials": {
+            "title": "Requires Credentials",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "description",
+          "is_mock",
+          "requires_credentials"
+        ],
+        "title": "SyncProviderOut",
+        "type": "object"
+      },
+      "SyncRunOut": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "connection_id": {
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "duplicate_count": {
+            "description": "Bets skipped because they were already imported.",
+            "title": "Duplicate Count",
+            "type": "integer"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "fetched_count": {
+            "title": "Fetched Count",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "imported_count": {
+            "title": "Imported Count",
+            "type": "integer"
+          },
+          "retryable": {
+            "description": "For failed runs: whether trying again may succeed.",
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connection_id",
+          "status",
+          "attempts",
+          "fetched_count",
+          "imported_count",
+          "duplicate_count",
+          "retryable",
+          "started_at"
+        ],
+        "title": "SyncRunOut",
+        "type": "object"
+      },
+      "TeamRef": {
+        "properties": {
+          "abbreviation": {
+            "title": "Abbreviation",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "abbreviation"
+        ],
+        "title": "TeamRef",
+        "type": "object"
+      },
+      "TimelinePointOut": {
+        "properties": {
+          "cumulative_profit": {
+            "title": "Cumulative Profit",
+            "type": "number"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "cumulative_profit"
+        ],
+        "title": "TimelinePointOut",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Token lifetime in seconds",
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "const": "bearer",
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_in",
+          "user"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "UserOut": {
+        "properties": {
+          "age_confirmed_at": {
+            "format": "date-time",
+            "title": "Age Confirmed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "display_name",
+          "role",
+          "age_confirmed_at",
+          "created_at"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "WatchlistItemCreate": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "team",
+              "player",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref_id": {
+            "description": "Team, player or event id from the data routes.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ref Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref_id"
+        ],
+        "title": "WatchlistItemCreate",
+        "type": "object"
+      },
+      "WatchlistItemOut": {
+        "properties": {
+          "available": {
+            "default": true,
+            "description": "False when the data provider no longer has the referenced entity (for example an old event). `team`, `player` and `event` are then all null.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "team",
+              "player",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Display name captured when the item was added.",
+            "title": "Label",
+            "type": "string"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "player": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ref_id": {
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "ref_id",
+          "label",
+          "created_at"
+        ],
+        "title": "WatchlistItemOut",
+        "type": "object"
+      },
+      "WatchlistOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "WatchlistOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "JWT access token from /v1/auth/login",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "OddVex is a sports-betting **intelligence** API: odds comparison, player-prop research,\nbetting math and bet tracking. It never accepts, places or facilitates wagers.\n\n**All sports data served by this build is synthetic.** Teams, players, sportsbooks, prices\nand statistics are fictional and generated deterministically. Responses carry\n`data_mode: \"synthetic\"`.\n\nConventions: JSON, snake_case, ISO-8601 UTC timestamps, string ids. Probabilities, holds, ROI\nand CLV are fractions (0.05 = 5%) unless the field name ends in `_percent`. Errors use the\nenvelope `{\"error\": {\"code\", \"message\", \"details\"?}}`.\n",
+    "title": "OddVex API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "get_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness check",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/admin/overview": {
+      "get": {
+        "operationId": "get_admin_overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Counts, provider health and recent audit entries",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/assistant/query": {
+      "post": {
+        "description": "Deterministic keyword routing to internal data tools with templated answers. No language model is connected and the assistant never produces a number that a tool did not compute. Authentication is optional; the bet summary intent needs it.",
+        "operationId": "assistant_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A token was sent but is invalid"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ask the rule-based assistant",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "summary": "Exchange email + password for an access token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Email already registered"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "summary": "Create an account (21+ attestation required)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/bets": {
+      "get": {
+        "description": "Filters combine with AND. `market` matches bets with at least one leg in that market. `sort` takes a field name, prefixed with `-` for descending; bets without a profit (pending) sort last either way.",
+        "operationId": "list_bets",
+        "parameters": [
+          {
+            "description": "pending, settled, or a specific result such as won",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "settled",
+                    "won",
+                    "lost",
+                    "push",
+                    "void",
+                    "half_won",
+                    "half_lost",
+                    "cashout"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "pending, settled, or a specific result such as won",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sport",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sport"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Default: -placed_at (newest first)",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "-placed_at",
+              "description": "Default: -placed_at (newest first)",
+              "enum": [
+                "placed_at",
+                "-placed_at",
+                "stake",
+                "-stake",
+                "profit",
+                "-profit"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "description": "Exact name, case-insensitive",
+            "in": "query",
+            "name": "sportsbook",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact name, case-insensitive",
+              "title": "Sportsbook"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bet_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "straight",
+                    "parlay",
+                    "sgp",
+                    "future"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bet Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BetOut"
+                  },
+                  "title": "Response List Bets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your bets, newest first",
+        "tags": [
+          "bets"
+        ]
+      },
+      "post": {
+        "description": "OddVex never places wagers. This only records a bet for tracking.",
+        "operationId": "create_bet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record a bet you placed elsewhere",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/bets/auto-settle": {
+      "post": {
+        "description": "Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new.",
+        "operationId": "auto_settle_bets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoSettleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Settle your pending bets from final scores",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/bets/summary": {
+      "get": {
+        "operationId": "get_bet_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Totals, breakdowns and cumulative profit for your bets",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/bets/{bet_id}": {
+      "delete": {
+        "operationId": "delete_bet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bet_id",
+            "required": true,
+            "schema": {
+              "title": "Bet Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a bet",
+        "tags": [
+          "bets"
+        ]
+      },
+      "get": {
+        "operationId": "get_bet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bet_id",
+            "required": true,
+            "schema": {
+              "title": "Bet Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One bet",
+        "tags": [
+          "bets"
+        ]
+      },
+      "patch": {
+        "operationId": "update_bet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bet_id",
+            "required": true,
+            "schema": {
+              "title": "Bet Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The bet is already settled"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit a bet",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/bets/{bet_id}/settle": {
+      "post": {
+        "description": "Settling an already settled bet overwrites the earlier result (for corrections). The change is recorded in the audit log.",
+        "operationId": "settle_bet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bet_id",
+            "required": true,
+            "schema": {
+              "title": "Bet Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetSettleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Grade a bet",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "description": "Without `date` the window is 3 days back to 4 days ahead (UTC). `date` selects one UTC calendar day.",
+        "operationId": "list_events",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "nba",
+                    "nfl",
+                    "mlb",
+                    "nhl",
+                    "soccer"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "upcoming",
+                    "final"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "UTC date, YYYY-MM-DD",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "UTC date, YYYY-MM-DD",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EventSummaryOut"
+                  },
+                  "title": "Response List Events",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Events, soonest first",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/{event_id}": {
+      "get": {
+        "operationId": "get_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "One event with its available markets",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/line-history": {
+      "get": {
+        "operationId": "get_event_line_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "default": "moneyline",
+              "enum": [
+                "moneyline",
+                "spread",
+                "total"
+              ],
+              "title": "Market",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineHistoryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "About 48 hours of price and line history per sportsbook",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/{event_id}/odds": {
+      "get": {
+        "description": "`is_best` and `best` only consider books that are open and not stale. For spread and total, prices are only compared between books quoting the consensus (most common) line. `consensus` is the mean no-vig probability of those same books. Markets of finished events are reported as `unavailable`.",
+        "operationId": "get_event_odds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "default": "moneyline",
+              "enum": [
+                "moneyline",
+                "spread",
+                "total"
+              ],
+              "title": "Market",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventOddsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Odds comparison across sportsbooks for one market",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/leagues": {
+      "get": {
+        "operationId": "list_leagues",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LeagueOut"
+                  },
+                  "title": "Response List Leagues",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Supported leagues",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/me": {
+      "delete": {
+        "description": "Permanently deletes the user, their bets, bet legs, watchlist, sync connections and import runs. An audit entry containing only the opaque user id is retained.",
+        "operationId": "delete_me",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete the account and all of its data",
+        "tags": [
+          "auth"
+        ]
+      },
+      "get": {
+        "operationId": "get_me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Current user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/me/export": {
+      "get": {
+        "description": "One JSON document with your profile, bets, watchlist, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.",
+        "operationId": "export_my_data",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountExportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download everything stored about your account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/me/password": {
+      "post": {
+        "description": "Every access token issued before the change stops working immediately, including the one used for this request. The response carries a replacement token.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The current password is not correct"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change the password and get a fresh access token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/meta": {
+      "get": {
+        "operationId": "get_meta",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Data mode, provider and server time",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/players": {
+      "get": {
+        "operationId": "list_players",
+        "parameters": [
+          {
+            "description": "Name contains",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Name contains",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "nba",
+                    "nfl",
+                    "mlb",
+                    "nhl",
+                    "soccer"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerOut"
+                  },
+                  "title": "Response List Players",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Search players by name",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/v1/players/{player_id}": {
+      "get": {
+        "operationId": "get_player",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "One player and their next event",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/v1/players/{player_id}/props": {
+      "get": {
+        "description": "`market` defaults to the player's first prop market. The game log is filtered by `split`, then cut to the most recent `window` games, and graded against the consensus line. Hit rate is historical only; pushes are excluded from the sample.",
+        "operationId": "get_player_props",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "10",
+              "enum": [
+                "5",
+                "10",
+                "20",
+                "season"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "split",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "home",
+                "away",
+                "vs_opponent"
+              ],
+              "title": "Split",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerPropsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Prop research: offers by book, game log and historical hit rate",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/v1/props": {
+      "get": {
+        "operationId": "list_props",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "nba",
+                    "nfl",
+                    "mlb",
+                    "nhl",
+                    "soccer"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PropBoardRowOut"
+                  },
+                  "title": "Response List Props",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Prop board: consensus line, best over/under and last-10 hit rate",
+        "tags": [
+          "players"
+        ]
+      }
+    },
+    "/v1/quant/clv": {
+      "post": {
+        "operationId": "quant_clv",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CLVRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLVResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Closing line value of a price against the close",
+        "tags": [
+          "quant"
+        ]
+      }
+    },
+    "/v1/quant/convert": {
+      "post": {
+        "operationId": "quant_convert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConvertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvertResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Convert a price between American, decimal and fractional",
+        "tags": [
+          "quant"
+        ]
+      }
+    },
+    "/v1/quant/ev": {
+      "post": {
+        "operationId": "quant_ev",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EVRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EVResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Expected value of a price for a win probability you supply",
+        "tags": [
+          "quant"
+        ]
+      }
+    },
+    "/v1/quant/no-vig": {
+      "post": {
+        "operationId": "quant_no_vig",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoVigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoVigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Remove the bookmaker margin from an n-way market (proportional method)",
+        "tags": [
+          "quant"
+        ]
+      }
+    },
+    "/v1/quant/parlay": {
+      "post": {
+        "operationId": "quant_parlay",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParlayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParlayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Combined parlay price and payout",
+        "tags": [
+          "quant"
+        ]
+      }
+    },
+    "/v1/sportsbooks": {
+      "get": {
+        "operationId": "list_sportsbooks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SportsbookOut"
+                  },
+                  "title": "Response List Sportsbooks",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sportsbooks in the comparison (fictional)",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/sync/connections": {
+      "get": {
+        "operationId": "list_sync_connections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncConnectionOut"
+                  },
+                  "title": "Response List Sync Connections",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your sync connections",
+        "tags": [
+          "sync"
+        ]
+      },
+      "post": {
+        "operationId": "create_sync_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Already connected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connect an account (mock authorization, no credentials)",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/v1/sync/connections/{connection_id}": {
+      "delete": {
+        "description": "Removes the connection and its import history. With `delete_data=true` the bets imported through it are deleted too; otherwise they are kept as tracked bets.",
+        "operationId": "delete_sync_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delete_data",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Delete Data",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncConnectionDeleteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Disconnect an account",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/v1/sync/connections/{connection_id}/runs": {
+      "get": {
+        "operationId": "list_sync_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncRunOut"
+                  },
+                  "title": "Response List Sync Runs",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import history for a connection, newest first",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/v1/sync/connections/{connection_id}/sync": {
+      "post": {
+        "description": "Idempotent: bets are de-duplicated on provider + external bet id, so running this again never creates duplicates. Retryable provider errors are retried up to `ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded with status `failed` and this returns 502 with `details.run_id` and `details.retryable`.",
+        "operationId": "run_sync",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A concurrent import collided; try again"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The provider failed; the run is recorded"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import bets from a connection",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/v1/sync/providers": {
+      "get": {
+        "operationId": "list_sync_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncProviderOut"
+                  },
+                  "title": "Response List Sync Providers",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Available sync providers",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/v1/watchlist": {
+      "get": {
+        "description": "Each item embeds the current team, player or event from the data provider. When the provider no longer has it, `available` is false and the embed is null.",
+        "operationId": "list_watchlist",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "team",
+                    "player",
+                    "event"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your watched teams, players and events, newest first",
+        "tags": [
+          "watchlist"
+        ]
+      },
+      "post": {
+        "description": "Idempotent: adding something you already watch returns the existing item with 200 instead of 201. A watchlist holds at most 200 items.",
+        "operationId": "add_watchlist_item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchlistItemCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistItemOut"
+                }
+              }
+            },
+            "description": "Already on the watchlist"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The watchlist is full"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Watch a team, player or event",
+        "tags": [
+          "watchlist"
+        ]
+      }
+    },
+    "/v1/watchlist/events": {
+      "get": {
+        "description": "Events involving a watched team or a watched player's team, plus events watched directly. De-duplicated; live events first, then by start time.",
+        "operationId": "list_watchlist_events",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EventSummaryOut"
+                  },
+                  "title": "Response List Watchlist Events",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Live and upcoming events for everything you watch",
+        "tags": [
+          "watchlist"
+        ]
+      }
+    },
+    "/v1/watchlist/{item_id}": {
+      "delete": {
+        "operationId": "remove_watchlist_item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stop watching",
+        "tags": [
+          "watchlist"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Service and reference data.",
+      "name": "meta"
+    },
+    {
+      "description": "Events, odds comparison and line history (synthetic).",
+      "name": "events"
+    },
+    {
+      "description": "Players and prop research (synthetic).",
+      "name": "players"
+    },
+    {
+      "description": "Calculators. Each response shows its working in `steps`.",
+      "name": "quant"
+    },
+    {
+      "description": "Accounts. Registration requires a 21+ attestation.",
+      "name": "auth"
+    },
+    {
+      "description": "Bet tracker. Records bets placed elsewhere; owner-scoped.",
+      "name": "bets"
+    },
+    {
+      "description": "Watched teams, players and events; owner-scoped.",
+      "name": "watchlist"
+    },
+    {
+      "description": "Sportsbook account import. Mock provider only.",
+      "name": "sync"
+    },
+    {
+      "description": "Rule-based assistant. No language model.",
+      "name": "assistant"
+    },
+    {
+      "description": "Administrator overview.",
+      "name": "admin"
+    }
+  ]
+}

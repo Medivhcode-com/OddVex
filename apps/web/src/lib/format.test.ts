@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAge, formatAmerican, formatDecimal, formatLine, formatMoney, formatPercent, formatPrice, titleCase } from "./format";
+import { formatSignedPercent, formatAge, formatAmerican, formatDecimal, formatLine, formatMoney, formatPercent, formatPrice, titleCase } from "./format";
 
 describe("formatAmerican", () => {
   it("signs positive prices and uses a true minus for negatives", () => {
@@ -42,6 +42,17 @@ describe("formatPercent", () => {
   it("does not invent a number for missing values", () => {
     expect(formatPercent(null)).toBe("n/a");
     expect(formatPercent(Number.NaN)).toBe("n/a");
+  });
+});
+
+describe("negative and signed percentages", () => {
+  it("uses a true minus and never prints negative zero", () => {
+    expect(formatPercent(-0.333)).toBe("−33.3%");
+    expect(formatPercent(-0.0001)).toBe("0.0%");
+    expect(formatSignedPercent(0.125)).toBe("+12.5%");
+    expect(formatSignedPercent(-0.02)).toBe("−2.0%");
+    expect(formatSignedPercent(-0.0001)).toBe("0.0%");
+    expect(formatSignedPercent(null)).toBe("n/a");
   });
 });
 

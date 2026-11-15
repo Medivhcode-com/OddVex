@@ -5,6 +5,8 @@ RUN corepack enable
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/types/package.json packages/types/
+# The lockfile covers every workspace package, so each manifest must be present for a frozen install.
+COPY apps/mobile/package.json apps/mobile/
 RUN pnpm install --frozen-lockfile --filter @oddvex/web...
 COPY packages/types packages/types
 COPY apps/web apps/web

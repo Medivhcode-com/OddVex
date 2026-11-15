@@ -1,0 +1,14 @@
+{
+  "_note": "SYNTHETIC payloads that the adapter must reject with ProviderContractError.",
+  "events": [
+    {"reason": "unknown state", "payload": {"eventId": "evt_nba_20260110_9", "leagueKey": "nba", "startsAt": "2026-01-10T19:00:00Z", "state": "POSTPONED_MAYBE", "home": {"teamId": "a"}, "away": {"teamId": "b"}}},
+    {"reason": "timestamp without timezone", "payload": {"eventId": "evt_nba_20260110_9", "leagueKey": "nba", "startsAt": "2026-01-10T19:00:00", "state": "SCHEDULED", "home": {"teamId": "a"}, "away": {"teamId": "b"}}},
+    {"reason": "live event without score", "payload": {"eventId": "evt_nba_20260110_9", "leagueKey": "nba", "startsAt": "2026-01-10T19:00:00Z", "state": "IN_PROGRESS", "home": {"teamId": "a"}, "away": {"teamId": "b"}}}
+  ],
+  "snapshots": [
+    {"reason": "american price inside (-100, 100)", "payload": {"eventId": "e", "marketType": "h2h", "book": "northline", "state": "OPEN", "selections": [{"side": "HOME", "label": "A", "priceAmerican": "-50"}, {"side": "AWAY", "label": "B", "priceAmerican": "+120"}]}},
+    {"reason": "spread without handicap", "payload": {"eventId": "e", "marketType": "spreads", "book": "northline", "state": "OPEN", "selections": [{"side": "HOME", "label": "A", "priceAmerican": "-110"}, {"side": "AWAY", "label": "B", "priceAmerican": "-110"}]}},
+    {"reason": "unknown market type", "payload": {"eventId": "e", "marketType": "alt_lines", "book": "northline", "state": "OPEN", "selections": []}},
+    {"reason": "single selection", "payload": {"eventId": "e", "marketType": "h2h", "book": "northline", "state": "OPEN", "selections": [{"side": "HOME", "label": "A", "priceAmerican": "-110"}]}}
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "_note": "SYNTHETIC sample data. Fictional sportsbooks and prices.",
+  "snapshots": [
+    {
+      "eventId": "evt_nba_20260110_0",
+      "marketType": "h2h",
+      "book": "northline",
+      "state": "OPEN",
+      "updatedAt": "2026-01-10T18:05:30Z",
+      "selections": [
+        {"side": "HOME", "label": "Harbor City Tides", "priceAmerican": "-150"},
+        {"side": "AWAY", "label": "Ironvale Anvils", "priceAmerican": "+130"}
+      ]
+    },
+    {
+      "eventId": "evt_nba_20260110_0",
+      "marketType": "spreads",
+      "book": "Cardinal",
+      "state": "SUSPENDED",
+      "updatedAt": "2026-01-10T18:04:00Z",
+      "selections": [
+        {"side": "HOME", "label": "Harbor City Tides", "handicap": -3.5, "priceAmerican": "-110"},
+        {"side": "AWAY", "label": "Ironvale Anvils", "handicap": 3.5, "priceAmerican": "-110"}
+      ]
+    },
+    {
+      "eventId": "evt_nba_20260110_0",
+      "marketType": "totals",
+      "book": "summit",
+      "state": "OFF"
+    },
+    {
+      "eventId": "evt_soccer_20260109_2",
+      "marketType": "h2h",
+      "book": "kestrel",
+      "state": "CLOSED",
+      "updatedAt": "2026-01-09T15:59:00Z",
+      "selections": [
+        {"side": "HOME", "label": "Aldermoor Athletic", "priceAmerican": "+140"},
+        {"side": "DRAW", "label": "Draw", "priceAmerican": "+230"},
+        {"side": "AWAY", "label": "Brightwater Rovers", "priceAmerican": "+195"}
+      ]
+    },
+    {
+      "eventId": "evt_nba_20260110_0",
+      "marketType": "totals",
+      "book": "oldmill",
+      "state": "OPEN",
+      "updatedAt": "2026-01-10T17:20:00Z",
+      "selections": [
+        {"side": "OVER", "label": "Over", "handicap": 224.5, "priceAmerican": "-108"},
+        {"side": "UNDER", "label": "Under", "handicap": 224.5, "priceAmerican": "-112"}
+      ]
+    }
+  ]
+}

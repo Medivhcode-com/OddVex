@@ -37,7 +37,7 @@ Legend — **Built**: `M1` handled by the current build (local/CI only); `Later`
 | D-18 | Support messages | Email content | Support | User | M | Support tool | Later (M2) | Support/email vendor |
 | D-19 | Community content | Posts, profile, reports | Community | User | M | PostgreSQL | Later (M5) | Public (by design) |
 | D-20 | Waitlist | Email | Launch comms | User | M | TBD | Later (M2, G-06) | Email vendor |
-| D-21 | Sports/odds data | Fixtures (synthetic) | Product | Fixtures / provider | L (non-personal) | PostgreSQL / files | M1 | — |
+| D-21 | Sports/odds data | Synthetic provider output | Product | Synthetic provider (M1) / licensed provider (M2) | L (non-personal) | Not persisted in M1 (served from provider, per ADR-0002); persisted from M2 | M1 | — |
 
 **Not collected (current intent):** date of birth, government ID, SSN, precise geolocation, contacts, payment card data, sportsbook credentials, biometric data. Adding any requires Founder approval (G-13) and counsel review.
 

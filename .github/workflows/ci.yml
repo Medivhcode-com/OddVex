@@ -35,6 +35,37 @@ jobs:
           python scripts/export_openapi.py
           git diff --exit-code -- openapi.json
 
+  api-postgres:
+    name: API on PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: oddvex
+          POSTGRES_PASSWORD: oddvex
+          POSTGRES_DB: oddvex_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U oddvex" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+      - run: pip install -e ".[dev]"
+      - name: Run the suite against PostgreSQL
+        env:
+          # Throwaway credentials for the job's own service container.
+          ODDVEX_TEST_DATABASE_URL: postgresql+psycopg://oddvex:oddvex@localhost:5432/oddvex_test
+        run: pytest -q
+
   web:
     name: Web (lint, types, unit, build)
     runs-on: ubuntu-latest
@@ -54,6 +85,21 @@ jobs:
       - run: pnpm --filter @oddvex/web typecheck
       - run: pnpm --filter @oddvex/web test
       - run: pnpm --filter @oddvex/web build
+
+  mobile:
+    name: Mobile (lint, types, unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @oddvex/mobile lint
+      - run: pnpm --filter @oddvex/mobile typecheck
+      - run: pnpm --filter @oddvex/mobile test
 
   e2e:
     name: End to end (Playwright)
@@ -81,6 +127,31 @@ jobs:
           name: playwright-report
           path: apps/web/test-results
           retention-days: 7
+
+  docker:
+    name: Docker images (build, smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t oddvex-api services/api
+      - name: Build web image
+        run: docker build -t oddvex-web -f apps/web/Dockerfile .
+      - name: Start both and check they answer
+        run: |
+          docker network create oddvex
+          docker run -d --name api --network oddvex -p 8000:8000 oddvex-api
+          docker run -d --name web --network oddvex -p 3000:3000 -e ODDVEX_API_URL=http://api:8000 oddvex-web
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health >/dev/null && curl -fsS http://localhost:3000/ >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/v1/meta
+          curl -fsS -o /dev/null -w "home %{http_code}\n" http://localhost:3000/
+          curl -fsS -o /dev/null -w "app %{http_code}\n" http://localhost:3000/app
+      - name: Container logs
+        if: failure()
+        run: docker logs api; docker logs web
 
   secrets:
     name: Secret scan
