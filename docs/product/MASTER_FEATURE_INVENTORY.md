@@ -46,10 +46,10 @@ Important caveats:
 |---|---|---|---|---|---|---|
 | ODDS-01 | Comparison grid | Moneyline / spread / total across sportsbooks | Free | M1 | Built in M1 | Fixtures |
 | ODDS-02 | Best-line highlight | Best price per outcome, non-colour cue | Free | M1 | Built in M1 | ODDS-01 |
-| ODDS-03 | Odds format toggle | American / decimal / implied % | Free | M1 | M1 — verify | Shared odds maths |
+| ODDS-03 | Odds format toggle | American / decimal / implied % | Free | M1 | Built in M1 | Shared odds maths |
 | ODDS-04 | Price freshness | Per-price "as of" + stale flag | Free | M1 | Built in M1 | DATA-04 |
 | ODDS-05 | Odds filters | Sport, league, market, sportsbook | Free | M1 | Built in M1 | — |
-| ODDS-06 | No-vig & hold inline | Fair price and hold % per market | Free | M1 | M1 — verify | INTL-02 |
+| ODDS-06 | No-vig & hold inline | Fair price and hold % per market | Free | M1 | Built in M1 | INTL-02 |
 | ODDS-07 | Line-movement chart | Historical price/line over time | Free+limits | M2 | Planned | DATA-05; licensed provider with history rights |
 | ODDS-08 | My sportsbooks | Choose books; state availability | Free | M2 | Planned | Sportsbook-by-state reference data; counsel review |
 | ODDS-09 | Outbound sportsbook links | Link out (affiliate or plain) | Free | M3 | Planned | **Founder gate**; affiliate agreements; state affiliate registration review by counsel; ad disclosures |
@@ -96,15 +96,15 @@ Important caveats:
 | TRKR-01 | Manual bet entry | Book, market, selection, odds, stake, date | Free | M1 | Built in M1 | AUTH-01 |
 | TRKR-02 | Manual settlement | Win/loss/push/void/cash-out | Free | M1 | Built in M1 | TRKR-01 |
 | TRKR-03 | Performance summary | P/L, ROI, record; by sport/book/market | Free | M1 | Built in M1 | TRKR-02 |
-| TRKR-04 | Bet list management | Filter, sort, edit, delete | Free | M1 | Built in M1 | — |
-| TRKR-05 | CLV per bet | Manual closing odds in M1 | Free | M1 | M1 — verify | INTL-04 |
+| TRKR-04 | Bet list management | Filter, sort, edit, delete | Free | M1 | Built in M1 (delete in UI; filter and edit in API only; no sort) | — |
+| TRKR-05 | CLV per bet | Manual closing odds in M1 | Free | M1 | Built in M1 (average shown in UI; per-bet value in API only) | INTL-04 |
 | TRKR-06 | Auto settlement & auto closing odds | From results/odds feed | Free | M2 | Planned | Needs licensed provider; DATA-05 |
 | TRKR-07 | CSV export / import | Export M2; import M3 | Free | M2/M3 | Planned | — |
-| TRKR-08 | Results-over-time chart | Cumulative net result | Free | M1 | M1 — verify | TRKR-03 |
+| TRKR-08 | Results-over-time chart | Cumulative net result | Free | M1 | Built in M1 | TRKR-03 |
 | TRKR-09 | Tags & notes | User annotations | Free | M2 | Planned | — |
 | TRKR-10 | Spending-awareness insights | Neutral summaries; optional reminders | Free (never paywalled) | M3 | Planned | RG policy review |
 | TRKR-11 | Mobile tracker | Tracker in Expo app | Free | M3 | Planned | MOB-02 |
-| TRKR-12 | Multi-leg bets | Parlays with legs in tracker | Free | M1 | M1 — verify | TRKR-01 |
+| TRKR-12 | Multi-leg bets | Parlays with legs in tracker | Free | M1 | Built in M1 | TRKR-01 |
 | TRKR-13 | Advanced analytics | Deeper breakdowns, custom date ranges | Premium | M4 | Planned | PREM-01 |
 
 ## G. Sportsbook Sync
@@ -114,12 +114,12 @@ Important caveats:
 | SYNC-01 | Sync adapter interface | Provider-agnostic contract | n/a | M1 | Built in M1 | — |
 | SYNC-02 | Mock sync adapter | Fictional sportsbook, synthetic bets | Free | M1 | Built in M1 | SYNC-01, fixtures |
 | SYNC-03 | Connection management | Status, last synced, disconnect | Free | M1 | Built in M1 | SYNC-02 |
-| SYNC-04 | De-duplication | Synced vs. manual bet matching | Free | M1 | M1 — verify | TRKR-01 |
+| SYNC-04 | De-duplication | Synced vs. manual bet matching | Free | M1 | Built in M1 (re-import de-duplication only; no matching against manual bets) | TRKR-01 |
 | SYNC-05 | Real vendor integration | Authorized third-party sync vendor | Free+limits or Premium (undecided) | M3 | Planned | **Founder gate** (paid vendor); vendor due diligence; counsel review of sportsbook ToS exposure |
 | SYNC-06 | No credential storage | Vendor-hosted link; tokens only | n/a | M1 design / M3 | Principle (enforced with SYNC-05) | Vendor capability |
 | SYNC-07 | Scheduled re-sync | Background sync, retry, error states | as SYNC-05 | M3 | Planned | SYNC-05; job runner |
-| SYNC-08 | Sync consent & disclosures | Clear consent before connecting | Free | M1 (mock) / M3 | M1 — verify | Counsel-reviewed copy for real vendor |
-| SYNC-09 | Delete synced data on disconnect | User choice to purge | Free | M2 | Planned | AUTH-06 |
+| SYNC-08 | Sync consent & disclosures | Clear consent before connecting | Free | M1 (mock) / M3 | Built in M1 (mock-only notice; real consent flow Planned) | Counsel-reviewed copy for real vendor |
+| SYNC-09 | Delete synced data on disconnect | User choice to purge | Free | M1 | Built in M1 (UI always purges; keep-data option in API only) | AUTH-06 |
 
 ## H. OddVex AI
 
@@ -144,9 +144,9 @@ Important caveats:
 |---|---|---|---|---|---|---|
 | PRLY-01 | Parlay builder | Add legs; combined odds/payout | Free | M1 | Built in M1 | INTL-05 |
 | PRLY-02 | Combined probability | Implied probability + per-leg breakdown | Free | M1 | Built in M1 | INTL-01 |
-| PRLY-03 | Correlation warning | Rule-based same-game/related-leg warning | Free | M1 | M1 — verify | Leg metadata (game/player IDs) |
+| PRLY-03 | Correlation warning | Rule-based same-game/related-leg warning | Free | M1 | Built in M1 (same-event rule only) | Leg metadata (game/player IDs) |
 | PRLY-04 | Parlay price comparison | Across sportsbooks | Premium | M3 | Planned | Provider coverage of parlay/SGP pricing (may not be available) |
-| PRLY-05 | Send to tracker / save drafts | Tracker hand-off (M1?), drafts (M2) | Free | M1/M2 | M1 — verify / Planned | TRKR-12 |
+| PRLY-05 | Send to tracker / save drafts | Tracker hand-off (M1?), drafts (M2) | Free | M1/M2 | Planned | TRKR-12 |
 | PRLY-06 | Quantified correlation | Model-based estimates | Premium | M4 | Planned | Historical data; model validation |
 | PRLY-07 | Mobile parlay research | In Expo app | Free | M3 | Planned | MOB-01 |
 
@@ -194,15 +194,15 @@ Important caveats:
 | ID | Feature | Description | Tier (proposal) | MS | Status | Dependencies |
 |---|---|---|---|---|---|---|
 | AUTH-01 | Email/password auth | Signup, login | Free | M1 | Built in M1 | — |
-| AUTH-02 | 21+ attestation & legal acceptance | Recorded with timestamp/version | Free | M1 | M1 — verify | Draft legal pages; counsel to confirm adequacy |
+| AUTH-02 | 21+ attestation & legal acceptance | Recorded with timestamp/version | Free | M1 | Built in M1 (attestation timestamp; no legal-version record) | Draft legal pages; counsel to confirm adequacy |
 | AUTH-03 | Sessions & logout | Session lifecycle | Free | M1 | Built in M1 | — |
 | AUTH-04 | Email verification & password reset | Via transactional email | Free | M2 | Planned | **Founder gate** (real customer email, paid email service) |
 | AUTH-05 | MFA / passkeys / social login | Stronger auth options | Free | M3 | Planned | — |
-| AUTH-06 | Account deletion & data export | Self-serve | Free | M2 | Planned | Required before any real user; store account-deletion rules |
+| AUTH-06 | Account deletion & data export | Self-serve | Free | M1 / M2 | Deletion built in M1; export Planned | Required before any real user; store account-deletion rules |
 | AUTH-07 | RBAC | `user`, `admin` roles | n/a | M1 | Built in M1 | — |
 | SET-01 | Settings | Profile, odds format, time zone | Free | M1 | Built in M1 | — |
 | SET-02 | Notification preferences | Per-channel, per-type | Free | M3 | Planned | NOTF-01/02 |
-| SET-03 | RG resources & tools | Links (M1); reminders/time-outs (M3) | Free (never paywalled) | M1/M3 | M1 — verify / Planned | RG policy |
+| SET-03 | RG resources & tools | Links (M1); reminders/time-outs (M3) | Free (never paywalled) | M1/M3 | Built in M1 (links) / Planned | RG policy |
 | NOTF-01 | Push notifications | APNs/FCM via Expo | Free | M3 | Planned | Store notification policies; consent |
 | NOTF-02 | Email notifications | Digest/alerts | Free | M3 | Planned | **Founder gate** (real email); CAN-SPAM review |
 | DATA-01 | Synthetic fixtures | Fictional teams/players/sportsbooks | n/a | M1 | Built in M1 | — |
