@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/*
+ * OddVex design tokens. Dark is the primary experience; light is a peer, not an inversion.
+ * Components consume the semantic names below, never raw hex values.
+ * Reference: docs/design/DESIGN_SYSTEM.md
+ */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ov-bg: #090d16;
+  --ov-surface: #121a29;
+  --ov-raised: #1b2638;
+  --ov-border: #2a3648;
+  --ov-border-strong: #3b4a61;
+  --ov-text: #f5f8fc;
+  --ov-muted: #98a7ba;
+  --ov-accent: #43e6b1;
+  --ov-accent-ink: #04241a;
+  --ov-accent-soft: rgb(67 230 177 / 0.12);
+  --ov-second: #748bff;
+  --ov-second-soft: rgb(116 139 255 / 0.14);
+  --ov-warn: #f5b84b;
+  --ov-warn-soft: rgb(245 184 75 / 0.13);
+  --ov-error: #f16b77;
+  --ov-error-soft: rgb(241 107 119 / 0.13);
+  --ov-grid: rgb(152 167 186 / 0.16);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ov-bg: #f4f6fa;
+  --ov-surface: #ffffff;
+  --ov-raised: #ebeff5;
+  --ov-border: #d3dae5;
+  --ov-border-strong: #aab5c5;
+  --ov-text: #0d1422;
+  --ov-muted: #515f75;
+  --ov-accent: #08805c;
+  --ov-accent-ink: #ffffff;
+  --ov-accent-soft: rgb(8 128 92 / 0.1);
+  --ov-second: #3f52d0;
+  --ov-second-soft: rgb(63 82 208 / 0.1);
+  --ov-warn: #8f5a00;
+  --ov-warn-soft: rgb(190 124 0 / 0.12);
+  --ov-error: #bd2f40;
+  --ov-error-soft: rgb(189 47 64 / 0.1);
+  --ov-grid: rgb(81 95 117 / 0.18);
+}
+
+@theme inline {
+  --color-bg: var(--ov-bg);
+  --color-surface: var(--ov-surface);
+  --color-raised: var(--ov-raised);
+  --color-line: var(--ov-border);
+  --color-line-strong: var(--ov-border-strong);
+  --color-ink: var(--ov-text);
+  --color-muted: var(--ov-muted);
+  --color-accent: var(--ov-accent);
+  --color-accent-ink: var(--ov-accent-ink);
+  --color-accent-soft: var(--ov-accent-soft);
+  --color-second: var(--ov-second);
+  --color-second-soft: var(--ov-second-soft);
+  --color-warn: var(--ov-warn);
+  --color-warn-soft: var(--ov-warn-soft);
+  --color-error: var(--ov-error);
+  --color-error-soft: var(--ov-error-soft);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+  --radius-cell: 6px;
+  --radius-panel: 12px;
+  --text-display: clamp(2.5rem, 5.2vw + 1rem, 4.75rem);
+  --text-display--line-height: 1.02;
+  --text-display--letter-spacing: -0.035em;
+  --text-title: clamp(1.75rem, 2vw + 1rem, 2.5rem);
+  --text-title--line-height: 1.1;
+  --text-title--letter-spacing: -0.025em;
+  --ease-settle: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+html {
+  background: var(--ov-bg);
+  color: var(--ov-text);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--ov-bg);
+  color: var(--ov-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers that people compare line-by-line: prices, lines, money. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ov-second);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--ov-second-soft);
+}
+
+.prose-ov :where(h2) {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+.prose-ov :where(h3) {
+  font-weight: 600;
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+.prose-ov :where(p, ul, ol) {
+  color: var(--ov-muted);
+  line-height: 1.7;
+  margin-bottom: 1rem;
+  max-width: 68ch;
+}
+.prose-ov :where(ul) {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.prose-ov :where(ol) {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.prose-ov :where(a) {
+  color: var(--ov-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose-ov :where(strong) {
+  color: var(--ov-text);
+  font-weight: 600;
+}
+
+@keyframes ov-skeleton {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.ov-skeleton {
+  background: var(--ov-raised);
+  border-radius: var(--radius-cell);
+  animation: ov-skeleton 1.4s ease-in-out infinite;
+}
+
+/* The one orchestrated moment: the hero board resolves its best prices on load. */
+@keyframes ov-resolve {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ov-resolve {
+  animation: ov-resolve 0.5s var(--ease-settle) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-skeleton,
+  .ov-resolve {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

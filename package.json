@@ -1,0 +1,14 @@
+{
+  "name": "oddvex",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev:web": "pnpm --filter @oddvex/web dev",
+    "build:web": "pnpm --filter @oddvex/web build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "types:generate": "pnpm --filter @oddvex/types generate"
+  }
+}
