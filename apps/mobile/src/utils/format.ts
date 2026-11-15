@@ -29,7 +29,25 @@ export function formatLine(line: number | null | undefined, opts: { signed?: boo
 
 export function formatPercent(probability: number | null | undefined, digits = 1): string {
   if (probability === null || probability === undefined || Number.isNaN(probability)) return 'n/a';
-  return `${(probability * 100).toFixed(digits)}%`;
+  const text = Math.abs(probability * 100).toFixed(digits);
+  // A true minus sign, and never a "-0.0%".
+  return `${probability < 0 && Number(text) !== 0 ? '−' : ''}${text}%`;
+}
+
+/** A fraction as a signed percentage: 0.125 is "+12.5%", -0.02 is "−2.0%", zero is unsigned. */
+export function formatSignedPercent(fraction: number | null | undefined, digits = 1): string {
+  if (fraction === null || fraction === undefined || Number.isNaN(fraction)) return 'n/a';
+  const text = Math.abs(fraction * 100).toFixed(digits);
+  if (Number(text) === 0) return `${text}%`;
+  return `${fraction > 0 ? '+' : '−'}${text}%`;
+}
+
+/** "$1,250.00", "−$25.00"; with `signed`, gains carry a plus: "+$22.73". Grouping is done by hand so it does not depend on the engine's Intl data. */
+export function formatMoney(amount: number, opts: { signed?: boolean } = {}): string {
+  const [whole, cents] = Math.abs(amount).toFixed(2).split('.');
+  const abs = `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${cents}`;
+  if (opts.signed) return amount > 0 ? `+$${abs}` : amount < 0 ? `−$${abs}` : `$${abs}`;
+  return amount < 0 ? `−$${abs}` : `$${abs}`;
 }
 
 /** "42s ago", "6 min ago", "3h ago". `now` is injectable so the output is testable. */
@@ -53,4 +71,24 @@ export function formatStart(iso: string, timeZone?: string): string {
     minute: '2-digit',
     timeZone,
   }).format(new Date(iso));
+}
+
+/** "Nov 15" in the device's time zone. */
+export function formatDay(iso: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone }).format(new Date(iso));
+}
+
+/** "player_prop" becomes "Player Prop". Used for API keys such as markets and results. */
+export function titleCase(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** What a person typed as odds, ready for the API: trimmed, typographic minus signs made plain. The API parses it. */
+export function cleanOdds(raw: string): string {
+  return raw.trim().replace(/[−–]/g, '-');
+}
+
+/** Typed American odds shown back with a sign: "150" is "+150", "-110" is "−110". Display only. */
+export function showTypedAmerican(odds: string): string {
+  return odds.startsWith('-') || odds.startsWith('+') ? odds.replace('-', '−') : `+${odds}`;
 }

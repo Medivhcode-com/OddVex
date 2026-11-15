@@ -12,7 +12,7 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 | API | `ruff check`, `ruff format --check`, OpenAPI export `--check` | Clean |
 | Web | Playwright end to end, real API + production build, desktop and phone viewports, including automated WCAG A/AA checks in both themes | 149 passed |
 | Web | ESLint, `tsc --noEmit`, Vitest | Clean, 12 unit tests passed |
-| Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 42 tests passed |
+| Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 192 tests passed |
 | Mobile | `expo export` for iOS and Android (JS bundle only) | Bundled |
 
 ## Built
@@ -24,7 +24,9 @@ and sportsbooks. Nothing has been deployed, purchased or published.
   sportsbook sync, OddVex AI (rule-based), settings with account deletion, login and signup with 21+ confirmation.
 - **API:** quant engine, synthetic provider behind a provider contract, auth, bets, sync layer with mock provider,
   assistant, admin overview endpoint, audit log, rate limiting, Alembic migration, demo seed script.
-- **Mobile:** games list, game detail with odds comparison, settings.
+- **Mobile:** games, game detail with odds comparison, props board and analyzer, calculators and parlay research,
+  bet tracker with settlement and mock sync, watchlist, OddVex AI, sign-in and account settings. Data export, the
+  profit chart and the performance breakdowns are web-only.
 - **Foundation:** constitution, agent guides, CODEOWNERS, PR and issue templates, CI workflow, Docker files, ADRs,
   design system and showcase page with a visual regression baseline.
 
@@ -49,7 +51,8 @@ email (verification, password reset), historical odds storage against a real fee
 ## Not verified
 
 - `docker-compose.yml` has not been started. The two images build and answer requests in CI.
-- The mobile app has not been run on a device or simulator.
+- The mobile app has not been run on a device or simulator. Layout, navigation between tabs, keyboard handling,
+  secure token storage on real hardware, VoiceOver and TalkBack are all unobserved.
 - Accessibility has automated checks only. No screen reader or keyboard-only walkthrough has been done.
 - Competitor and provider research relied on search extracts, not direct page visits. Re-check every price.
 
@@ -63,6 +66,5 @@ infrastructure, store submission, analytics instrumentation, error monitoring.
 
 - The assistant matches keywords. It handles a small set of question types and declines the rest.
 - Prices refresh on a timer, not by push.
-- The mobile app does not have the watchlist, tracker or calculators yet.
 - Watchlist items do not trigger alerts.
 - Legal pages are unreviewed drafts and say so. The contact page has no address until one is configured.

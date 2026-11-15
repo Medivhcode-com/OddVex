@@ -3,6 +3,13 @@ import {
   ApiError,
   ApiUnavailableError,
   apiGet,
+  apiRequest,
+  askAssistant,
+  deleteBet,
+  describeError,
+  getBets,
+  setAuthToken,
+  setUnauthorizedHandler,
   getEventOdds,
   getEvents,
   getMeta,
@@ -129,5 +136,114 @@ describe('apiGet', () => {
     });
     const error = await apiGet('/v1/meta').catch((caught: unknown) => caught);
     expect(error).toMatchObject({ name: 'ApiError', code: 'invalid_response' });
+  });
+});
+
+describe('signed-in requests', () => {
+  afterEach(() => {
+    setAuthToken(null);
+    setUnauthorizedHandler(null);
+  });
+
+  it('sends the bearer token on the user\'s own data and never on public data', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await getBets();
+    await getEvents();
+
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({ accept: 'application/json', authorization: 'Bearer token-1' });
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({ accept: 'application/json' });
+  });
+
+  it('refuses a signed-in request without a token, before any network call', async () => {
+    const onUnauthorized = jest.fn();
+    setUnauthorizedHandler(onUnauthorized);
+
+    const error = await getBets().catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ name: 'ApiError', status: 401, code: 'not_logged_in' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('sends a JSON body with its content type and defaults to POST', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await apiRequest('/v1/quant/convert', { body: { odds: '-110', odds_format: 'american' } });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:8000/v1/quant/convert');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ accept: 'application/json', 'content-type': 'application/json' });
+    expect(JSON.parse(init.body)).toEqual({ odds: '-110', odds_format: 'american' });
+  });
+
+  it('treats 204 as success with no body', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: async () => {
+        throw new SyntaxError('No content');
+      },
+    });
+
+    await expect(deleteBet('bet 1')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/v1/bets/bet%201');
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  });
+
+  it('reports a rejected token to the session, and still throws the API error', async () => {
+    const onUnauthorized = jest.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'unauthorized', message: 'Token expired' } }, 401));
+
+    const error = await getBets().catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: 401, code: 'unauthorized', message: 'Token expired' });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not end the session for a 401 on a request that sent no token', async () => {
+    const onUnauthorized = jest.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'invalid_credentials', message: 'Incorrect email or password' } }, 401));
+
+    await apiRequest('/v1/auth/login', { body: { email: 'a@b.test', password: 'x' } }).catch(() => {});
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('sends the token to the assistant only when there is one', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ answer: 'ok' }));
+
+    await askAssistant('What is expected value?');
+    setAuthToken('token-1');
+    await askAssistant('How are my bets doing?');
+
+    expect(fetchMock.mock.calls[0][1].headers.authorization).toBeUndefined();
+    expect(fetchMock.mock.calls[1][1].headers.authorization).toBe('Bearer token-1');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ message: 'How are my bets doing?' });
+  });
+});
+
+describe('describeError', () => {
+  it('uses the web wording for rate limits and an unreachable service', () => {
+    expect(describeError(new ApiError(429, 'rate_limited', 'Rate limit exceeded'), 'fallback')).toBe(
+      'Too many attempts. Wait a minute, then try again.',
+    );
+    expect(describeError(new ApiUnavailableError(), 'fallback')).toBe(
+      "OddVex can't reach its data service right now. Try again in a moment.",
+    );
+  });
+
+  it("passes the API's own message through, and falls back for anything else", () => {
+    expect(describeError(new ApiError(422, 'invalid_odds', 'American odds cannot be between -100 and 100.'), 'fallback')).toBe(
+      'American odds cannot be between -100 and 100.',
+    );
+    expect(describeError(new Error('boom'), 'The bet was not saved. Try again.')).toBe('The bet was not saved. Try again.');
   });
 });

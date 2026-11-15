@@ -2,8 +2,7 @@ import { IBMPlexMono_400Regular } from '@expo-google-fonts/ibm-plex-mono/400Regu
 import { IBMPlexMono_500Medium } from '@expo-google-fonts/ibm-plex-mono/500Medium';
 import { IBMPlexMono_600SemiBold } from '@expo-google-fonts/ibm-plex-mono/600SemiBold';
 import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import { NativeTabs } from 'expo-router/native-tabs';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -13,11 +12,14 @@ import { useTheme } from '@/hooks/use-theme';
 import { MonoFontContext } from '@/providers/fonts';
 import { MetaProvider } from '@/providers/meta';
 import { OddsFormatProvider } from '@/providers/odds-format';
+import { SessionProvider } from '@/providers/session';
+import { useStackOptions } from '@/hooks/use-stack-options';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const theme = useTheme();
+  const stackOptions = useStackOptions();
   const light = useColorScheme() === 'light';
   const [fontsLoaded, fontError] = useFonts({ IBMPlexMono_400Regular, IBMPlexMono_500Medium, IBMPlexMono_600SemiBold });
   const fontsSettled = fontsLoaded || fontError !== null;
@@ -48,21 +50,14 @@ export default function RootLayout() {
         <MetaProvider>
           <OddsFormatProvider>
             <StatusBar style={light ? 'dark' : 'light'} />
-            <NativeTabs
-              backgroundColor={theme.surface}
-              tintColor={theme.accent}
-              iconColor={{ default: theme.muted, selected: theme.accent }}
-              indicatorColor={theme.raised}
-              labelStyle={{ default: { color: theme.muted }, selected: { color: theme.text } }}>
-              <NativeTabs.Trigger name="(games)">
-                <NativeTabs.Trigger.Label>Games</NativeTabs.Trigger.Label>
-                <NativeTabs.Trigger.Icon sf="sportscourt" md="scoreboard" />
-              </NativeTabs.Trigger>
-              <NativeTabs.Trigger name="(settings)">
-                <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
-                <NativeTabs.Trigger.Icon sf="gearshape" md="settings" />
-              </NativeTabs.Trigger>
-            </NativeTabs>
+            <SessionProvider>
+              {/* Log in and sign up sit above the tabs as modals, so they can open from any screen and close back to it. */}
+              <Stack screenOptions={stackOptions}>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="login" options={{ title: 'Log in', presentation: 'modal' }} />
+                <Stack.Screen name="signup" options={{ title: 'Create account', presentation: 'modal' }} />
+              </Stack>
+            </SessionProvider>
           </OddsFormatProvider>
         </MetaProvider>
       </MonoFontContext>

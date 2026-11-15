@@ -7,11 +7,15 @@ import { MARKETS, type EventSummary, type Market, type OddsComparison } from '@/
 import { Segmented } from '@/components/choice';
 import { EventStatus } from '@/components/game-card';
 import { ConsensusRow, OddsRow, type OddsColumn } from '@/components/odds-row';
-import { ErrorState, Notice, Panel, SkeletonCards } from '@/components/states';
+import { QuickBet, quickBetOptions } from '@/components/quick-bet';
+import { Button, ErrorState, Notice, Panel, PanelHeading, SkeletonCards } from '@/components/states';
 import { Num, Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
 import { useResource } from '@/hooks/use-resource';
 import { useTheme } from '@/hooks/use-theme';
+import { useWatchlist, watchId } from '@/hooks/use-watchlist';
+import { WatchButton } from '@/components/watch-button';
+import { openLogin, useSession } from '@/providers/session';
 import { fontSize, space } from '@/theme';
 import { formatAge } from '@/utils/format';
 
@@ -80,6 +84,42 @@ function OddsBoard({ odds, now }: { odds: OddsComparison; now: Date }) {
   );
 }
 
+/** Follow toggles for the game and both teams. */
+function Following({ event }: { event: EventSummary }) {
+  const watchlist = useWatchlist();
+  return (
+    <View style={styles.follow}>
+      <WatchButton kind="event" refId={event.id} name="this game" itemId={watchId(watchlist.data, 'event', event.id)} />
+      <WatchButton kind="team" refId={event.away_team.id} name={event.away_team.name} itemId={watchId(watchlist.data, 'team', event.away_team.id)} />
+      <WatchButton kind="team" refId={event.home_team.id} name={event.home_team.name} itemId={watchId(watchlist.data, 'team', event.home_team.id)} />
+    </View>
+  );
+}
+
+/** "Track a bet on this game": the quick-bet form when logged in, a prompt to log in otherwise. */
+function TrackBet({ event, odds }: { event: EventSummary; odds: OddsComparison }) {
+  const session = useSession();
+  const options = quickBetOptions(odds);
+  if (event.status === 'final' || options.length === 0) return null;
+  return (
+    <Panel>
+      <View style={styles.scoreboard}>
+        <PanelHeading title="Track a bet on this game" description="OddVex records the bet. It does not place it." />
+        {session.user ? (
+          <QuickBet key={odds.market} event={event} market={odds.market} options={options} onSaved={() => session.changed('bets')} />
+        ) : (
+          <>
+            <Txt variant="secondary" tone="muted">
+              Log in to add this game to your tracker.
+            </Txt>
+            <Button label="Log in" variant="secondary" accessibilityLabel="Log in to track a bet" onPress={openLogin} />
+          </>
+        )}
+      </View>
+    </Panel>
+  );
+}
+
 export function GameDetailScreen({ eventId }: { eventId: string }) {
   const theme = useTheme();
   const now = useNow();
@@ -101,6 +141,8 @@ export function GameDetailScreen({ eventId }: { eventId: string }) {
       style={{ backgroundColor: theme.bg }}
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
+      automaticallyAdjustKeyboardInsets
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl refreshing={odds.refreshing || event.refreshing} onRefresh={refresh} tintColor={theme.muted} />
       }>
@@ -109,6 +151,10 @@ export function GameDetailScreen({ eventId }: { eventId: string }) {
       />
 
       {summary ? <Scoreboard event={summary} /> : null}
+      {summary ? <Following event={summary} /> : null}
+      {summary?.status === 'final' ? (
+        <Notice tone="neutral" title="This game is over" text="Its markets are closed, so there are no current prices." />
+      ) : null}
 
       <Segmented label="Market" options={markets} value={market} onChange={setMarket} />
 
@@ -127,6 +173,7 @@ export function GameDetailScreen({ eventId }: { eventId: string }) {
             sportsbook&apos;s margin on this market. Implied probability includes that margin; no-vig consensus removes
             it.
           </Txt>
+          {summary ? <TrackBet event={summary} odds={odds.data} /> : null}
         </>
       ) : null}
     </ScrollView>
@@ -139,5 +186,6 @@ const styles = StyleSheet.create({
   teamRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[3] },
   teamName: { flex: 1, gap: 2 },
   summary: { paddingBottom: space[3] },
+  follow: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
   none: { textAlign: 'center', paddingVertical: space[6] },
 });

@@ -1,15 +1,17 @@
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 
-import { getEvents, getLeagues } from '@/api/client';
+import { getEvents, getLeagues, getWatchlistEvents } from '@/api/client';
 import type { EventStatus, EventSummary, League } from '@/api/types';
 import { FilterChips } from '@/components/choice';
 import { GameCard } from '@/components/game-card';
-import { EmptyState, ErrorState, Notice, SkeletonCards } from '@/components/states';
+import { Button, EmptyState, ErrorState, Notice, Panel, SkeletonCards } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useResource } from '@/hooks/use-resource';
 import { useTheme } from '@/hooks/use-theme';
+import { useWatchlist } from '@/hooks/use-watchlist';
+import { useSession } from '@/providers/session';
 import { useMeta } from '@/providers/meta';
 import { space } from '@/theme';
 
@@ -31,7 +33,92 @@ export function leagueLabel(leagues: readonly League[], key: string): string {
   return leagues.find((league) => league.key === key)?.name ?? key.toUpperCase();
 }
 
+const WATCHED_SHOWN = 6;
+
+/** "Your watchlist": live and upcoming games for what the user follows, and the players they follow. */
+export function Watchlist({ userId, leagues }: { userId: string; leagues: readonly League[] }) {
+  const router = useRouter();
+  const { revision } = useSession();
+  const items = useWatchlist();
+  const events = useResource(`watchlist-events:${userId}`, getWatchlistEvents, revision.watchlist);
+  const players = (items.data ?? []).filter((item) => item.kind === 'player');
+  const retry = () => {
+    items.reload();
+    events.reload();
+  };
+
+  return (
+    <View style={styles.watchlist}>
+      <Txt variant="heading" accessibilityRole="header">
+        Your watchlist
+      </Txt>
+      {items.status === 'loading' || events.status === 'loading' ? (
+        <SkeletonCards label="Loading your watchlist" count={1} />
+      ) : items.status === 'error' || events.status === 'error' ? (
+        <Panel>
+          <View style={styles.watchError} accessibilityRole="alert">
+            <Txt variant="secondary" tone="muted">
+              OddVex can&apos;t reach its data service, so your watchlist did not load. Your follows are safe.
+            </Txt>
+            <Button label="Try again" variant="secondary" accessibilityLabel="Try loading your watchlist again" onPress={retry} />
+          </View>
+        </Panel>
+      ) : (items.data ?? []).length === 0 ? (
+        <EmptyState title="Nothing followed yet" body="Open a game or a player and choose Follow. Their upcoming games show up here." />
+      ) : (
+        <>
+          {(events.data ?? []).length ? (
+            (events.data ?? []).slice(0, WATCHED_SHOWN).map((event) => (
+              <Link key={event.id} href={{ pathname: '/event/[id]', params: { id: event.id } }} asChild>
+                <GameCard event={event} leagueName={leagueLabel(leagues, event.league)} />
+              </Link>
+            ))
+          ) : (
+            <Txt variant="secondary" tone="muted">
+              No live or upcoming games for what you follow.
+            </Txt>
+          )}
+          {players.length ? (
+            <View style={styles.players}>
+              {players.map((item) => (
+                <Button
+                  key={item.id}
+                  label={item.label}
+                  variant="ghost"
+                  compact
+                  accessibilityLabel={`${item.label}, followed player`}
+                  accessibilityHint="Opens the prop analyzer for this player"
+                  onPress={() => router.push({ pathname: '/player/[id]', params: { id: item.ref_id } })}
+                />
+              ))}
+            </View>
+          ) : null}
+        </>
+      )}
+    </View>
+  );
+}
+
+/** The way in to OddVex AI from the first screen. */
+function AskCard() {
+  const router = useRouter();
+  return (
+    <Panel>
+      <View style={styles.ask}>
+        <Txt variant="heading" accessibilityRole="header">
+          Ask OddVex AI
+        </Txt>
+        <Txt variant="secondary" tone="muted">
+          Find a best price, check a player&apos;s recent form or get a formula explained, with sources.
+        </Txt>
+        <Button label="Ask a question" variant="secondary" compact onPress={() => router.push('/assistant')} />
+      </View>
+    </Panel>
+  );
+}
+
 export function GamesScreen() {
+  const session = useSession();
   const theme = useTheme();
   const meta = useMeta();
   const [league, setLeague] = useState<string | null>(null);
@@ -58,6 +145,8 @@ export function GamesScreen() {
       refreshControl={<RefreshControl refreshing={events.refreshing} onRefresh={refresh} tintColor={theme.muted} />}
       ListHeaderComponent={
         <View style={styles.header}>
+          <AskCard />
+          {session.user ? <Watchlist userId={session.user.id} leagues={leagueList} /> : null}
           <View style={styles.chips}>
             <FilterChips
               label="Filter by league"
@@ -109,7 +198,11 @@ export function GamesScreen() {
 
 const styles = StyleSheet.create({
   content: { paddingHorizontal: space[4], paddingBottom: space[8] },
-  header: { gap: space[2], marginBottom: space[2] },
+  header: { gap: space[3], marginBottom: space[2], paddingTop: space[4] },
+  watchlist: { gap: space[3] },
+  watchError: { gap: space[3] },
+  players: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
+  ask: { gap: space[2] },
   chips: { marginHorizontal: -space[4] },
   sectionHeader: {
     flexDirection: 'row',

@@ -21,6 +21,7 @@ export type ThemeColors = {
   warn: string;
   warnSoft: string;
   error: string;
+  errorSoft: string;
 };
 
 export const colors: { dark: ThemeColors; light: ThemeColors } = {
@@ -39,6 +40,7 @@ export const colors: { dark: ThemeColors; light: ThemeColors } = {
     warn: '#F5B84B',
     warnSoft: 'rgba(245, 184, 75, 0.12)',
     error: '#F16B77',
+    errorSoft: 'rgba(241, 107, 119, 0.12)',
   },
   light: {
     bg: '#F4F6FA',
@@ -48,13 +50,14 @@ export const colors: { dark: ThemeColors; light: ThemeColors } = {
     borderStrong: '#AAB5C5',
     text: '#0D1422',
     muted: '#515F75',
-    accent: '#08805C',
+    accent: '#06694B',
     accentInk: '#FFFFFF',
-    accentSoft: 'rgba(8, 128, 92, 0.10)',
+    accentSoft: 'rgba(6, 105, 75, 0.10)',
     second: '#3F52D0',
     warn: '#8F5A00',
     warnSoft: 'rgba(143, 90, 0, 0.10)',
     error: '#BD2F40',
+    errorSoft: 'rgba(189, 47, 64, 0.08)',
   },
 };
 
