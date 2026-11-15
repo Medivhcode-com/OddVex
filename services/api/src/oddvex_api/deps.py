@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from .auth.security import decode_access_token
+from .board import Board
 from .cache import Cache
 from .config import Settings
 from .db import AuditLog, User
@@ -126,3 +127,10 @@ def write_audit(
             details=details,
         )
     )
+
+
+def get_board(provider: ProviderDep, settings: SettingsDep, cache: CacheDep) -> Board:
+    return Board(provider, settings, cache)
+
+
+BoardDep = Annotated[Board, Depends(get_board)]
