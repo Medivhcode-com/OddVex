@@ -38,6 +38,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your alert rules, newest first
+         * @description Each rule has a one-line `summary` and embeds the current event or team from the data provider. When the provider no longer has it, `available` is false.
+         */
+        get: operations["list_alerts"];
+        put?: never;
+        /**
+         * Create an alert rule
+         * @description `kind` selects the rule type and its fields. The event must exist (`422 unknown_event`) and must not be over (`422 event_not_open`); the market and outcome must fit it. Creating a rule identical to one of your active rules returns that rule with 200. At most 100 active rules per user.
+         *
+         *     Alerts are delivered in the app only. There is no background worker: rules are evaluated when you read your notifications or call `POST /v1/alerts/evaluate`.
+         */
+        post: operations["create_alert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/alerts/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Evaluate your active alert rules now
+         * @description Checks every active rule against the current data, creates the notifications that are due and updates rule states. Calling it again right away changes nothing.
+         */
+        post: operations["evaluate_alerts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/alerts/{alert_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an alert rule
+         * @description Notifications the rule already created are kept.
+         */
+        delete: operations["delete_alert"];
+        options?: never;
+        head?: never;
+        /**
+         * Pause, resume or re-arm an alert rule
+         * @description `state: paused` pauses an active rule. `state: active` resumes a paused rule or re-arms a triggered one so it can fire again; a re-armed `line_move` rule takes the current consensus line as its new baseline. Re-arming needs the event to still be open (`422 event_not_open`).
+         */
+        patch: operations["update_alert"];
+        trace?: never;
+    };
     "/v1/assistant/query": {
         parameters: {
             query?: never;
@@ -107,7 +177,7 @@ export interface paths {
         put?: never;
         /**
          * Record a bet you placed elsewhere
-         * @description OddVex never places wagers. This only records a bet for tracking.
+         * @description OddVex never places wagers. This only records a bet for tracking. If you set a weekly staking reminder and this bet takes the week's total to or past it, a `stake_reminder` notification is created; the bet is saved either way.
          */
         post: operations["create_bet"];
         delete?: never;
@@ -127,7 +197,7 @@ export interface paths {
         put?: never;
         /**
          * Settle your pending bets from final scores
-         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new.
+         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new. Each settled bet also creates a `bet_settled` notification.
          */
         post: operations["auto_settle_bets"];
         delete?: never;
@@ -296,7 +366,7 @@ export interface paths {
         post?: never;
         /**
          * Delete the account and all of its data
-         * @description Permanently deletes the user, their bets, bet legs, watchlist, sync connections and import runs. An audit entry containing only the opaque user id is retained.
+         * @description Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections and import runs. An audit entry containing only the opaque user id is retained.
          */
         delete: operations["delete_me"];
         options?: never;
@@ -313,10 +383,34 @@ export interface paths {
         };
         /**
          * Download everything stored about your account
-         * @description One JSON document with your profile, bets, watchlist, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.
+         * @description One JSON document with your profile, bets, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.
          */
         get: operations["export_my_data"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Which kinds of notification you receive
+         * @description Every kind is enabled until you switch it off. Delivery is in-app only.
+         */
+        get: operations["get_notification_preferences"];
+        /**
+         * Switch notification kinds on or off
+         * @description Kinds left out of `in_app` keep their current value. A disabled kind creates no notification; alert rules still fire and change state.
+         */
+        put: operations["update_notification_preferences"];
         post?: never;
         delete?: never;
         options?: never;
@@ -344,6 +438,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/stake-reminder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your weekly staking reminder and this week's total
+         * @description A responsible-gambling tool. It is a reminder, not a limit: OddVex never blocks or rejects a bet you record. When your weekly total goes from below the threshold to at or above it you get one `stake_reminder` notification for that week.
+         */
+        get: operations["get_stake_reminder"];
+        /**
+         * Set or turn off your weekly staking reminder
+         * @description A responsible-gambling tool. It is a reminder, not a limit: OddVex never blocks or rejects a bet you record. When your weekly total goes from below the threshold to at or above it you get one `stake_reminder` notification for that week. `weekly_stake_threshold: null` turns it off.
+         */
+        put: operations["update_stake_reminder"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/meta": {
         parameters: {
             query?: never;
@@ -355,6 +473,100 @@ export interface paths {
         get: operations["get_meta"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your notifications, newest first
+         * @description In-app notifications only; at most 500 are kept per user. Page with `limit` and the `next_before` cursor. Your active alert rules are evaluated first, at most once every `ODDVEX_ALERT_EVAL_MIN_SECONDS` seconds per user.
+         */
+        get: operations["list_notifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark every notification as read */
+        post: operations["mark_all_notifications_read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How many notifications you have not read
+         * @description Your active alert rules are evaluated first, at most once every `ODDVEX_ALERT_EVAL_MIN_SECONDS` seconds per user.
+         */
+        get: operations["get_unread_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications/{notification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a notification */
+        delete: operations["delete_notification"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark one notification as read
+         * @description Idempotent: a notification that is already read keeps its `read_at`.
+         */
+        post: operations["mark_notification_read"];
         delete?: never;
         options?: never;
         head?: never;
@@ -600,7 +812,7 @@ export interface paths {
         put?: never;
         /**
          * Import bets from a connection
-         * @description Idempotent: bets are de-duplicated on provider + external bet id, so running this again never creates duplicates. Retryable provider errors are retried up to `ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded with status `failed` and this returns 502 with `details.run_id` and `details.retryable`.
+         * @description Idempotent: bets are de-duplicated on provider + external bet id, so running this again never creates duplicates. Retryable provider errors are retried up to `ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded with status `failed` and this returns 502 with `details.run_id` and `details.retryable`. Either way a `sync_finished` notification is created, and imported bets count towards the weekly staking reminder.
          */
         post: operations["run_sync"];
         delete?: never;
@@ -697,6 +909,11 @@ export interface components {
          */
         AccountExportOut: {
             /**
+             * Alerts
+             * @description Your alert rules.
+             */
+            alerts?: components["schemas"]["AlertRuleOut"][];
+            /**
              * Audit Log
              * @description Your own audit entries, oldest first, including this export.
              */
@@ -714,6 +931,14 @@ export interface components {
              * @default 1
              */
             format_version: number;
+            notification_preferences?: components["schemas"]["NotificationPreferencesOut"] | null;
+            /**
+             * Notifications
+             * @description Your notifications, oldest first.
+             */
+            notifications?: components["schemas"]["NotificationOut"][];
+            /** @description Your weekly staking reminder and this week's total. */
+            stake_reminder?: components["schemas"]["StakeReminderOut"] | null;
             /** Sync Connections */
             sync_connections: components["schemas"]["SyncConnectionOut"][];
             /** Sync Runs */
@@ -737,6 +962,113 @@ export interface components {
             user_count: number;
             /** Version */
             version: string;
+        };
+        /** AlertEvaluationOut */
+        AlertEvaluationOut: {
+            /**
+             * Evaluated
+             * @description Active rules that were checked.
+             */
+            evaluated: number;
+            /**
+             * Expired
+             * @description Rules that expired in this run.
+             */
+            expired: number;
+            /**
+             * Fired
+             * @description Times a rule's condition was met in this run.
+             */
+            fired: number;
+        };
+        /** AlertListOut */
+        AlertListOut: {
+            /** Items */
+            items: components["schemas"]["AlertRuleOut"][];
+        };
+        /** AlertRuleOut */
+        AlertRuleOut: {
+            /**
+             * Available
+             * @description False when the data provider no longer has the event or team.
+             * @default true
+             */
+            available: boolean;
+            /**
+             * Baseline Line
+             * @description line_move only: the consensus line when the rule was armed.
+             */
+            baseline_line?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            event?: components["schemas"]["EventSummaryOut"] | null;
+            /** Event Id */
+            event_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "price_at_least" | "line_move" | "game_start" | "game_final";
+            /**
+             * Label
+             * @description Event or team name captured when the rule was created.
+             */
+            label: string;
+            /** League */
+            league?: string | null;
+            /** Line */
+            line?: number | null;
+            /** Market */
+            market?: ("moneyline" | "spread" | "total") | null;
+            /**
+             * Min Move
+             * @description line_move only, in points.
+             */
+            min_move?: number | null;
+            /**
+             * Minutes Before
+             * @description game_start only.
+             */
+            minutes_before?: number | null;
+            /** Outcome Key */
+            outcome_key?: ("home" | "away" | "draw" | "over" | "under") | null;
+            /**
+             * State
+             * @description active: being evaluated. triggered: fired once and stopped. expired: the event ended or is no longer available before the rule fired. paused: switched off by you. Team-scoped rules stay active after firing.
+             * @enum {string}
+             */
+            state: "active" | "triggered" | "expired" | "paused";
+            /**
+             * Summary
+             * @description One-line, human-readable description of the rule.
+             */
+            summary: string;
+            team?: components["schemas"]["TeamRef"] | null;
+            /** Team Id */
+            team_id?: string | null;
+            /** @description price_at_least only. */
+            threshold?: components["schemas"]["PriceOut"] | null;
+            /** Triggered At */
+            triggered_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** AlertUpdate */
+        AlertUpdate: {
+            /**
+             * State
+             * @description paused: stop evaluating an active rule. active: resume a paused rule, or re-arm a triggered one (a line_move rule then takes the current consensus line as its new baseline).
+             * @enum {string}
+             */
+            state: "active" | "paused";
         };
         /** AssistantQueryRequest */
         AssistantQueryRequest: {
@@ -1557,6 +1889,22 @@ export interface components {
             /** Request Id */
             request_id?: string | null;
         };
+        /**
+         * GameFinalAlertCreate
+         * @description Fires with the final score when a matching event ends. With `team_id` it fires once
+         *     for each of the team's games and stays active.
+         */
+        GameFinalAlertCreate: {
+            /** Event Id */
+            event_id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "game_final";
+            /** Team Id */
+            team_id?: string | null;
+        };
         /** GameLogEntryOut */
         GameLogEntryOut: {
             /**
@@ -1577,6 +1925,24 @@ export interface components {
             result: "over" | "under" | "push";
             /** Value */
             value: number;
+        };
+        /**
+         * GameStartAlertCreate
+         * @description Fires when a matching upcoming event starts within `minutes_before` minutes. With
+         *     `team_id` it fires once for each of the team's games and stays active.
+         */
+        GameStartAlertCreate: {
+            /** Event Id */
+            event_id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "game_start";
+            /** Minutes Before */
+            minutes_before: number;
+            /** Team Id */
+            team_id?: string | null;
         };
         /** HealthOut */
         HealthOut: {
@@ -1640,6 +2006,67 @@ export interface components {
             sample_size: number;
             /** Under Count */
             under_count: number;
+        };
+        /**
+         * InAppPreferencesIn
+         * @description Kinds left out keep their current value.
+         */
+        InAppPreferencesIn: {
+            /** Bet Settled */
+            bet_settled?: boolean | null;
+            /** Game Final */
+            game_final?: boolean | null;
+            /** Game Start */
+            game_start?: boolean | null;
+            /** Line Move */
+            line_move?: boolean | null;
+            /** Price Alert */
+            price_alert?: boolean | null;
+            /** Stake Reminder */
+            stake_reminder?: boolean | null;
+            /** Sync Finished */
+            sync_finished?: boolean | null;
+        };
+        /**
+         * InAppPreferencesOut
+         * @description One switch per notification kind. All default to true.
+         */
+        InAppPreferencesOut: {
+            /**
+             * Bet Settled
+             * @default true
+             */
+            bet_settled: boolean;
+            /**
+             * Game Final
+             * @default true
+             */
+            game_final: boolean;
+            /**
+             * Game Start
+             * @default true
+             */
+            game_start: boolean;
+            /**
+             * Line Move
+             * @default true
+             */
+            line_move: boolean;
+            /**
+             * Price Alert
+             * @default true
+             */
+            price_alert: boolean;
+            /**
+             * Stake Reminder
+             * @default true
+             */
+            stake_reminder: boolean;
+            /**
+             * Sync Finished
+             * @default true
+             */
+            sync_finished: boolean;
         };
         /** LeagueOut */
         LeagueOut: {
@@ -1708,6 +2135,41 @@ export interface components {
             /** Series */
             series: components["schemas"]["LineSeriesOut"][];
         };
+        /**
+         * LineMoveAlertCreate
+         * @description Fires when the consensus line is `min_move` points or more away from where it was
+         *     when the alert was created, in either direction.
+         */
+        LineMoveAlertCreate: {
+            /**
+             * Event Id
+             * @description Event id from the data routes.
+             */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "line_move";
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "spread" | "total";
+            /**
+             * Min Move
+             * @description Points.
+             * @example 1
+             * @example 1.5
+             */
+            min_move: number;
+            /**
+             * Outcome Key
+             * @description spread: home, away. total: over, under.
+             * @enum {string}
+             */
+            outcome_key: "home" | "away" | "draw" | "over" | "under";
+        };
         /** LinePointOut */
         LinePointOut: {
             /** Line */
@@ -1738,6 +2200,14 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MarkAllReadOut */
+        MarkAllReadOut: {
+            /**
+             * Updated
+             * @description Notifications that were unread and are now read.
+             */
+            updated: number;
         };
         /** MetaOut */
         MetaOut: {
@@ -1818,6 +2288,63 @@ export interface components {
             overround: number;
             /** Steps */
             steps: string[];
+        };
+        /** NotificationListOut */
+        NotificationListOut: {
+            /** Items */
+            items: components["schemas"]["NotificationOut"][];
+            /**
+             * Next Before
+             * @description Pass as `before` to get the next (older) page. Null on the last page.
+             */
+            next_before?: string | null;
+            /**
+             * Unread Count
+             * @description All of your unread notifications, not just this page.
+             */
+            unread_count: number;
+        };
+        /** NotificationOut */
+        NotificationOut: {
+            /** Body */
+            body: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Data
+             * @description Small object for deep links; the keys depend on `kind` (`event_id`, `alert_id`, `market`, `price_american`, `line`, `bet_id`, `run_id`, ...).
+             */
+            data?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Href
+             * @description Web route to open, e.g. `/app/games/{event_id}?market=spread`.
+             */
+            href?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "price_alert" | "line_move" | "game_start" | "game_final" | "bet_settled" | "sync_finished" | "stake_reminder";
+            /** Read At */
+            read_at?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** NotificationPreferencesOut */
+        NotificationPreferencesOut: {
+            /** @description In-app delivery per kind. A disabled kind creates no notification; alert rules still change state. */
+            in_app: components["schemas"]["InAppPreferencesOut"];
+        };
+        /** NotificationPreferencesUpdate */
+        NotificationPreferencesUpdate: {
+            in_app: components["schemas"]["InAppPreferencesIn"];
         };
         /** OddsOutcomeOut */
         OddsOutcomeOut: {
@@ -2017,6 +2544,53 @@ export interface components {
             window: "5" | "10" | "20" | "season";
         };
         /**
+         * PriceAtLeastAlertCreate
+         * @description Fires when the best open, non-stale price for the outcome is at or above `threshold`.
+         */
+        PriceAtLeastAlertCreate: {
+            /**
+             * Event Id
+             * @description Event id from the data routes.
+             */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "price_at_least";
+            /**
+             * Line
+             * @description Required for spread and total, not allowed for moneyline. Spread: the handicap of the selected side. Only books quoting exactly this line are compared.
+             */
+            line?: number | null;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "moneyline" | "spread" | "total";
+            /**
+             * Odds Format
+             * @default american
+             * @enum {string}
+             */
+            odds_format: "american" | "decimal" | "fractional";
+            /**
+             * Outcome Key
+             * @description moneyline: home, away (or draw where 3-way). spread: home, away. total: over, under.
+             * @enum {string}
+             */
+            outcome_key: "home" | "away" | "draw" | "over" | "under";
+            /**
+             * Threshold
+             * @description The price to reach, in `odds_format`.
+             * @example 150
+             * @example +150
+             * @example 2.5
+             * @example 3/2
+             */
+            threshold: number | string;
+        };
+        /**
          * PriceOut
          * @description One price in every display format.
          */
@@ -2143,6 +2717,41 @@ export interface components {
             key: string;
             /** Name */
             name: string;
+        };
+        /**
+         * StakeReminderOut
+         * @description A reminder, never a limit: bets are always saved.
+         */
+        StakeReminderOut: {
+            /**
+             * Exceeded
+             * @description True when a threshold is set and `staked_this_week` is at or above it.
+             */
+            exceeded: boolean;
+            /**
+             * Staked This Week
+             * @description Sum of the stakes of your bets placed in the current ISO week (Monday to Sunday, UTC). Void bets are excluded.
+             */
+            staked_this_week: number;
+            /**
+             * Week Start
+             * Format: date-time
+             * @description Monday 00:00 UTC of the current week.
+             */
+            week_start: string;
+            /**
+             * Weekly Stake Threshold
+             * @description Null means the reminder is off.
+             */
+            weekly_stake_threshold?: number | null;
+        };
+        /** StakeReminderUpdate */
+        StakeReminderUpdate: {
+            /**
+             * Weekly Stake Threshold
+             * @description Total stake per week at which you want a reminder. Null turns it off.
+             */
+            weekly_stake_threshold: number | null;
         };
         /** SyncConnectionCreate */
         SyncConnectionCreate: {
@@ -2289,6 +2898,11 @@ export interface components {
             token_type: "bearer";
             user: components["schemas"]["UserOut"];
         };
+        /** UnreadCountOut */
+        UnreadCountOut: {
+            /** Unread Count */
+            unread_count: number;
+        };
         /** UserOut */
         UserOut: {
             /**
@@ -2422,6 +3036,253 @@ export interface operations {
             };
             /** @description Administrator role required */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_alerts: {
+        parameters: {
+            query?: {
+                state?: ("active" | "triggered" | "expired" | "paused") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertListOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_alert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceAtLeastAlertCreate"] | components["schemas"]["LineMoveAlertCreate"] | components["schemas"]["GameStartAlertCreate"] | components["schemas"]["GameFinalAlertCreate"];
+            };
+        };
+        responses: {
+            /** @description An identical active rule exists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRuleOut"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRuleOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description You have the maximum number of alerts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    evaluate_alerts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertEvaluationOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_alert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_alert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRuleOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not possible from the rule's state, or you are at the limit */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3262,6 +4123,86 @@ export interface operations {
             };
         };
     };
+    get_notification_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferencesOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_notification_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferencesOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     change_password: {
         parameters: {
             query?: never;
@@ -3322,6 +4263,86 @@ export interface operations {
             };
         };
     };
+    get_stake_reminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StakeReminderOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_stake_reminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StakeReminderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StakeReminderOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_meta: {
         parameters: {
             query?: never;
@@ -3338,6 +4359,222 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetaOut"];
+                };
+            };
+        };
+    };
+    list_notifications: {
+        parameters: {
+            query?: {
+                /** @description true: unread only. false: read only. Omit for all. */
+                unread?: boolean | null;
+                limit?: number;
+                /** @description `next_before` from the previous page. */
+                before?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationListOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    mark_all_notifications_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkAllReadOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_unread_count: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_notification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    mark_notification_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

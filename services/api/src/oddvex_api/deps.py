@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
@@ -135,3 +136,12 @@ def get_board(provider: ProviderDep, settings: SettingsDep, cache: CacheDep) -> 
 
 
 BoardDep = Annotated[Board, Depends(get_board)]
+
+
+def get_now(provider: ProviderDep) -> datetime:
+    """The application's clock: the data provider's ``now()`` (wall-clock time in
+    production, a fixed instant in tests)."""
+    return provider.now()
+
+
+NowDep = Annotated[datetime, Depends(get_now)]

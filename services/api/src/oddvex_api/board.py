@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from statistics import median
@@ -66,6 +67,21 @@ SYNTHETIC_NOTICE = (
 _WINDOW_SIZES = {"5": 5, "10": 10, "20": 20}
 _GAME_LOG_TTL_SECONDS = 30.0
 _BOARD_TTL_SECONDS = 10.0
+
+
+#: One book's quote: (snapshot, API status, is stale, decimal price per outcome).
+type _QuoteRow = tuple[OddsSnapshot, str, bool, list[Decimal]]
+#: Best price for one outcome: (decimal price, sportsbook id, line).
+type _Best = tuple[Decimal, str, float | None]
+
+
+@dataclass(frozen=True)
+class BestQuote:
+    """The best available price for one outcome and where it is offered."""
+
+    price: Decimal
+    sportsbook: SportsbookRef
+    line: float | None = None
 
 
 def consensus_line(lines: Sequence[float]) -> float | None:
@@ -203,10 +219,10 @@ class Board:
         )
 
     # ------------------------------------------------------------------- odds
-    def event_odds(self, event: Event, market: str) -> EventOddsOut:
-        snapshots: list[OddsSnapshot] = self.provider.get_odds(event.id, market)
-        rows: list[tuple[OddsSnapshot, str, bool, list[Decimal]]] = []
-        for snap in snapshots:
+    def _quote_rows(self, event: Event, market: str) -> list[_QuoteRow]:
+        """Every book's quote with its API status, staleness and decimal prices."""
+        rows: list[_QuoteRow] = []
+        for snap in self.provider.get_odds(event.id, market):
             status = self._api_status(snap.status)
             stale = status != "unavailable" and self.is_stale(snap.last_updated, event.status)
             prices = (
@@ -215,8 +231,65 @@ class Board:
                 else [american_to_decimal(o.price_american) for o in snap.outcomes]
             )
             rows.append((snap, status, stale, prices))
+        return rows
 
-        usable = [r for r in rows if r[1] == "open" and not r[2] and len(r[3]) >= 2]
+    @staticmethod
+    def _usable(rows: Sequence[_QuoteRow]) -> list[_QuoteRow]:
+        """Quotes that count for best price and consensus: open, not stale, fully priced."""
+        return [r for r in rows if r[1] == "open" and not r[2] and len(r[3]) >= 2]
+
+    @staticmethod
+    def _best_prices(comparable: Sequence[_QuoteRow]) -> dict[str, _Best]:
+        """Highest price per outcome key among ``comparable``; the first book wins a tie."""
+        best: dict[str, _Best] = {}
+        for snap, _, _, prices in comparable:
+            for outcome, price in zip(snap.outcomes, prices, strict=True):
+                if outcome.key not in best or price > best[outcome.key][0]:
+                    best[outcome.key] = (price, snap.sportsbook_id, outcome.line)
+        return best
+
+    def best_price(
+        self, event: Event, market: str, outcome_key: str, line: float | None = None
+    ) -> BestQuote | None:
+        """Best open, non-stale price for one outcome, or ``None`` when no book offers it.
+
+        The same rows and the same comparison as :meth:`event_odds`. The only difference
+        is which books are compared for spread and total: the ones quoting ``line`` for
+        this outcome instead of the ones on the consensus line.
+        """
+        usable = self._usable(self._quote_rows(event, market))
+        if market != "moneyline":
+            usable = [
+                r
+                for r in usable
+                if any(o.key == outcome_key and o.line == line for o in r[0].outcomes)
+            ]
+        found = self._best_prices(usable).get(outcome_key)
+        if found is None:
+            return None
+        price, book, best_line = found
+        return BestQuote(price=price, sportsbook=self.book_ref(book), line=best_line)
+
+    def consensus_outcome_line(self, event: Event, market: str, outcome_key: str) -> float | None:
+        """The consensus line as quoted for ``outcome_key`` (the away spread is the home
+        spread negated). ``None`` for moneyline or when no usable book quotes the market."""
+        if market == "moneyline":
+            return None
+        usable = self._usable(self._quote_rows(event, market))
+        line = consensus_line(
+            [r[0].outcomes[0].line for r in usable if r[0].outcomes[0].line is not None]
+        )
+        for row in usable:
+            if row[0].outcomes[0].line != line:
+                continue
+            for outcome in row[0].outcomes:
+                if outcome.key == outcome_key:
+                    return outcome.line
+        return None
+
+    def event_odds(self, event: Event, market: str) -> EventOddsOut:
+        rows = self._quote_rows(event, market)
+        usable = self._usable(rows)
         line: float | None = None
         if market != "moneyline":
             line = consensus_line(
@@ -226,16 +299,14 @@ class Board:
         else:
             comparable = usable
 
-        best: dict[str, tuple[Decimal, str, float | None]] = {}
+        best = self._best_prices(comparable)
         probability_sums: dict[str, float] = {}
         names: dict[str, str] = {}
         for snap, _, _, prices in comparable:
             fair = no_vig(prices).fair_probabilities
-            for outcome, price, probability in zip(snap.outcomes, prices, fair, strict=True):
+            for outcome, probability in zip(snap.outcomes, fair, strict=True):
                 names.setdefault(outcome.key, outcome.name)
                 probability_sums[outcome.key] = probability_sums.get(outcome.key, 0.0) + probability
-                if outcome.key not in best or price > best[outcome.key][0]:
-                    best[outcome.key] = (price, snap.sportsbook_id, outcome.line)
 
         comparable_ids = {id(r[0]) for r in comparable}
         books: list[BookOddsOut] = []
@@ -540,4 +611,11 @@ class Board:
         return rows
 
 
-__all__ = ["HIT_RATE_CAVEAT", "SYNTHETIC_NOTICE", "Board", "PriceOut", "consensus_line"]
+__all__ = [
+    "HIT_RATE_CAVEAT",
+    "SYNTHETIC_NOTICE",
+    "BestQuote",
+    "Board",
+    "PriceOut",
+    "consensus_line",
+]

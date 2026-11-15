@@ -4,6 +4,14 @@
       "AccountExportOut": {
         "description": "Everything OddVex stores about one account. Never contains the password hash.",
         "properties": {
+          "alerts": {
+            "description": "Your alert rules.",
+            "items": {
+              "$ref": "#/components/schemas/AlertRuleOut"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
           "audit_log": {
             "description": "Your own audit entries, oldest first, including this export.",
             "items": {
@@ -29,6 +37,35 @@
             "description": "Version of this document's layout.",
             "title": "Format Version",
             "type": "integer"
+          },
+          "notification_preferences": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationPreferencesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notifications": {
+            "description": "Your notifications, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/NotificationOut"
+            },
+            "title": "Notifications",
+            "type": "array"
+          },
+          "stake_reminder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StakeReminderOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Your weekly staking reminder and this week's total."
           },
           "sync_connections": {
             "items": {
@@ -110,6 +147,290 @@
           "recent_audit"
         ],
         "title": "AdminOverviewOut",
+        "type": "object"
+      },
+      "AlertEvaluationOut": {
+        "properties": {
+          "evaluated": {
+            "description": "Active rules that were checked.",
+            "title": "Evaluated",
+            "type": "integer"
+          },
+          "expired": {
+            "description": "Rules that expired in this run.",
+            "title": "Expired",
+            "type": "integer"
+          },
+          "fired": {
+            "description": "Times a rule's condition was met in this run.",
+            "title": "Fired",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evaluated",
+          "fired",
+          "expired"
+        ],
+        "title": "AlertEvaluationOut",
+        "type": "object"
+      },
+      "AlertListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AlertRuleOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AlertListOut",
+        "type": "object"
+      },
+      "AlertRuleOut": {
+        "properties": {
+          "available": {
+            "default": true,
+            "description": "False when the data provider no longer has the event or team.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "baseline_line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "line_move only: the consensus line when the rule was armed.",
+            "title": "Baseline Line"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "price_at_least",
+              "line_move",
+              "game_start",
+              "game_final"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Event or team name captured when the rule was created.",
+            "title": "Label",
+            "type": "string"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "enum": [
+                  "moneyline",
+                  "spread",
+                  "total"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "min_move": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "line_move only, in points.",
+            "title": "Min Move"
+          },
+          "minutes_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "game_start only.",
+            "title": "Minutes Before"
+          },
+          "outcome_key": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "away",
+                  "draw",
+                  "over",
+                  "under"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Key"
+          },
+          "state": {
+            "description": "active: being evaluated. triggered: fired once and stopped. expired: the event ended or is no longer available before the rule fired. paused: switched off by you. Team-scoped rules stay active after firing.",
+            "enum": [
+              "active",
+              "triggered",
+              "expired",
+              "paused"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "summary": {
+            "description": "One-line, human-readable description of the rule.",
+            "title": "Summary",
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "price_at_least only."
+          },
+          "triggered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggered At"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "summary",
+          "label",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AlertRuleOut",
+        "type": "object"
+      },
+      "AlertUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "description": "paused: stop evaluating an active rule. active: resume a paused rule, or re-arm a triggered one (a line_move rule then takes the current consensus line as its new baseline).",
+            "enum": [
+              "active",
+              "paused"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "AlertUpdate",
         "type": "object"
       },
       "AssistantQueryRequest": {
@@ -2335,6 +2656,48 @@
         "title": "ExportAuditEntryOut",
         "type": "object"
       },
+      "GameFinalAlertCreate": {
+        "additionalProperties": false,
+        "description": "Fires with the final score when a matching event ends. With `team_id` it fires once\nfor each of the team's games and stays active.",
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "const": "game_final",
+            "title": "Kind",
+            "type": "string"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "GameFinalAlertCreate",
+        "type": "object"
+      },
       "GameLogEntryOut": {
         "properties": {
           "date": {
@@ -2377,6 +2740,55 @@
           "result"
         ],
         "title": "GameLogEntryOut",
+        "type": "object"
+      },
+      "GameStartAlertCreate": {
+        "additionalProperties": false,
+        "description": "Fires when a matching upcoming event starts within `minutes_before` minutes. With\n`team_id` it fires once for each of the team's games and stays active.",
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "const": "game_start",
+            "title": "Kind",
+            "type": "string"
+          },
+          "minutes_before": {
+            "maximum": 1440.0,
+            "minimum": 5.0,
+            "title": "Minutes Before",
+            "type": "integer"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          }
+        },
+        "required": [
+          "kind",
+          "minutes_before"
+        ],
+        "title": "GameStartAlertCreate",
         "type": "object"
       },
       "HealthOut": {
@@ -2490,6 +2902,133 @@
           "sample_size"
         ],
         "title": "HitRateOut",
+        "type": "object"
+      },
+      "InAppPreferencesIn": {
+        "additionalProperties": false,
+        "description": "Kinds left out keep their current value.",
+        "properties": {
+          "bet_settled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bet Settled"
+          },
+          "game_final": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Final"
+          },
+          "game_start": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Start"
+          },
+          "line_move": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Move"
+          },
+          "price_alert": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Alert"
+          },
+          "stake_reminder": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stake Reminder"
+          },
+          "sync_finished": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Finished"
+          }
+        },
+        "title": "InAppPreferencesIn",
+        "type": "object"
+      },
+      "InAppPreferencesOut": {
+        "description": "One switch per notification kind. All default to true.",
+        "properties": {
+          "bet_settled": {
+            "default": true,
+            "title": "Bet Settled",
+            "type": "boolean"
+          },
+          "game_final": {
+            "default": true,
+            "title": "Game Final",
+            "type": "boolean"
+          },
+          "game_start": {
+            "default": true,
+            "title": "Game Start",
+            "type": "boolean"
+          },
+          "line_move": {
+            "default": true,
+            "title": "Line Move",
+            "type": "boolean"
+          },
+          "price_alert": {
+            "default": true,
+            "title": "Price Alert",
+            "type": "boolean"
+          },
+          "stake_reminder": {
+            "default": true,
+            "title": "Stake Reminder",
+            "type": "boolean"
+          },
+          "sync_finished": {
+            "default": true,
+            "title": "Sync Finished",
+            "type": "boolean"
+          }
+        },
+        "title": "InAppPreferencesOut",
         "type": "object"
       },
       "LeagueOut": {
@@ -2666,6 +3205,64 @@
         "title": "LineHistoryOut",
         "type": "object"
       },
+      "LineMoveAlertCreate": {
+        "additionalProperties": false,
+        "description": "Fires when the consensus line is `min_move` points or more away from where it was\nwhen the alert was created, in either direction.",
+        "properties": {
+          "event_id": {
+            "description": "Event id from the data routes.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "line_move",
+            "title": "Kind",
+            "type": "string"
+          },
+          "market": {
+            "enum": [
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "min_move": {
+            "description": "Points.",
+            "examples": [
+              1,
+              1.5
+            ],
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Min Move",
+            "type": "number"
+          },
+          "outcome_key": {
+            "description": "spread: home, away. total: over, under.",
+            "enum": [
+              "home",
+              "away",
+              "draw",
+              "over",
+              "under"
+            ],
+            "title": "Outcome Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "event_id",
+          "market",
+          "outcome_key",
+          "min_move"
+        ],
+        "title": "LineMoveAlertCreate",
+        "type": "object"
+      },
       "LinePointOut": {
         "properties": {
           "line": {
@@ -2745,6 +3342,20 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MarkAllReadOut": {
+        "properties": {
+          "updated": {
+            "description": "Notifications that were unread and are now read.",
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ],
+        "title": "MarkAllReadOut",
         "type": "object"
       },
       "MetaOut": {
@@ -2913,6 +3524,139 @@
           "steps"
         ],
         "title": "NoVigResponse",
+        "type": "object"
+      },
+      "NotificationListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `before` to get the next (older) page. Null on the last page.",
+            "title": "Next Before"
+          },
+          "unread_count": {
+            "description": "All of your unread notifications, not just this page.",
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "unread_count"
+        ],
+        "title": "NotificationListOut",
+        "type": "object"
+      },
+      "NotificationOut": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "description": "Small object for deep links; the keys depend on `kind` (`event_id`, `alert_id`, `market`, `price_american`, `line`, `bet_id`, `run_id`, ...).",
+            "title": "Data",
+            "type": "object"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Web route to open, e.g. `/app/games/{event_id}?market=spread`.",
+            "title": "Href"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "price_alert",
+              "line_move",
+              "game_start",
+              "game_final",
+              "bet_settled",
+              "sync_finished",
+              "stake_reminder"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "body",
+          "created_at"
+        ],
+        "title": "NotificationOut",
+        "type": "object"
+      },
+      "NotificationPreferencesOut": {
+        "properties": {
+          "in_app": {
+            "$ref": "#/components/schemas/InAppPreferencesOut",
+            "description": "In-app delivery per kind. A disabled kind creates no notification; alert rules still change state."
+          }
+        },
+        "required": [
+          "in_app"
+        ],
+        "title": "NotificationPreferencesOut",
+        "type": "object"
+      },
+      "NotificationPreferencesUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "in_app": {
+            "$ref": "#/components/schemas/InAppPreferencesIn"
+          }
+        },
+        "required": [
+          "in_app"
+        ],
+        "title": "NotificationPreferencesUpdate",
         "type": "object"
       },
       "OddsOutcomeOut": {
@@ -3491,6 +4235,96 @@
         "title": "PlayerPropsOut",
         "type": "object"
       },
+      "PriceAtLeastAlertCreate": {
+        "additionalProperties": false,
+        "description": "Fires when the best open, non-stale price for the outcome is at or above `threshold`.",
+        "properties": {
+          "event_id": {
+            "description": "Event id from the data routes.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "price_at_least",
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": -100000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for spread and total, not allowed for moneyline. Spread: the handicap of the selected side. Only books quoting exactly this line are compared.",
+            "title": "Line"
+          },
+          "market": {
+            "enum": [
+              "moneyline",
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "odds_format": {
+            "default": "american",
+            "enum": [
+              "american",
+              "decimal",
+              "fractional"
+            ],
+            "title": "Odds Format",
+            "type": "string"
+          },
+          "outcome_key": {
+            "description": "moneyline: home, away (or draw where 3-way). spread: home, away. total: over, under.",
+            "enum": [
+              "home",
+              "away",
+              "draw",
+              "over",
+              "under"
+            ],
+            "title": "Outcome Key",
+            "type": "string"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "The price to reach, in `odds_format`.",
+            "examples": [
+              150,
+              "+150",
+              2.5,
+              "3/2"
+            ],
+            "title": "Threshold"
+          }
+        },
+        "required": [
+          "kind",
+          "event_id",
+          "market",
+          "outcome_key",
+          "threshold"
+        ],
+        "title": "PriceAtLeastAlertCreate",
+        "type": "object"
+      },
       "PriceOut": {
         "description": "One price in every display format.",
         "properties": {
@@ -3816,6 +4650,70 @@
         "title": "SportsbookRef",
         "type": "object"
       },
+      "StakeReminderOut": {
+        "description": "A reminder, never a limit: bets are always saved.",
+        "properties": {
+          "exceeded": {
+            "description": "True when a threshold is set and `staked_this_week` is at or above it.",
+            "title": "Exceeded",
+            "type": "boolean"
+          },
+          "staked_this_week": {
+            "description": "Sum of the stakes of your bets placed in the current ISO week (Monday to Sunday, UTC). Void bets are excluded.",
+            "title": "Staked This Week",
+            "type": "number"
+          },
+          "week_start": {
+            "description": "Monday 00:00 UTC of the current week.",
+            "format": "date-time",
+            "title": "Week Start",
+            "type": "string"
+          },
+          "weekly_stake_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null means the reminder is off.",
+            "title": "Weekly Stake Threshold"
+          }
+        },
+        "required": [
+          "staked_this_week",
+          "week_start",
+          "exceeded"
+        ],
+        "title": "StakeReminderOut",
+        "type": "object"
+      },
+      "StakeReminderUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "weekly_stake_threshold": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total stake per week at which you want a reminder. Null turns it off.",
+            "title": "Weekly Stake Threshold"
+          }
+        },
+        "required": [
+          "weekly_stake_threshold"
+        ],
+        "title": "StakeReminderUpdate",
+        "type": "object"
+      },
       "SyncConnectionCreate": {
         "properties": {
           "label": {
@@ -4134,6 +5032,19 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "UnreadCountOut": {
+        "properties": {
+          "unread_count": {
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread_count"
+        ],
+        "title": "UnreadCountOut",
+        "type": "object"
+      },
       "UserOut": {
         "properties": {
           "age_confirmed_at": {
@@ -4397,6 +5308,369 @@
         "summary": "Counts, provider health and recent audit entries",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/v1/alerts": {
+      "get": {
+        "description": "Each rule has a one-line `summary` and embeds the current event or team from the data provider. When the provider no longer has it, `available` is false.",
+        "operationId": "list_alerts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "triggered",
+                    "expired",
+                    "paused"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your alert rules, newest first",
+        "tags": [
+          "alerts"
+        ]
+      },
+      "post": {
+        "description": "`kind` selects the rule type and its fields. The event must exist (`422 unknown_event`) and must not be over (`422 event_not_open`); the market and outcome must fit it. Creating a rule identical to one of your active rules returns that rule with 200. At most 100 active rules per user.\n\nAlerts are delivered in the app only. There is no background worker: rules are evaluated when you read your notifications or call `POST /v1/alerts/evaluate`.",
+        "operationId": "create_alert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "game_final": "#/components/schemas/GameFinalAlertCreate",
+                    "game_start": "#/components/schemas/GameStartAlertCreate",
+                    "line_move": "#/components/schemas/LineMoveAlertCreate",
+                    "price_at_least": "#/components/schemas/PriceAtLeastAlertCreate"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PriceAtLeastAlertCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LineMoveAlertCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GameStartAlertCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GameFinalAlertCreate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRuleOut"
+                }
+              }
+            },
+            "description": "An identical active rule exists"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRuleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "You have the maximum number of alerts"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an alert rule",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/v1/alerts/evaluate": {
+      "post": {
+        "description": "Checks every active rule against the current data, creates the notifications that are due and updates rule states. Calling it again right away changes nothing.",
+        "operationId": "evaluate_alerts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertEvaluationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Evaluate your active alert rules now",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/v1/alerts/{alert_id}": {
+      "delete": {
+        "description": "Notifications the rule already created are kept.",
+        "operationId": "delete_alert",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete an alert rule",
+        "tags": [
+          "alerts"
+        ]
+      },
+      "patch": {
+        "description": "`state: paused` pauses an active rule. `state: active` resumes a paused rule or re-arms a triggered one so it can fire again; a re-armed `line_move` rule takes the current consensus line as its new baseline. Re-arming needs the event to still be open (`422 event_not_open`).",
+        "operationId": "update_alert",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRuleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not possible from the rule's state, or you are at the limit"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Pause, resume or re-arm an alert rule",
+        "tags": [
+          "alerts"
         ]
       }
     },
@@ -4789,7 +6063,7 @@
         ]
       },
       "post": {
-        "description": "OddVex never places wagers. This only records a bet for tracking.",
+        "description": "OddVex never places wagers. This only records a bet for tracking. If you set a weekly staking reminder and this bet takes the week's total to or past it, a `stake_reminder` notification is created; the bet is saved either way.",
         "operationId": "create_bet",
         "requestBody": {
           "content": {
@@ -4846,7 +6120,7 @@
     },
     "/v1/bets/auto-settle": {
       "post": {
-        "description": "Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new.",
+        "description": "Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new. Each settled bet also creates a `bet_settled` notification.",
         "operationId": "auto_settle_bets",
         "responses": {
           "200": {
@@ -5540,7 +6814,7 @@
     },
     "/v1/me": {
       "delete": {
-        "description": "Permanently deletes the user, their bets, bet legs, watchlist, sync connections and import runs. An audit entry containing only the opaque user id is retained.",
+        "description": "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections and import runs. An audit entry containing only the opaque user id is retained.",
         "operationId": "delete_me",
         "responses": {
           "204": {
@@ -5624,7 +6898,7 @@
     },
     "/v1/me/export": {
       "get": {
-        "description": "One JSON document with your profile, bets, watchlist, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.",
+        "description": "One JSON document with your profile, bets, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.",
         "operationId": "export_my_data",
         "responses": {
           "200": {
@@ -5666,6 +6940,108 @@
         "summary": "Download everything stored about your account",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/v1/me/notification-preferences": {
+      "get": {
+        "description": "Every kind is enabled until you switch it off. Delivery is in-app only.",
+        "operationId": "get_notification_preferences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Which kinds of notification you receive",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "put": {
+        "description": "Kinds left out of `in_app` keep their current value. A disabled kind creates no notification; alert rules still fire and change state.",
+        "operationId": "update_notification_preferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferencesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Switch notification kinds on or off",
+        "tags": [
+          "notifications"
         ]
       }
     },
@@ -5746,6 +7122,108 @@
         ]
       }
     },
+    "/v1/me/stake-reminder": {
+      "get": {
+        "description": "A responsible-gambling tool. It is a reminder, not a limit: OddVex never blocks or rejects a bet you record. When your weekly total goes from below the threshold to at or above it you get one `stake_reminder` notification for that week.",
+        "operationId": "get_stake_reminder",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StakeReminderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your weekly staking reminder and this week's total",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "put": {
+        "description": "A responsible-gambling tool. It is a reminder, not a limit: OddVex never blocks or rejects a bet you record. When your weekly total goes from below the threshold to at or above it you get one `stake_reminder` notification for that week. `weekly_stake_threshold: null` turns it off.",
+        "operationId": "update_stake_reminder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StakeReminderUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StakeReminderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set or turn off your weekly staking reminder",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
     "/v1/meta": {
       "get": {
         "operationId": "get_meta",
@@ -5764,6 +7242,325 @@
         "summary": "Data mode, provider and server time",
         "tags": [
           "meta"
+        ]
+      }
+    },
+    "/v1/notifications": {
+      "get": {
+        "description": "In-app notifications only; at most 500 are kept per user. Page with `limit` and the `next_before` cursor. Your active alert rules are evaluated first, at most once every `ODDVEX_ALERT_EVAL_MIN_SECONDS` seconds per user.",
+        "operationId": "list_notifications",
+        "parameters": [
+          {
+            "description": "true: unread only. false: read only. Omit for all.",
+            "in": "query",
+            "name": "unread",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: unread only. false: read only. Omit for all.",
+              "title": "Unread"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`next_before` from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_before` from the previous page.",
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your notifications, newest first",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/v1/notifications/read-all": {
+      "post": {
+        "operationId": "mark_all_notifications_read",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllReadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark every notification as read",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/v1/notifications/unread-count": {
+      "get": {
+        "description": "Your active alert rules are evaluated first, at most once every `ODDVEX_ALERT_EVAL_MIN_SECONDS` seconds per user.",
+        "operationId": "get_unread_count",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "How many notifications you have not read",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/v1/notifications/{notification_id}": {
+      "delete": {
+        "operationId": "delete_notification",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a notification",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/v1/notifications/{notification_id}/read": {
+      "post": {
+        "description": "Idempotent: a notification that is already read keeps its `read_at`.",
+        "operationId": "mark_notification_read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark one notification as read",
+        "tags": [
+          "notifications"
         ]
       }
     },
@@ -6572,7 +8369,7 @@
     },
     "/v1/sync/connections/{connection_id}/sync": {
       "post": {
-        "description": "Idempotent: bets are de-duplicated on provider + external bet id, so running this again never creates duplicates. Retryable provider errors are retried up to `ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded with status `failed` and this returns 502 with `details.run_id` and `details.retryable`.",
+        "description": "Idempotent: bets are de-duplicated on provider + external bet id, so running this again never creates duplicates. Retryable provider errors are retried up to `ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded with status `failed` and this returns 502 with `details.run_id` and `details.retryable`. Either way a `sync_finished` notification is created, and imported bets count towards the weekly staking reminder.",
         "operationId": "run_sync",
         "parameters": [
           {
@@ -7003,6 +8800,14 @@
     {
       "description": "Watched teams, players and events; owner-scoped.",
       "name": "watchlist"
+    },
+    {
+      "description": "Alert rules on prices, line moves, game starts and final scores; owner-scoped. Evaluated on request: there is no background worker.",
+      "name": "alerts"
+    },
+    {
+      "description": "In-app notifications, their preferences and the weekly staking reminder (a reminder, never a limit); owner-scoped.",
+      "name": "notifications"
     },
     {
       "description": "Sportsbook account import. Mock provider only.",

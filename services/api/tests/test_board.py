@@ -290,3 +290,79 @@ def test_props_fall_back_to_a_reference_line_when_nothing_is_offered(
     assert props.hit_rate.line % 1 == 0.5
     assert props.hit_rate.pushes == 0
     assert props.hit_rate.sample_size == len(props.game_log) >= 25
+
+
+# ------------------------------------------------ best price for one outcome
+def test_single_outcome_best_price_matches_the_odds_endpoint_on_synthetic_data() -> None:
+    """``Board.best_price`` (used by alerts) and ``event_odds`` share one implementation."""
+    provider = SyntheticProvider(seed=20260101, clock=lambda: FROZEN_NOW)
+    board = Board(provider, Settings(_env_file=None), InMemoryTTLCache())  # type: ignore[call-arg]
+    compared = 0
+    for event in provider.list_events():
+        for market in event.markets:
+            odds = board.event_odds(event, market)
+            keys = {o.key for book in odds.books for o in book.outcomes}
+            for key in keys:
+                expected = next((b for b in odds.best if b.outcome_key == key), None)
+                line = expected.line if expected is not None else None
+                if market != "moneyline" and expected is None:
+                    continue
+                found = board.best_price(event, market, key, line)
+                if expected is None:
+                    assert found is None
+                    continue
+                assert found is not None
+                assert found.sportsbook.key == expected.sportsbook_key
+                assert found.line == expected.line
+                assert float(found.price) == pytest.approx(expected.price.decimal, abs=1e-4)
+                compared += 1
+            if event.status == "final":
+                assert odds.best == []
+                assert board.best_price(event, market, "home") is None
+                assert board.consensus_outcome_line(event, market, "home") is None
+    assert compared > 200
+
+
+def test_single_outcome_best_price_ignores_unusable_books_and_other_lines(
+    scripted: ScriptedProvider, board: Board
+) -> None:
+    event = scripted.list_events(league="nba", status="upcoming")[0]
+    scripted.quotes = [
+        ("oldmill", "open", 5000, ml(400, -500)),  # stale
+        ("cardinal", "suspended", 60, ml(300, -400)),
+        ("summit", "unavailable", 60, []),
+        ("northline", "open", 60, ml(120, -140)),
+        ("kestrel", "open", 60, ml(118, -135)),
+    ]
+    home = board.best_price(event, "moneyline", "home")
+    away = board.best_price(event, "moneyline", "away")
+    assert home is not None and away is not None
+    assert (home.sportsbook.key, float(home.price)) == ("northline", 2.2)
+    assert away.sportsbook.key == "kestrel" and home.line is None
+    assert board.best_price(event, "moneyline", "draw") is None
+
+    scripted.quotes = [
+        ("northline", "open", 60, [("home", -3.5, 130), ("away", 3.5, -150)]),
+        ("cardinal", "open", 60, [("home", -4.5, -108), ("away", 4.5, -112)]),
+        ("summit", "open", 60, [("home", -4.5, -104), ("away", 4.5, -116)]),
+        ("oldmill", "open", 5000, [("home", -4.5, 200), ("away", 4.5, -240)]),
+    ]
+    at_line = board.best_price(event, "spread", "home", -4.5)
+    assert at_line is not None
+    assert (at_line.sportsbook.key, at_line.line) == ("summit", -4.5)
+    other_line = board.best_price(event, "spread", "home", -3.5)
+    assert other_line is not None and other_line.sportsbook.key == "northline"
+    away_side = board.best_price(event, "spread", "away", 4.5)
+    assert away_side is not None and away_side.sportsbook.key == "cardinal"
+    assert board.best_price(event, "spread", "home", -5.5) is None  # nobody quotes it
+    assert board.best_price(event, "spread", "home", 4.5) is None  # that is the away line
+    assert board.best_price(event, "spread", "home") is None  # a spread needs its line
+
+    # The consensus line, per outcome. Two of three usable books are on -4.5.
+    assert board.consensus_outcome_line(event, "spread", "home") == -4.5
+    assert board.consensus_outcome_line(event, "spread", "away") == 4.5
+    assert board.consensus_outcome_line(event, "spread", "over") is None
+    assert board.consensus_outcome_line(event, "moneyline", "home") is None
+    assert board.event_odds(event, "spread").consensus.line == -4.5
+    scripted.quotes = [("oldmill", "open", 5000, [("home", -4.5, 200), ("away", 4.5, -240)])]
+    assert board.consensus_outcome_line(event, "spread", "home") is None

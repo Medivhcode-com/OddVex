@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import Bet, SyncConnection, SyncImportRun, utcnow
-from ..deps import CurrentUserDep, DbDep, SettingsDep, write_audit
+from ..deps import CurrentUserDep, DbDep, NowDep, SettingsDep, write_audit
 from ..errors import (
     AUTH_ERROR_RESPONSES,
     NOT_FOUND_RESPONSE,
@@ -18,6 +18,8 @@ from ..errors import (
     ErrorResponse,
     not_found,
 )
+from ..notifications import service as notifications
+from ..notifications import templates
 from . import service
 from .base import SyncProvider
 from .registry import SyncRegistry
@@ -147,7 +149,8 @@ def create_sync_connection(
         "again never creates duplicates. Retryable provider errors are retried up to "
         "`ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded "
         "with status `failed` and this returns 502 with `details.run_id` and "
-        "`details.retryable`."
+        "`details.retryable`. Either way a `sync_finished` notification is created, and "
+        "imported bets count towards the weekly staking reminder."
     ),
     responses={
         **NOT_FOUND_RESPONSE,
@@ -156,10 +159,16 @@ def create_sync_connection(
     },
 )
 def run_sync(
-    connection_id: str, user: CurrentUserDep, db: DbDep, settings: SettingsDep, request: Request
+    connection_id: str,
+    user: CurrentUserDep,
+    db: DbDep,
+    settings: SettingsDep,
+    request: Request,
+    now: NowDep,
 ) -> SyncRunOut:
     connection = _owned_connection(db, user.id, connection_id)
     provider = _provider(request, connection.provider)
+    staked_before = notifications.staked_this_week(db, user.id, now)
     run = service.run_import(db, connection, provider, settings.sync_max_attempts)
     try:
         db.flush()
@@ -187,6 +196,21 @@ def run_sync(
             "duplicates": run.duplicate_count,
         },
     )
+    notifications.notify(
+        db,
+        user.id,
+        templates.sync_finished(
+            run_id=run.id,
+            connection_id=connection.id,
+            label=connection.label,
+            succeeded=run.status == "succeeded",
+            imported=run.imported_count,
+            duplicates=run.duplicate_count,
+            attempts=run.attempts,
+        ),
+    )
+    notifications.check_stake_reminder(db, user.id, staked_before, now, request)
+    notifications.trim(db, user.id)
     db.commit()
     if run.status != "succeeded":
         raise ApiError(

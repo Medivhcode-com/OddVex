@@ -13,10 +13,21 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .alerts import service as alerts_service
+from .alerts.schemas import (
+    GameFinalAlertCreate,
+    GameStartAlertCreate,
+    LineMoveAlertCreate,
+    PriceAtLeastAlertCreate,
+)
 from .auth.security import hash_password
 from .bets import service
 from .bets.schemas import BetCreate, BetLegIn, BetSettleRequest, LegResultIn
-from .db import Bet, User
+from .board import Board
+from .cache import InMemoryTTLCache
+from .config import Settings, get_settings
+from .db import AlertRule, Bet, User
+from .errors import ApiError
 from .providers import Event, SportsDataProvider
 
 DEMO_EMAIL = "demo@oddvex.test"
@@ -205,19 +216,110 @@ def _gradeable_bets(provider: SportsDataProvider, now: datetime) -> list[tuple[s
     ]
 
 
+def seed_demo_alerts(
+    db: Session,
+    user: User,
+    provider: SportsDataProvider,
+    now: datetime,
+    settings: Settings | None = None,
+) -> int:
+    """Give the demo user a few alert rules and run them once. Returns the rules created.
+
+    Idempotent: does nothing when the user already has alert rules. The rules are built
+    and evaluated by the same code the API uses, so the resulting notifications are real
+    output of the engine on the current synthetic data:
+
+    * a price alert whose threshold is already met (fires at once, becomes ``triggered``),
+    * a price alert far above the market and a 3-point line-move alert (stay ``active``),
+    * a final-score alert for a team, armed as if before its last two games (two
+      notifications, stays ``active``),
+    * a game-start alert for a team, 24 hours ahead (fires for its next game, stays
+      ``active``).
+    """
+    if db.scalar(select(AlertRule.id).where(AlertRule.user_id == user.id).limit(1)) is not None:
+        return 0
+    board = Board(provider, settings or get_settings(), InMemoryTTLCache())
+    upcoming = sorted(provider.list_events(status="upcoming"), key=lambda e: (e.start_time, e.id))
+    finals = sorted(provider.list_events(status="final"), key=lambda e: (e.start_time, e.id))
+    rules: list[AlertRule] = []
+
+    def add(body: alerts_service.AlertCreateBody) -> AlertRule | None:
+        rule = alerts_service.from_body(body)
+        try:
+            alerts_service.arm(board, rule)
+        except ApiError:
+            return None
+        rule.user_id = user.id
+        rules.append(rule)
+        return rule
+
+    priced = [
+        (event, best)
+        for event in upcoming
+        if (best := board.best_price(event, "moneyline", "home")) is not None
+    ]
+    if priced:
+        # The game priced closest to even money reads best in a demo.
+        event, best = min(priced, key=lambda pair: (abs(float(pair[1].price) - 2.0), pair[0].id))
+        start_team_id = event.home_team_id
+        # Slightly below the current best price, so the rule is met as soon as it runs.
+        add(
+            PriceAtLeastAlertCreate(
+                kind="price_at_least",
+                event_id=event.id,
+                market="moneyline",
+                outcome_key="home",
+                threshold=round(float(best.price) * 0.97, 4),
+                odds_format="decimal",
+            )
+        )
+        event, best = priced[-1]
+        add(
+            PriceAtLeastAlertCreate(
+                kind="price_at_least",
+                event_id=event.id,
+                market="moneyline",
+                outcome_key="home",
+                threshold=round(float(best.price) * 1.6, 4),
+                odds_format="decimal",
+            )
+        )
+        add(GameStartAlertCreate(kind="game_start", team_id=start_team_id, minutes_before=1440))
+    for event in upcoming:
+        if "total" in event.markets and add(
+            LineMoveAlertCreate(
+                kind="line_move", event_id=event.id, market="total", outcome_key="over", min_move=3
+            )
+        ):
+            break
+    if finals:
+        team_id = finals[-1].home_team_id
+        final_rule = add(GameFinalAlertCreate(kind="game_final", team_id=team_id))
+        if final_rule is not None:
+            # Arming marks every finished game as handled. Un-mark the last two, as if
+            # the rule had been created before they were played.
+            final_rule.fired_event_ids = list(final_rule.fired_event_ids)[:-2]
+    db.add_all(rules)
+    db.flush()
+    alerts_service.evaluate_user_alerts(db, user, now, board)
+    return len(rules)
+
+
 def seed_demo(
     db: Session,
     password: str,
     now: datetime,
     seed: int = DEMO_SEED,
     provider: SportsDataProvider | None = None,
+    settings: Settings | None = None,
 ) -> int:
     """Create the demo user and any missing demo bets. Returns the number of bets created.
 
     Idempotent: each demo bet has a stable external id, so running this again
     creates nothing new. An existing demo user's password is left untouched.
     With a ``provider``, ``DEMO_GRADEABLE_COUNT`` pending bets on already final
-    events are added as well (see :func:`_gradeable_bets`).
+    events are added as well (see :func:`_gradeable_bets`), and so are a few alert rules
+    with the notifications they produce (see :func:`seed_demo_alerts`).
     """
     user = db.scalar(select(User).where(User.email == DEMO_EMAIL))
     if user is None:
@@ -298,5 +400,7 @@ def seed_demo(
             bet.external_bet_id = external_id
             db.add(bet)
             created += 1
+        db.flush()
+        seed_demo_alerts(db, user, provider, now, settings)
     db.commit()
     return created

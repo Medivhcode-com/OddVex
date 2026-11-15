@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .account import router as account_router
+from .alerts import router as alerts_router
+from .alerts.throttle import EvaluationThrottle
 from .api import admin, data, quant_routes
 from .assistant import router as assistant_router
 from .auth import router as auth_router
@@ -22,6 +24,7 @@ from .db import Base, make_engine, make_session_factory
 from .errors import ErrorResponse, install_error_handlers
 from .logging_config import configure_logging
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+from .notifications import router as notifications_router
 from .providers import SportsDataProvider, SyntheticProvider
 from .ratelimit import SlidingWindowRateLimiter
 from .sync import SyncRegistry, default_registry
@@ -51,6 +54,20 @@ TAGS = [
     {"name": "auth", "description": "Accounts. Registration requires a 21+ attestation."},
     {"name": "bets", "description": "Bet tracker. Records bets placed elsewhere; owner-scoped."},
     {"name": "watchlist", "description": "Watched teams, players and events; owner-scoped."},
+    {
+        "name": "alerts",
+        "description": (
+            "Alert rules on prices, line moves, game starts and final scores; owner-scoped. "
+            "Evaluated on request: there is no background worker."
+        ),
+    },
+    {
+        "name": "notifications",
+        "description": (
+            "In-app notifications, their preferences and the weekly staking reminder "
+            "(a reminder, never a limit); owner-scoped."
+        ),
+    },
     {"name": "sync", "description": "Sportsbook account import. Mock provider only."},
     {"name": "assistant", "description": "Rule-based assistant. No language model."},
     {"name": "admin", "description": "Administrator overview."},
@@ -120,6 +137,7 @@ def create_app(
                     settings.demo_password,
                     app.state.provider.now(),
                     provider=app.state.provider,
+                    settings=settings,
                 )
             logger.info("demo_seed", extra={"created_bets": created})
         logger.info("startup", extra={"env": settings.env, "provider": app.state.provider.name})
@@ -142,6 +160,7 @@ def create_app(
     app.state.cache = InMemoryTTLCache()
     app.state.rate_limiter = SlidingWindowRateLimiter(settings.rate_limit_window_seconds)
     app.state.sync_registry = sync_registry or default_registry()
+    app.state.alert_throttle = EvaluationThrottle()
 
     # Added first = innermost, so a 413 still gets the request id, security and CORS headers.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
@@ -151,7 +170,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=["X-Request-ID", "Retry-After"],
         max_age=600,
@@ -165,6 +184,8 @@ def create_app(
     app.include_router(account_router.router, prefix="/v1")
     app.include_router(bets_router.router, prefix="/v1")
     app.include_router(watchlist_router.router, prefix="/v1")
+    app.include_router(alerts_router.router, prefix="/v1")
+    app.include_router(notifications_router.router, prefix="/v1")
     app.include_router(sync_router.router, prefix="/v1")
     app.include_router(assistant_router.router, prefix="/v1")
     app.include_router(admin.router, prefix="/v1")

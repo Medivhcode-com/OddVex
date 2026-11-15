@@ -10,13 +10,14 @@ provenance columns the provider contract already carries.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     ForeignKey,
     Index,
     Integer,
@@ -57,6 +58,18 @@ class User(Base):
     )
     watchlist_items: Mapped[list[WatchlistItem]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    alert_rules: Mapped[list[AlertRule]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    notifications: Mapped[list[Notification]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    notification_preferences: Mapped[NotificationPreference | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True, uselist=False
+    )
+    stake_reminder: Mapped[StakeReminder | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True, uselist=False
     )
 
 
@@ -201,6 +214,109 @@ class WatchlistItem(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     user: Mapped[User] = relationship(back_populates="watchlist_items")
+
+
+class AlertRule(Base):
+    """A condition a user wants to be notified about. Ids are provider ids, not foreign keys."""
+
+    __tablename__ = "alert_rules"
+    __table_args__ = (Index("ix_alert_rules_user_state", "user_id", "state"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: price_at_least | line_move | game_start | game_final
+    kind: Mapped[str] = mapped_column(String(24))
+    #: active | triggered | expired | paused
+    state: Mapped[str] = mapped_column(String(16), default="active")
+    event_id: Mapped[str | None] = mapped_column(String(64))
+    team_id: Mapped[str | None] = mapped_column(String(64))
+    market: Mapped[str | None] = mapped_column(String(16))
+    outcome_key: Mapped[str | None] = mapped_column(String(16))
+    line: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    #: price_at_least: the price to reach, as decimal odds.
+    threshold_decimal: Mapped[Decimal | None] = mapped_column(ODDS)
+    #: line_move: points the consensus line has to move, and where it started.
+    min_move: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    baseline_line: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    #: game_start: how long before the start to notify.
+    minutes_before: Mapped[int | None] = mapped_column(Integer)
+    #: Team-scoped rules: event ids already handled (notified, or already final when the
+    #: rule was created or resumed), so each game is notified at most once.
+    fired_event_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    #: Bumped each time a triggered rule is re-armed; part of the notification dedupe key.
+    arm_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    #: Display name of the event or team captured at creation.
+    label: Mapped[str] = mapped_column(String(200))
+    league: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+    triggered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    user: Mapped[User] = relationship(back_populates="alert_rules")
+
+
+class Notification(Base):
+    """An in-app notification. ``dedupe_key`` makes creation idempotent per user."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "dedupe_key", name="uq_notifications_user_dedupe_key"),
+        Index("ix_notifications_user_created_at", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: price_alert | line_move | game_start | game_final | bet_settled | sync_finished |
+    #: stake_reminder
+    kind: Mapped[str] = mapped_column(String(24))
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    href: Mapped[str | None] = mapped_column(String(300))
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    #: The alert rule that produced it, if any. Kept as a plain id (the rule id is also part
+    #: of ``dedupe_key``) so deleting a rule never touches notifications already delivered.
+    rule_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(160))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    user: Mapped[User] = relationship(back_populates="notifications")
+
+
+class NotificationPreference(Base):
+    """Per-user notification switches. No row means every kind is enabled."""
+
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    #: Notification kinds switched off for in-app delivery.
+    in_app_disabled: Mapped[list[str]] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="notification_preferences")
+
+
+class StakeReminder(Base):
+    """A user's weekly staking reminder threshold. A reminder, never a limit."""
+
+    __tablename__ = "stake_reminders"
+
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    #: Null means the reminder is off.
+    weekly_stake_threshold: Mapped[Decimal | None] = mapped_column(MONEY)
+    #: Monday (UTC) of the last week a reminder was created for; one reminder per week.
+    last_reminded_week: Mapped[date | None] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="stake_reminder")
 
 
 class AuditLog(Base):
