@@ -3,6 +3,7 @@
 from .clv import CLVResult, closing_line_value
 from .errors import QuantError
 from .ev import EVResult, expected_value, money, payout, profit, roi, validate_stake
+from .grading import GRADE_RESULTS, GRADEABLE_MARKETS, grade_leg, is_gradeable, valid_outcome_keys
 from .hitrate import HitRate, hit_rate, wilson_interval
 from .novig import NoVigResult, no_vig
 from .odds import (
@@ -33,6 +34,8 @@ from .parlay import (
 
 __all__ = [
     "BET_RESULTS",
+    "GRADEABLE_MARKETS",
+    "GRADE_RESULTS",
     "INDEPENDENCE_NOTE",
     "LEG_RESULTS",
     "CLVResult",
@@ -53,8 +56,10 @@ __all__ = [
     "describe_price",
     "expected_value",
     "fractional_to_decimal",
+    "grade_leg",
     "hit_rate",
     "implied_probability",
+    "is_gradeable",
     "money",
     "no_vig",
     "parse_odds",
@@ -64,6 +69,7 @@ __all__ = [
     "roi",
     "settle_bet",
     "settle_parlay",
+    "valid_outcome_keys",
     "validate_decimal_odds",
     "validate_probability",
     "validate_stake",

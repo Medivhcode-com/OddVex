@@ -29,8 +29,15 @@ def verify_password(password: str, password_hash: str | None) -> bool:
 
 
 def create_access_token(
-    user_id: str, role: str, secret: str, ttl_minutes: int, now: datetime | None = None
+    user_id: str,
+    role: str,
+    secret: str,
+    ttl_minutes: int,
+    now: datetime | None = None,
+    token_version: int = 0,
 ) -> tuple[str, int]:
+    """Sign an access token. ``token_version`` is the user's current ``token_version``;
+    it is only written when non-zero, so a token without the claim means version 0."""
     issued = now or datetime.now(UTC)
     ttl_seconds = ttl_minutes * 60
     payload: dict[str, Any] = {
@@ -40,6 +47,8 @@ def create_access_token(
         "iat": int(issued.timestamp()),
         "exp": int((issued + timedelta(seconds=ttl_seconds)).timestamp()),
     }
+    if token_version:
+        payload["ver"] = token_version
     return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM), ttl_seconds
 
 

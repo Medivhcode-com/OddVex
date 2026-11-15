@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import Bet, SyncConnection, SyncImportRun, utcnow
@@ -150,6 +151,7 @@ def create_sync_connection(
     ),
     responses={
         **NOT_FOUND_RESPONSE,
+        409: {"model": ErrorResponse, "description": "A concurrent import collided; try again"},
         502: {"model": ErrorResponse, "description": "The provider failed; the run is recorded"},
     },
 )
@@ -159,7 +161,18 @@ def run_sync(
     connection = _owned_connection(db, user.id, connection_id)
     provider = _provider(request, connection.provider)
     run = service.run_import(db, connection, provider, settings.sync_max_attempts)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        # Another import of the same account committed between the duplicate check and
+        # this insert. Nothing from this run is kept; the other run has the bets.
+        db.rollback()
+        raise ApiError(
+            409,
+            "sync_conflict",
+            "Another import of this account was running at the same time. Try again.",
+            details={"retryable": True},
+        ) from exc
     write_audit(
         db,
         request,

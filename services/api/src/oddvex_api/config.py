@@ -44,6 +44,9 @@ class Settings(BaseSettings):
 
     sync_max_attempts: int = 3
 
+    #: Largest request body accepted, in bytes. Larger requests get 413.
+    max_body_bytes: int = Field(default=64 * 1024, ge=1024)
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"

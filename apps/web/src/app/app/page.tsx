@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { formatLine, formatMoney, formatPercent, titleCase } from "@/lib/format";
 import { getLeagues, leagueLabel } from "@/lib/leagues";
 import { currentUser } from "@/lib/session";
+import { getWatchlist } from "@/lib/watchlist";
 import type { BetSummary, EventSummary, PropBoardRow } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Home" };
@@ -19,6 +20,10 @@ export default async function DashboardPage() {
     api<PropBoardRow[]>("/v1/props").catch(() => [] as PropBoardRow[]),
     user ? api<BetSummary>("/v1/bets/summary", { auth: true }).catch(() => null) : null,
   ]);
+  const [watchlist, watchedEvents] = user
+    ? await Promise.all([getWatchlist(true), api<EventSummary[]>("/v1/watchlist/events", { auth: true }).catch(() => [] as EventSummary[])])
+    : [[], [] as EventSummary[]];
+  const watchedPlayers = watchlist.filter((item) => item.kind === "player" && item.player);
   const live = events.filter((event) => event.status === "live");
   const upcoming = events.filter((event) => event.status === "upcoming").sort((a, b) => a.start_time.localeCompare(b.start_time));
   const board = [...live, ...upcoming].slice(0, 6);
@@ -90,6 +95,44 @@ export default async function DashboardPage() {
             </div>
           </Panel>
         </div>
+
+        {user ? (
+          <section aria-labelledby="watch-heading" className="lg:col-span-3">
+            <h2 id="watch-heading" className="mb-3 font-semibold">
+              Your watchlist
+            </h2>
+            {watchlist.length === 0 ? (
+              <Panel>
+                <EmptyState title="Nothing followed yet">Open a game or a player and choose Follow. Their upcoming games show up here.</EmptyState>
+              </Panel>
+            ) : (
+              <>
+                {watchedEvents.length ? (
+                  <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {watchedEvents.slice(0, 6).map((event) => (
+                      <li key={event.id}>
+                        <EventCard event={event} leagueName={leagueLabel(leagues, event.league)} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted">No live or upcoming games for what you follow.</p>
+                )}
+                {watchedPlayers.length ? (
+                  <ul className="mt-3 flex flex-wrap gap-2">
+                    {watchedPlayers.map((item) => (
+                      <li key={item.id}>
+                        <Link href={`/app/props/${item.ref_id}`} className="inline-flex min-h-9 items-center rounded-full border border-line px-3.5 text-sm font-medium hover:border-line-strong hover:bg-raised">
+                          {item.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
+          </section>
+        ) : null}
 
         <Panel aria-labelledby="props-heading" className="lg:col-span-3">
           <PanelHeader

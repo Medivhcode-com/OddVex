@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _EMAIL_RE = re.compile(
     r"^[^@\s]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\.[A-Za-z]{2,24}$"
@@ -55,6 +55,17 @@ class LoginRequest(BaseModel):
     @classmethod
     def _lower(cls, value: str) -> str:
         return value.strip().lower()
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+    @model_validator(mode="after")
+    def _must_differ(self) -> PasswordChangeRequest:
+        if self.new_password == self.current_password:
+            raise ValueError("the new password must be different from the current password")
+        return self
 
 
 class UserOut(BaseModel):

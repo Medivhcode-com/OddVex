@@ -18,6 +18,13 @@ BetStatusFilter = Literal[
     "pending", "settled", "won", "lost", "push", "void", "half_won", "half_lost", "cashout"
 ]
 
+OutcomeKey = Literal["home", "away", "draw", "over", "under"]
+SettledBy = Literal["user", "auto"]
+BetSort = Literal["placed_at", "-placed_at", "stake", "-stake", "profit", "-profit"]
+AutoSettleSkipReason = Literal[
+    "not_gradeable", "event_not_final", "event_unavailable", "manual_result_required"
+]
+
 MAX_STAKE = 1_000_000
 
 
@@ -27,7 +34,24 @@ class BetLegIn(BaseModel):
     league: str | None = Field(default=None, max_length=32, examples=["nba"])
     event_id: str | None = Field(default=None, max_length=64)
     event_label: str | None = Field(default=None, max_length=200)
-    line: float | None = Field(default=None, ge=-100000, le=100000)
+    line: float | None = Field(
+        default=None,
+        ge=-100000,
+        le=100000,
+        description=(
+            "Spread: the handicap of the selected side (home -3.5 is `-3.5`, the away side "
+            "of that market is `+3.5`). Total: the points line."
+        ),
+    )
+    outcome_key: OutcomeKey | None = Field(
+        default=None,
+        description=(
+            "Structured selection. With `event_id`, a `market` of moneyline, spread or total "
+            "and (for spread and total) `line`, the leg can be graded automatically from the "
+            "final score. moneyline: home, away, or draw where the league has a 3-way "
+            "market. spread: home or away. total: over or under."
+        ),
+    )
     odds: OddsValue = Field(examples=[-110, "+150", 2.5, "5/2"])
     odds_format: OddsFormatIn = "american"
     closing_odds: OddsValue | None = Field(
@@ -136,6 +160,11 @@ class BetLegOut(BaseModel):
         default=None, description="decimal_taken / decimal_closing - 1, as a fraction."
     )
     result: LegResult | None = None
+    outcome_key: OutcomeKey | None = None
+    gradeable: bool = Field(
+        default=False,
+        description="True when the leg has event_id, a gradeable market, outcome_key and line.",
+    )
 
 
 class BetOut(BaseModel):
@@ -162,12 +191,37 @@ class BetOut(BaseModel):
     notes: str | None = None
     placed_at: datetime
     settled_at: datetime | None = None
+    settled_by: SettledBy | None = Field(
+        default=None,
+        description=(
+            "user: settled by hand. auto: graded from final scores by auto-settle. Null "
+            "while pending and for bets that were imported already settled."
+        ),
+    )
     source: BetSource
     sync_connection_id: str | None = None
     external_bet_id: str | None = None
     legs: list[BetLegOut]
     created_at: datetime
     updated_at: datetime
+
+
+class AutoSettleSkipOut(BaseModel):
+    bet_id: str
+    reason: AutoSettleSkipReason = Field(
+        description=(
+            "not_gradeable: a leg has no structured selection. event_not_final: a leg's "
+            "event has not finished. event_unavailable: the data provider no longer has a "
+            "leg's event. manual_result_required: the bet carries its own price and a leg "
+            "pushed, so the payout cannot be derived."
+        )
+    )
+
+
+class AutoSettleOut(BaseModel):
+    checked: int = Field(description="Pending bets examined.")
+    settled: list[BetOut]
+    skipped: list[AutoSettleSkipOut]
 
 
 class BetTotalsOut(BaseModel):

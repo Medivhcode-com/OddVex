@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ChangePasswordForm, ExportDataButton } from "@/components/app/account-forms";
 import { DeleteAccountForm } from "@/components/app/delete-account";
 import { OddsFormatToggle } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
@@ -58,6 +59,23 @@ export default async function SettingsPage() {
             <Link href="/responsible-gambling" className="text-ink underline">responsible gambling page</Link>.
           </p>
         </Panel>
+
+        {user ? (
+          <>
+            <Panel>
+              <PanelHeader title="Password" description="Changing it signs out every other device." />
+              <div className="p-4 sm:p-5">
+                <ChangePasswordForm />
+              </div>
+            </Panel>
+            <Panel>
+              <PanelHeader title="Your data" description="A JSON file with your account details, bets, watchlist, sync history and security log." />
+              <div className="p-4 sm:p-5">
+                <ExportDataButton />
+              </div>
+            </Panel>
+          </>
+        ) : null}
 
         {user ? (
           <Panel>

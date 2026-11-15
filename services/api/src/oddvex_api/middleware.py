@@ -10,7 +10,9 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .errors import envelope
 
@@ -26,6 +28,57 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "geolocation=(), camera=(), microphone=()",
     "Cross-Origin-Resource-Policy": "same-site",
 }
+
+
+class BodySizeLimitMiddleware:
+    """Reject request bodies larger than ``max_bytes`` with 413 in the error envelope.
+
+    A declared ``Content-Length`` over the limit is refused before the body is read.
+    Bodies without a usable length (chunked uploads) are counted while they are read and
+    refused as soon as they pass the limit, so an oversized body is never buffered.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    def _message(self) -> str:
+        return f"Request body is larger than the {self.max_bytes} byte limit"
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared: int | None = None
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                try:
+                    declared = int(value)
+                except ValueError:
+                    declared = None
+        if declared is not None and declared > self.max_bytes:
+            response = JSONResponse(
+                envelope("payload_too_large", self._message(), {"max_body_bytes": self.max_bytes}),
+                status_code=413,
+                headers={"Connection": "close"},
+            )
+            await response(scope, receive, send)
+            return
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    # Raised inside the route's body read; FastAPI re-raises HTTP
+                    # exceptions from there and the error handler renders the envelope.
+                    raise StarletteHTTPException(status_code=413, detail=self._message())
+            return message
+
+        await self.app(scope, limited_receive, send)
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -65,7 +118,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             response.headers.setdefault(
                 "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
             )
-        if path.startswith(("/v1/auth", "/v1/me", "/v1/bets", "/v1/sync", "/v1/admin")):
+        if path.startswith(
+            ("/v1/auth", "/v1/me", "/v1/bets", "/v1/sync", "/v1/admin", "/v1/watchlist")
+        ):
             response.headers.setdefault("Cache-Control", "no-store")
         if self._production:
             response.headers.setdefault(

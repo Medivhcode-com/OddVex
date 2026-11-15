@@ -44,11 +44,18 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     age_confirmed_at: Mapped[datetime] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    #: Bumped on every password change. Access tokens carry the value they were issued
+    #: under (claim ``ver``); a token with another value is rejected.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    password_changed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     bets: Mapped[list[Bet]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
     sync_connections: Mapped[list[SyncConnection]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    watchlist_items: Mapped[list[WatchlistItem]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -83,6 +90,9 @@ class Bet(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     placed_at: Mapped[datetime] = mapped_column(UTCDateTime)
     settled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: "user" (manual settle) or "auto" (graded from final scores). Null for pending bets
+    #: and for bets that arrived already settled from a sync import.
+    settled_by: Mapped[str | None] = mapped_column(String(16))
     source: Mapped[str] = mapped_column(String(16), default="manual")
     sync_connection_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("sync_connections.id", ondelete="SET NULL"), index=True
@@ -116,6 +126,9 @@ class BetLeg(Base):
     event_id: Mapped[str | None] = mapped_column(String(64), index=True)
     event_label: Mapped[str | None] = mapped_column(String(200))
     line: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    #: Structured selection: home | away | draw | over | under. With ``event_id``, ``market``
+    #: and (for spread/total) ``line`` it makes the leg gradeable from a final score.
+    outcome_key: Mapped[str | None] = mapped_column(String(16))
     odds_decimal: Mapped[Decimal] = mapped_column(ODDS)
     closing_odds_decimal: Mapped[Decimal | None] = mapped_column(ODDS)
     closing_opposite_odds_decimal: Mapped[Decimal | None] = mapped_column(ODDS)
@@ -165,6 +178,29 @@ class SyncImportRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     connection: Mapped[SyncConnection] = relationship(back_populates="runs")
+
+
+class WatchlistItem(Base):
+    """A team, player or event a user follows. ``ref_id`` is a provider id, not a foreign key."""
+
+    __tablename__ = "watchlist_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "ref_id", name="uq_watchlist_items_user_kind_ref"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: team | player | event
+    kind: Mapped[str] = mapped_column(String(16))
+    ref_id: Mapped[str] = mapped_column(String(64))
+    #: Display name captured when the item was added, so it survives the provider dropping it.
+    label: Mapped[str] = mapped_column(String(200))
+    league: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="watchlist_items")
 
 
 class AuditLog(Base):

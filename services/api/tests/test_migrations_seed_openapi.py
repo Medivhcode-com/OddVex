@@ -15,16 +15,25 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, select
+from sqlalchemy import DateTime, bindparam, inspect, select, text
 
+from oddvex_api.auth.security import hash_password
 from oddvex_api.db import Base, Bet, User, make_engine, make_session_factory
-from oddvex_api.seed import DEMO_BET_COUNT, DEMO_EMAIL, seed_demo
+from oddvex_api.seed import DEMO_BET_COUNT, DEMO_EMAIL, DEMO_GRADEABLE_COUNT, seed_demo
 
-from .conftest import AppFactory
+from .conftest import EXTERNAL_DATABASE_URL, AppFactory, _reset_external_database
 from .test_provider_synthetic import REAL_NAMES
 
 API_ROOT = Path(__file__).resolve().parents[1]
-TABLES = {"users", "bets", "bet_legs", "sync_connections", "sync_import_runs", "audit_log"}
+TABLES = {
+    "users",
+    "bets",
+    "bet_legs",
+    "sync_connections",
+    "sync_import_runs",
+    "audit_log",
+    "watchlist_items",
+}
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
 
@@ -46,6 +55,148 @@ def test_upgrade_head_on_a_fresh_database_matches_the_models(tmp_path: Path) -> 
     assert diff == [], diff
     command.downgrade(alembic_config(url), "base")
     assert set(inspect(make_engine(url)).get_table_names()) == {"alembic_version"}
+
+
+def _database_urls() -> list[str]:
+    """SQLite always; the external (PostgreSQL) database too when one is configured."""
+    return ["sqlite", *([EXTERNAL_DATABASE_URL] if EXTERNAL_DATABASE_URL else [])]
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0001_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0001")
+    engine = make_engine(url)
+    assert "watchlist_items" not in inspect(engine).get_table_names()
+
+    # Rows written by the previous release.
+    stamp = datetime(2026, 2, 1, 12, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+                "age_confirmed_at, created_at) VALUES (:id, :email, :hash, 'Old', 'user', "
+                ":active, :at, :at)"
+            ).bindparams(bindparam("at", type_=DateTime(timezone=True))),
+            {
+                "id": "u" * 32,
+                "email": "old@example.test",
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+            },
+        )
+        for bet_id, status, result, source in (
+            ("b" * 32, "settled", "won", "manual"),
+            ("c" * 32, "pending", None, "manual"),
+            ("d" * 32, "settled", "lost", "sync"),
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO bets (id, user_id, bet_type, status, result, sport, sportsbook, "
+                    "stake, odds_decimal, odds_source, payout, profit, placed_at, settled_at, "
+                    "source, created_at, updated_at) VALUES (:id, :user, 'straight', :status, "
+                    ":result, 'nba', 'Northline', 10, 2.0, 'legs', :payout, :profit, :at, "
+                    ":settled, :source, :at, :at)"
+                ).bindparams(
+                    bindparam("at", type_=DateTime(timezone=True)),
+                    bindparam("settled", type_=DateTime(timezone=True)),
+                ),
+                {
+                    "id": bet_id,
+                    "user": "u" * 32,
+                    "status": status,
+                    "result": result,
+                    "payout": {"won": 20, "lost": 0}.get(result or ""),
+                    "profit": {"won": 10, "lost": -10}.get(result or ""),
+                    "settled": stamp if status == "settled" else None,
+                    "source": source,
+                    "at": stamp,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO bet_legs (id, bet_id, position, selection, market, event_id, "
+                    "line, odds_decimal) VALUES (:id, :bet, 0, 'Tides -3.5', 'spread', "
+                    "'evt_nba_20260201_0', -3.5, 2.0)"
+                ),
+                {"id": bet_id[:1].upper() * 32, "bet": bet_id},
+            )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert "watchlist_items" in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    assert diff == [], diff
+    command.check(config)  # `alembic check`: models and migrations agree
+
+    with make_session_factory(engine)() as db:
+        user = db.scalar(select(User))
+        assert user is not None and user.email == "old@example.test"
+        assert user.token_version == 0 and user.password_changed_at is None
+        bets = {b.id[0]: b for b in db.scalars(select(Bet))}
+        assert len(bets) == 3
+        # Backfill: bets settled by hand were settled by the user; imports and pending are null.
+        assert bets["b"].settled_by == "user" and bets["b"].profit == 10
+        assert bets["c"].settled_by is None and bets["d"].settled_by is None
+        assert all(leg.outcome_key is None for b in bets.values() for leg in b.legs)
+        assert all(float(leg.line or 0) == -3.5 for b in bets.values() for leg in b.legs)
+    engine.dispose()
+
+    # The current app runs on the upgraded data: old login, old bets, new features.
+    app = make_app(database_url=url, env="production", jwt_secret="k" * 48)
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        listed = client.get("/v1/bets", headers=headers).json()
+        assert len(listed) == 3
+        assert all(b["legs"][0]["gradeable"] is False for b in listed)
+        assert {b["settled_by"] for b in listed} == {"user", None}
+        skipped = client.post("/v1/bets/auto-settle", headers=headers).json()
+        assert skipped["settled"] == [] and skipped["skipped"][0]["reason"] == "not_gradeable"
+        team_id = client.get("/v1/events").json()[0]["home_team"]["id"]
+        added = client.post(
+            "/v1/watchlist", json={"kind": "team", "ref_id": team_id}, headers=headers
+        )
+        assert added.status_code == 201
+        assert len(client.get("/v1/me/export", headers=headers).json()["bets"]) == 3
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0002 added; the 0001 data is still there.
+    command.downgrade(config, "0001")
+    engine = make_engine(url)
+    inspector = inspect(engine)
+    assert "watchlist_items" not in inspector.get_table_names()
+    assert "token_version" not in {c["name"] for c in inspector.get_columns("users")}
+    assert "settled_by" not in {c["name"] for c in inspector.get_columns("bets")}
+    assert "outcome_key" not in {c["name"] for c in inspector.get_columns("bet_legs")}
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM users")).scalar() == 1
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 3
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 3
+        assert connection.execute(text("SELECT email FROM users")).scalar() == "old@example.test"
+    engine.dispose()
+
+    # And back up again, then all the way down.
+    command.upgrade(config, "head")
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
 
 
 def test_app_works_on_a_migrated_database_without_auto_create(
@@ -177,7 +328,9 @@ def test_demo_user_can_log_in_and_see_a_summary(make_app: AppFactory) -> None:
         )
         assert login.status_code == 200
         headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-        assert len(client.get("/v1/bets", headers=headers).json()) == 40
+        # 40 history bets plus the gradeable ones the app seeds with its provider.
+        assert DEMO_BET_COUNT + DEMO_GRADEABLE_COUNT == 44
+        assert len(client.get("/v1/bets", headers=headers).json()) == 44
         summary = client.get("/v1/bets/summary", headers=headers).json()
         assert summary["totals"]["settled_count"] >= 28
         assert summary["totals"]["pending_count"] >= 7
@@ -217,7 +370,7 @@ def test_seed_script_refuses_production(tmp_path: Path) -> None:
         [sys.executable, script], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
     )
     assert first.returncode == 0, first.stderr
-    assert "40 bet(s) created" in first.stdout
+    assert "44 bet(s) created" in first.stdout  # 40 history bets + 4 gradeable
     second = subprocess.run(
         [sys.executable, script], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
     )
@@ -247,6 +400,13 @@ EXPECTED_OPERATIONS = {
     ("POST", "/v1/auth/login"): "login",
     ("GET", "/v1/me"): "get_me",
     ("DELETE", "/v1/me"): "delete_me",
+    ("GET", "/v1/me/export"): "export_my_data",
+    ("POST", "/v1/me/password"): "change_password",
+    ("GET", "/v1/watchlist"): "list_watchlist",
+    ("POST", "/v1/watchlist"): "add_watchlist_item",
+    ("GET", "/v1/watchlist/events"): "list_watchlist_events",
+    ("DELETE", "/v1/watchlist/{item_id}"): "remove_watchlist_item",
+    ("POST", "/v1/bets/auto-settle"): "auto_settle_bets",
     ("GET", "/v1/bets"): "list_bets",
     ("POST", "/v1/bets"): "create_bet",
     ("GET", "/v1/bets/summary"): "get_bet_summary",

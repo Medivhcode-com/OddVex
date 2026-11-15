@@ -3,6 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import clsx from "clsx";
 import { Freshness } from "@/components/app/freshness";
+import { WatchButton } from "@/components/app/watch-button";
+import { currentUser } from "@/lib/session";
+import { getWatchlist, watchId } from "@/lib/watchlist";
 import { Price } from "@/components/app/odds-format";
 import { GameLogBars } from "@/components/ui/charts";
 import { Notice, Panel, PanelHeader, Segmented, Stat } from "@/components/ui/primitives";
@@ -43,6 +46,8 @@ export default async function PropAnalyzerPage({ params, searchParams }: Props) 
   const split = pick(query.split, SPLITS, "all");
   const data = await apiOrNull<PropAnalysis>(`/v1/players/${playerId}/props`, { query: { market: query.market, window, split } });
   if (!data) notFound();
+  const user = await currentUser().catch(() => null);
+  const watchlist = await getWatchlist(Boolean(user));
   const market = data.market;
   const href = (next: { market?: string; window?: string; split?: string }) =>
     withQuery(`/app/props/${playerId}`, { market: next.market ?? market, window: next.window ?? window, split: next.split ?? split });
@@ -64,6 +69,9 @@ export default async function PropAnalyzerPage({ params, searchParams }: Props) 
           {data.opponent ? `. Next: ${data.opponent.name}` : ""}
           {data.next_event ? `, ${formatDay(data.next_event.start_time)}` : ""}
         </p>
+        <div className="mt-3">
+          <WatchButton kind="player" refId={data.player.id} name={data.player.name} itemId={watchId(watchlist, "player", data.player.id)} signedIn={Boolean(user)} returnTo={`/app/props/${playerId}`} />
+        </div>
       </div>
 
       <div className="mb-5 space-y-1">

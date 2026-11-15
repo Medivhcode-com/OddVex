@@ -15,7 +15,13 @@ from ..errors import (
     ErrorResponse,
 )
 from ..ratelimit import rate_limit
-from .schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from .schemas import (
+    LoginRequest,
+    PasswordChangeRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserOut,
+)
 from .security import create_access_token, hash_password, verify_password
 
 router = APIRouter(tags=["auth"])
@@ -23,7 +29,11 @@ router = APIRouter(tags=["auth"])
 
 def _token_response(user: User, settings: Settings) -> TokenResponse:
     token, ttl = create_access_token(
-        user.id, user.role, settings.jwt_secret, settings.jwt_ttl_minutes
+        user.id,
+        user.role,
+        settings.jwt_secret,
+        settings.jwt_ttl_minutes,
+        token_version=user.token_version,
     )
     return TokenResponse(access_token=token, expires_in=ttl, user=UserOut.model_validate(user))
 
@@ -105,7 +115,8 @@ def me(user: CurrentUserDep) -> UserOut:
     operation_id="delete_me",
     summary="Delete the account and all of its data",
     description=(
-        "Permanently deletes the user, their bets, bet legs, sync connections and import runs. "
+        "Permanently deletes the user, their bets, bet legs, watchlist, sync connections and "
+        "import runs. "
         "An audit entry containing only the opaque user id is retained."
     ),
     responses=AUTH_ERROR_RESPONSES,
@@ -118,3 +129,49 @@ def delete_me(user: CurrentUserDep, request: Request, db: DbDep) -> Response:
     )
     db.commit()
     return Response(status_code=204)
+
+
+@router.post(
+    "/me/password",
+    response_model=TokenResponse,
+    operation_id="change_password",
+    summary="Change the password and get a fresh access token",
+    description=(
+        "Every access token issued before the change stops working immediately, including "
+        "the one used for this request. The response carries a replacement token."
+    ),
+    dependencies=[Depends(rate_limit("auth"))],
+    responses={
+        400: {"model": ErrorResponse, "description": "The current password is not correct"},
+        **AUTH_ERROR_RESPONSES,
+        **RATE_LIMIT_RESPONSE,
+    },
+)
+def change_password(
+    body: PasswordChangeRequest,
+    user: CurrentUserDep,
+    request: Request,
+    db: DbDep,
+    settings: SettingsDep,
+) -> TokenResponse:
+    if not verify_password(body.current_password, user.password_hash):
+        write_audit(
+            db,
+            request,
+            "auth.password_change_failed",
+            user_id=user.id,
+            entity_type="user",
+            entity_id=user.id,
+        )
+        db.commit()
+        raise ApiError(
+            400, "invalid_credentials", "The password was not changed. Check the details."
+        )
+    user.password_hash = hash_password(body.new_password)
+    user.token_version += 1
+    user.password_changed_at = utcnow()
+    write_audit(
+        db, request, "auth.password_changed", user_id=user.id, entity_type="user", entity_id=user.id
+    )
+    db.commit()
+    return _token_response(user, settings)

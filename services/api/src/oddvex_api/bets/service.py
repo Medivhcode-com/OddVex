@@ -7,18 +7,26 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from ..db import Bet, BetLeg, utcnow
 from ..errors import ApiError
+from ..providers import Event, SportsDataProvider
 from ..quant import (
+    GRADEABLE_MARKETS,
     ParlayLeg,
     QuantError,
     closing_line_value,
+    grade_leg,
+    is_gradeable,
     money,
     payout,
     profit,
     roi,
     settle_bet,
     settle_parlay,
+    valid_outcome_keys,
 )
 from ..schemas import odds_to_decimal, price_out
 from .schemas import (
@@ -31,6 +39,7 @@ from .schemas import (
     BetTotalsOut,
     BetUpdate,
     BreakdownRowOut,
+    LegResultIn,
     TimelinePointOut,
     _check_leg_count,
 )
@@ -69,10 +78,77 @@ def build_leg(data: BetLegIn, position: int) -> BetLeg:
         event_id=data.event_id,
         event_label=data.event_label,
         line=Decimal(str(data.line)) if data.line is not None else None,
+        outcome_key=data.outcome_key,
         odds_decimal=_q(odds_to_decimal(data.odds, data.odds_format)),
         closing_odds_decimal=closing,
         closing_opposite_odds_decimal=closing_opposite,
     )
+
+
+def _selection_error(code: str, message: str, index: int, **details: object) -> ApiError:
+    return ApiError(422, code, f"Leg {index + 1}: {message}", details={"leg": index, **details})
+
+
+def resolve_structured_legs(
+    legs: Sequence[BetLegIn], provider: SportsDataProvider
+) -> list[BetLegIn]:
+    """Validate legs that carry a structured selection (``outcome_key``) against the provider.
+
+    Legs without ``outcome_key`` are free text and pass through untouched, exactly as
+    before structured legs existed. For a structured leg the event must exist and offer
+    the market, the outcome must be valid for it (``draw`` only where the league has a
+    3-way moneyline) and spread/total need a line. A missing ``league`` or
+    ``event_label`` is filled in from the event.
+    """
+    three_way = {league.key: league.has_draw for league in provider.list_leagues()}
+    resolved: list[BetLegIn] = []
+    for index, leg in enumerate(legs):
+        if leg.outcome_key is None:
+            resolved.append(leg)
+            continue
+        market = leg.market.strip().lower()
+        if market not in GRADEABLE_MARKETS:
+            raise _selection_error(
+                "invalid_selection",
+                "outcome_key can only be used with the moneyline, spread or total market",
+                index,
+            )
+        if not leg.event_id:
+            raise _selection_error("invalid_selection", "outcome_key needs an event_id", index)
+        event = provider.get_event(leg.event_id)
+        if event is None:
+            raise _selection_error("unknown_event", f"event '{leg.event_id}' was not found", index)
+        if market not in event.markets:
+            raise _selection_error(
+                "market_not_available",
+                f"market '{market}' is not offered for this event",
+                index,
+                available_markets=event.markets,
+            )
+        allowed = valid_outcome_keys(market, three_way.get(event.league, False))
+        if leg.outcome_key not in allowed:
+            raise _selection_error(
+                "invalid_selection",
+                f"outcome '{leg.outcome_key}' is not valid for {market} on this event",
+                index,
+                valid_outcome_keys=list(allowed),
+            )
+        if market != "moneyline" and leg.line is None:
+            raise _selection_error("invalid_selection", f"a {market} selection needs a line", index)
+        updates: dict[str, object] = {"market": market}
+        if not leg.league:
+            updates["league"] = event.league
+        if not leg.event_label:
+            home = provider.get_team(event.home_team_id)
+            away = provider.get_team(event.away_team_id)
+            if home is not None and away is not None:
+                updates["event_label"] = f"{away.name} at {home.name}"
+        resolved.append(leg.model_copy(update=updates))
+    return resolved
+
+
+def leg_gradeable(leg: BetLeg) -> bool:
+    return bool(leg.event_id) and is_gradeable(leg.market, leg.outcome_key, leg.line)
 
 
 def sport_of(legs: Sequence[BetLeg]) -> str:
@@ -164,8 +240,11 @@ def update_bet(bet: Bet, data: BetUpdate) -> None:
     bet.updated_at = utcnow()
 
 
-def settle(bet: Bet, data: BetSettleRequest) -> None:
-    """Grade a bet. Re-settling an already settled bet overwrites the earlier result."""
+def settle(bet: Bet, data: BetSettleRequest, settled_by: str = "user") -> None:
+    """Grade a bet. Re-settling an already settled bet overwrites the earlier result.
+
+    The one settlement path: manual settles and auto-settlement both end up here.
+    """
     by_id = {leg.id: leg for leg in bet.legs}
     for item in data.leg_results or []:
         if item.leg_id not in by_id:
@@ -232,11 +311,93 @@ def settle(bet: Bet, data: BetSettleRequest) -> None:
     for leg in bet.legs:
         leg.result = staged[leg.id]
     bet.status = "settled"
+    bet.settled_by = settled_by
     bet.result = settlement.result
     bet.payout = settlement.payout
     bet.profit = settlement.profit
     bet.settled_at = data.settled_at.astimezone(UTC) if data.settled_at else utcnow()
     bet.updated_at = utcnow()
+
+
+# ------------------------------------------------------------ auto-settlement
+def _auto_grade(
+    bet: Bet, events: dict[str, Event | None], three_way: dict[str, bool]
+) -> tuple[str | None, BetSettleRequest | None]:
+    """Return ``(skip_reason, None)`` or ``(None, settle_request)`` for one pending bet."""
+    if not bet.legs or not all(leg_gradeable(leg) for leg in bet.legs):
+        return "not_gradeable", None
+    leg_events = [events[leg.event_id] for leg in bet.legs if leg.event_id]
+    if any(event is None for event in leg_events):
+        return "event_unavailable", None
+    if any(event is None or event.status != "final" or event.score is None for event in leg_events):
+        return "event_not_final", None
+    results: list[str] = []
+    for leg, event in zip(bet.legs, leg_events, strict=True):
+        assert event is not None and event.score is not None and leg.outcome_key is not None
+        try:
+            results.append(
+                grade_leg(
+                    leg.market,
+                    leg.outcome_key,
+                    leg.line,
+                    event.score.home,
+                    event.score.away,
+                    three_way=three_way.get(event.league, False),
+                )
+            )
+        except QuantError:
+            return "not_gradeable", None
+    request = BetSettleRequest(
+        leg_results=[
+            LegResultIn(leg_id=leg.id, result=result)  # type: ignore[arg-type]
+            for leg, result in zip(bet.legs, results, strict=True)
+        ]
+    )
+    if len(bet.legs) > 1 and bet.odds_source == "override" and "lost" not in results:
+        # The bet has its own price. All legs won or all pushed is unambiguous; a mix of
+        # wins and pushes needs the book's reduced price, which only the user knows.
+        if all(result == "push" for result in results):
+            request.result = "push"
+        elif any(result == "push" for result in results):
+            return "manual_result_required", None
+    return None, request
+
+
+def auto_settle(
+    db: Session, user_id: str, provider: SportsDataProvider
+) -> tuple[int, list[Bet], list[tuple[str, str]]]:
+    """Settle the user's pending bets whose legs can all be graded from final scores.
+
+    Returns ``(checked, settled, skipped)``. Grading is :func:`quant.grade_leg`; the
+    payout comes from :func:`settle`, the same path a manual settle takes. Nothing is
+    committed here.
+    """
+    pending = list(
+        db.scalars(
+            select(Bet)
+            .where(Bet.user_id == user_id, Bet.status == "pending")
+            .order_by(Bet.placed_at, Bet.id)
+        )
+    )
+    three_way = {league.key: league.has_draw for league in provider.list_leagues()}
+    events: dict[str, Event | None] = {}
+    settled: list[Bet] = []
+    skipped: list[tuple[str, str]] = []
+    for bet in pending:
+        for leg in bet.legs:
+            if leg.event_id and leg.event_id not in events:
+                events[leg.event_id] = provider.get_event(leg.event_id)
+        reason, request = _auto_grade(bet, events, three_way)
+        if request is not None:
+            try:
+                settle(bet, request, settled_by="auto")
+            except (ApiError, QuantError):
+                reason = "manual_result_required"
+            else:
+                settled.append(bet)
+                continue
+        skipped.append((bet.id, reason or "not_gradeable"))
+    return len(pending), settled, skipped
 
 
 # ------------------------------------------------------------- serialisation
@@ -286,6 +447,7 @@ def bet_out(bet: Bet) -> BetOut:
         notes=bet.notes,
         placed_at=bet.placed_at,
         settled_at=bet.settled_at,
+        settled_by=bet.settled_by,  # type: ignore[arg-type]
         source=bet.source,  # type: ignore[arg-type]
         sync_connection_id=bet.sync_connection_id,
         external_bet_id=bet.external_bet_id,
@@ -307,6 +469,8 @@ def bet_out(bet: Bet) -> BetOut:
                 ),
                 clv=_leg_clv(leg),
                 result=leg.result,  # type: ignore[arg-type]
+                outcome_key=leg.outcome_key,  # type: ignore[arg-type]
+                gradeable=leg_gradeable(leg),
             )
             for leg in bet.legs
         ],

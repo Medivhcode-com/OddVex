@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AutoSettleButton } from "@/components/app/auto-settle";
 import { BetActions } from "@/components/app/bet-actions";
 import { BetForm } from "@/components/app/bet-form";
 import { SyncPanel } from "@/components/app/sync-panel";
@@ -104,7 +105,11 @@ function BetRow({ bet, leagues }: { bet: Bet; leagues: League[] }) {
         </dl>
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        {bet.status === "settled" && bet.result ? <Badge tone={RESULT_TONE[bet.result] ?? "neutral"}>{titleCase(bet.result)}</Badge> : <Badge tone="second">Open</Badge>}
+        <span className="flex flex-wrap items-center gap-1.5">
+          {bet.status === "settled" && bet.result ? <Badge tone={RESULT_TONE[bet.result] ?? "neutral"}>{titleCase(bet.result)}</Badge> : <Badge tone="second">Open</Badge>}
+          {bet.settled_by === "auto" ? <Badge>Settled from final score</Badge> : null}
+          {bet.status === "pending" && bet.legs.every((leg) => leg.gradeable) ? <Badge>Tied to a game</Badge> : null}
+        </span>
         <BetActions key={`${bet.id}-${bet.status}-${bet.updated_at}`} bet={bet} label={title} />
       </div>
     </li>
@@ -171,7 +176,7 @@ export default async function TrackerPage() {
         </Panel>
 
         <Panel aria-labelledby="open-heading">
-          <PanelHeader id="open-heading" title="Open bets" description={`${open.length} open`} />
+          <PanelHeader id="open-heading" title="Open bets" description={`${open.length} open`} action={open.length ? <AutoSettleButton /> : undefined} />
           {open.length === 0 ? <EmptyState title="No open bets">Bets you log appear here until you settle them.</EmptyState> : <ul>{open.map((bet) => <BetRow key={bet.id} bet={bet} leagues={leagues} />)}</ul>}
         </Panel>
 

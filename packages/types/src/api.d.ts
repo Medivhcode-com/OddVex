@@ -99,7 +99,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Your bets, newest first */
+        /**
+         * Your bets, newest first
+         * @description Filters combine with AND. `market` matches bets with at least one leg in that market. `sort` takes a field name, prefixed with `-` for descending; bets without a profit (pending) sort last either way.
+         */
         get: operations["list_bets"];
         put?: never;
         /**
@@ -107,6 +110,26 @@ export interface paths {
          * @description OddVex never places wagers. This only records a bet for tracking.
          */
         post: operations["create_bet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bets/auto-settle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settle your pending bets from final scores
+         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new.
+         */
+        post: operations["auto_settle_bets"];
         delete?: never;
         options?: never;
         head?: never;
@@ -273,9 +296,49 @@ export interface paths {
         post?: never;
         /**
          * Delete the account and all of its data
-         * @description Permanently deletes the user, their bets, bet legs, sync connections and import runs. An audit entry containing only the opaque user id is retained.
+         * @description Permanently deletes the user, their bets, bet legs, watchlist, sync connections and import runs. An audit entry containing only the opaque user id is retained.
          */
         delete: operations["delete_me"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download everything stored about your account
+         * @description One JSON document with your profile, bets, watchlist, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.
+         */
+        get: operations["export_my_data"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the password and get a fresh access token
+         * @description Every access token issued before the change stops working immediately, including the one used for this request. The response carries a replacement token.
+         */
+        post: operations["change_password"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -563,10 +626,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/watchlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your watched teams, players and events, newest first
+         * @description Each item embeds the current team, player or event from the data provider. When the provider no longer has it, `available` is false and the embed is null.
+         */
+        get: operations["list_watchlist"];
+        put?: never;
+        /**
+         * Watch a team, player or event
+         * @description Idempotent: adding something you already watch returns the existing item with 200 instead of 201. A watchlist holds at most 200 items.
+         */
+        post: operations["add_watchlist_item"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/watchlist/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live and upcoming events for everything you watch
+         * @description Events involving a watched team or a watched player's team, plus events watched directly. De-duplicated; live events first, then by start time.
+         */
+        get: operations["list_watchlist_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/watchlist/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Stop watching */
+        delete: operations["remove_watchlist_item"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AccountExportOut
+         * @description Everything OddVex stores about one account. Never contains the password hash.
+         */
+        AccountExportOut: {
+            /**
+             * Audit Log
+             * @description Your own audit entries, oldest first, including this export.
+             */
+            audit_log: components["schemas"]["ExportAuditEntryOut"][];
+            /** Bets */
+            bets: components["schemas"]["BetOut"][];
+            /**
+             * Exported At
+             * Format: date-time
+             */
+            exported_at: string;
+            /**
+             * Format Version
+             * @description Version of this document's layout.
+             * @default 1
+             */
+            format_version: number;
+            /** Sync Connections */
+            sync_connections: components["schemas"]["SyncConnectionOut"][];
+            /** Sync Runs */
+            sync_runs: components["schemas"]["SyncRunOut"][];
+            user: components["schemas"]["UserOut"];
+            /** Watchlist */
+            watchlist: components["schemas"]["WatchlistItemOut"][];
+        };
         /** AdminOverviewOut */
         AdminOverviewOut: {
             /** Bet Count */
@@ -659,6 +814,29 @@ export interface components {
             request_id?: string | null;
             /** User Id */
             user_id?: string | null;
+        };
+        /** AutoSettleOut */
+        AutoSettleOut: {
+            /**
+             * Checked
+             * @description Pending bets examined.
+             */
+            checked: number;
+            /** Settled */
+            settled: components["schemas"]["BetOut"][];
+            /** Skipped */
+            skipped: components["schemas"]["AutoSettleSkipOut"][];
+        };
+        /** AutoSettleSkipOut */
+        AutoSettleSkipOut: {
+            /** Bet Id */
+            bet_id: string;
+            /**
+             * Reason
+             * @description not_gradeable: a leg has no structured selection. event_not_final: a leg's event has not finished. event_unavailable: the data provider no longer has a leg's event. manual_result_required: the bet carries its own price and a leg pushed, so the payout cannot be derived.
+             * @enum {string}
+             */
+            reason: "not_gradeable" | "event_not_final" | "event_unavailable" | "manual_result_required";
         };
         /** AveragesOut */
         AveragesOut: {
@@ -757,7 +935,10 @@ export interface components {
              * @example nba
              */
             league?: string | null;
-            /** Line */
+            /**
+             * Line
+             * @description Spread: the handicap of the selected side (home -3.5 is `-3.5`, the away side of that market is `+3.5`). Total: the points line.
+             */
             line?: number | null;
             /**
              * Market
@@ -779,6 +960,11 @@ export interface components {
              */
             odds_format: "american" | "decimal" | "fractional";
             /**
+             * Outcome Key
+             * @description Structured selection. With `event_id`, a `market` of moneyline, spread or total and (for spread and total) `line`, the leg can be graded automatically from the final score. moneyline: home, away, or draw where the league has a 3-way market. spread: home or away. total: over or under.
+             */
+            outcome_key?: ("home" | "away" | "draw" | "over" | "under") | null;
+            /**
              * Selection
              * @example Harbor City Tides -3.5
              */
@@ -796,6 +982,12 @@ export interface components {
             event_id?: string | null;
             /** Event Label */
             event_label?: string | null;
+            /**
+             * Gradeable
+             * @description True when the leg has event_id, a gradeable market, outcome_key and line.
+             * @default false
+             */
+            gradeable: boolean;
             /** Id */
             id: string;
             /** League */
@@ -804,6 +996,8 @@ export interface components {
             line?: number | null;
             /** Market */
             market: string;
+            /** Outcome Key */
+            outcome_key?: ("home" | "away" | "draw" | "over" | "under") | null;
             /** Position */
             position: number;
             price: components["schemas"]["PriceOut"];
@@ -869,6 +1063,11 @@ export interface components {
             result?: ("won" | "lost" | "push" | "void" | "half_won" | "half_lost" | "cashout") | null;
             /** Settled At */
             settled_at?: string | null;
+            /**
+             * Settled By
+             * @description user: settled by hand. auto: graded from final scores by auto-settle. Null while pending and for bets that were imported already settled.
+             */
+            settled_by?: ("user" | "auto") | null;
             /**
              * Source
              * @enum {string}
@@ -1334,6 +1533,30 @@ export interface components {
              */
             status_detail?: string | null;
         };
+        /** ExportAuditEntryOut */
+        ExportAuditEntryOut: {
+            /** Action */
+            action: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Entity Id */
+            entity_id?: string | null;
+            /** Entity Type */
+            entity_type?: string | null;
+            /** Id */
+            id: string;
+            /** Ip */
+            ip?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+        };
         /** GameLogEntryOut */
         GameLogEntryOut: {
             /**
@@ -1695,6 +1918,13 @@ export interface components {
             stake?: number | null;
             /** Steps */
             steps: string[];
+        };
+        /** PasswordChangeRequest */
+        PasswordChangeRequest: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
         };
         /** PlayerDetailOut */
         PlayerDetailOut: {
@@ -2083,6 +2313,57 @@ export interface components {
              */
             role: "user" | "admin";
         };
+        /** WatchlistItemCreate */
+        WatchlistItemCreate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "team" | "player" | "event";
+            /**
+             * Ref Id
+             * @description Team, player or event id from the data routes.
+             */
+            ref_id: string;
+        };
+        /** WatchlistItemOut */
+        WatchlistItemOut: {
+            /**
+             * Available
+             * @description False when the data provider no longer has the referenced entity (for example an old event). `team`, `player` and `event` are then all null.
+             * @default true
+             */
+            available: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            event?: components["schemas"]["EventSummaryOut"] | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "team" | "player" | "event";
+            /**
+             * Label
+             * @description Display name captured when the item was added.
+             */
+            label: string;
+            /** League */
+            league?: string | null;
+            player?: components["schemas"]["PlayerOut"] | null;
+            /** Ref Id */
+            ref_id: string;
+            team?: components["schemas"]["TeamRef"] | null;
+        };
+        /** WatchlistOut */
+        WatchlistOut: {
+            /** Items */
+            items: components["schemas"]["WatchlistItemOut"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -2320,6 +2601,12 @@ export interface operations {
                 sport?: string | null;
                 limit?: number;
                 offset?: number;
+                /** @description Default: -placed_at (newest first) */
+                sort?: "placed_at" | "-placed_at" | "stake" | "-stake" | "profit" | "-profit";
+                market?: string | null;
+                /** @description Exact name, case-insensitive */
+                sportsbook?: string | null;
+                bet_type?: ("straight" | "parlay" | "sgp" | "future") | null;
             };
             header?: never;
             path?: never;
@@ -2376,6 +2663,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BetOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    auto_settle_bets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoSettleOut"];
                 };
             };
             /** @description Missing or invalid credentials */
@@ -2890,6 +3215,104 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_my_data: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountExportOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    change_password: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description The current password is not correct */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3480,6 +3903,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description A concurrent import collided; try again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation error */
             422: {
                 headers: {
@@ -3520,6 +3952,200 @@ export interface operations {
             };
             /** @description Missing or invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_watchlist: {
+        parameters: {
+            query?: {
+                kind?: ("team" | "player" | "event") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_watchlist_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchlistItemCreate"];
+            };
+        };
+        responses: {
+            /** @description Already on the watchlist */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistItemOut"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistItemOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The watchlist is full */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_watchlist_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventSummaryOut"][];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_watchlist_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

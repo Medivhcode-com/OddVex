@@ -5,19 +5,23 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..db import Bet
-from ..deps import CurrentUserDep, DbDep, write_audit
+from ..db import Bet, BetLeg
+from ..deps import CurrentUserDep, DbDep, ProviderDep, write_audit
 from ..errors import AUTH_ERROR_RESPONSES, NOT_FOUND_RESPONSE, ErrorResponse, not_found
 from . import service
 from .schemas import (
+    AutoSettleOut,
+    AutoSettleSkipOut,
     BetCreate,
     BetOut,
     BetSettleRequest,
+    BetSort,
     BetStatusFilter,
     BetSummaryOut,
+    BetType,
     BetUpdate,
 )
 
@@ -41,6 +45,11 @@ def _owned_bet(db: Session, user_id: str, bet_id: str) -> Bet:
     response_model=list[BetOut],
     operation_id="list_bets",
     summary="Your bets, newest first",
+    description=(
+        "Filters combine with AND. `market` matches bets with at least one leg in that "
+        "market. `sort` takes a field name, prefixed with `-` for descending; bets without "
+        "a profit (pending) sort last either way."
+    ),
 )
 def list_bets(
     user: CurrentUserDep,
@@ -52,6 +61,14 @@ def list_bets(
     sport: Annotated[str | None, Query(max_length=32)] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 500,
     offset: Annotated[int, Query(ge=0)] = 0,
+    sort: Annotated[BetSort, Query(description="Default: -placed_at (newest first)")] = (
+        "-placed_at"
+    ),
+    market: Annotated[str | None, Query(max_length=40)] = None,
+    sportsbook: Annotated[
+        str | None, Query(max_length=80, description="Exact name, case-insensitive")
+    ] = None,
+    bet_type: Annotated[BetType | None, Query()] = None,
 ) -> list[BetOut]:
     query = select(Bet).where(Bet.user_id == user.id)
     if status in ("pending", "settled"):
@@ -60,7 +77,22 @@ def list_bets(
         query = query.where(Bet.result == status)
     if sport:
         query = query.where(Bet.sport == sport.strip().lower())
-    query = query.order_by(Bet.placed_at.desc(), Bet.id).limit(limit).offset(offset)
+    if market and market.strip():
+        query = query.where(Bet.legs.any(BetLeg.market == market.strip().lower()))
+    if sportsbook and sportsbook.strip():
+        query = query.where(func.lower(Bet.sportsbook) == sportsbook.strip().lower())
+    if bet_type is not None:
+        query = query.where(Bet.bet_type == bet_type)
+    column = {"placed_at": Bet.placed_at, "stake": Bet.stake, "profit": Bet.profit}[
+        sort.lstrip("-")
+    ]
+    direction = column.desc() if sort.startswith("-") else column.asc()
+    # ``IS NULL`` first keeps the ordering of nulls identical on SQLite and PostgreSQL.
+    query = (
+        query.order_by(column.is_(None), direction, Bet.placed_at.desc(), Bet.id)
+        .limit(limit)
+        .offset(offset)
+    )
     return [service.bet_out(bet) for bet in db.scalars(query)]
 
 
@@ -72,7 +104,10 @@ def list_bets(
     summary="Record a bet you placed elsewhere",
     description="OddVex never places wagers. This only records a bet for tracking.",
 )
-def create_bet(body: BetCreate, user: CurrentUserDep, db: DbDep, request: Request) -> BetOut:
+def create_bet(
+    body: BetCreate, user: CurrentUserDep, db: DbDep, request: Request, provider: ProviderDep
+) -> BetOut:
+    body.legs = service.resolve_structured_legs(body.legs, provider)
     bet = service.create_bet(user.id, body)
     db.add(bet)
     db.flush()
@@ -90,6 +125,41 @@ def create_bet(body: BetCreate, user: CurrentUserDep, db: DbDep, request: Reques
 def get_bet_summary(user: CurrentUserDep, db: DbDep) -> BetSummaryOut:
     bets = list(db.scalars(select(Bet).where(Bet.user_id == user.id)))
     return service.summarize(bets)
+
+
+@router.post(
+    "/auto-settle",
+    response_model=AutoSettleOut,
+    operation_id="auto_settle_bets",
+    summary="Settle your pending bets from final scores",
+    description=(
+        "Looks at each of your pending bets. A bet is settled when every leg has a "
+        "structured selection (`gradeable`) and every leg's event is final: the legs are "
+        "graded from the final score and the bet goes through the same settlement as a "
+        "manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with "
+        "a reason. Calling this again settles nothing new."
+    ),
+)
+def auto_settle_bets(
+    user: CurrentUserDep, db: DbDep, request: Request, provider: ProviderDep
+) -> AutoSettleOut:
+    checked, settled, skipped = service.auto_settle(db, user.id, provider)
+    for bet in settled:
+        write_audit(
+            db,
+            request,
+            "bet.auto_settle",
+            user_id=user.id,
+            entity_type="bet",
+            entity_id=bet.id,
+            details={"result": bet.result, "legs": [leg.result for leg in bet.legs]},
+        )
+    db.commit()
+    return AutoSettleOut(
+        checked=checked,
+        settled=[service.bet_out(bet) for bet in settled],
+        skipped=[AutoSettleSkipOut(bet_id=bet_id, reason=reason) for bet_id, reason in skipped],  # type: ignore[arg-type]
+    )
 
 
 @router.get(
@@ -110,8 +180,12 @@ def get_bet(bet_id: str, user: CurrentUserDep, db: DbDep) -> BetOut:
     summary="Edit a bet",
     responses={**NOT_FOUND_RESPONSE, **_CONFLICT},
 )
-def update_bet(bet_id: str, body: BetUpdate, user: CurrentUserDep, db: DbDep) -> BetOut:
+def update_bet(
+    bet_id: str, body: BetUpdate, user: CurrentUserDep, db: DbDep, provider: ProviderDep
+) -> BetOut:
     bet = _owned_bet(db, user.id, bet_id)
+    if body.legs is not None:
+        body.legs = service.resolve_structured_legs(body.legs, provider)
     service.update_bet(bet, body)
     db.commit()
     db.refresh(bet)

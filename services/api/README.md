@@ -36,12 +36,22 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # or: uv venv && uv 
 .venv/bin/python scripts/export_openapi.py --check
 ```
 
-To run the API tests against PostgreSQL, point `ODDVEX_TEST_DATABASE_URL` at a **throwaway**
-database (it is wiped before each test):
+To run the **whole suite** against PostgreSQL, point `ODDVEX_TEST_DATABASE_URL` at a
+**throwaway** database. Every table in it is dropped before each test.
 
 ```bash
-ODDVEX_TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/oddvex_test .venv/bin/pytest tests/test_api_*.py
+ODDVEX_TEST_DATABASE_URL=postgresql+psycopg://oddvex:oddvex@localhost:5432/oddvex_test .venv/bin/pytest
 ```
+
+Every test that goes through the app then uses that database. Tests that are about SQLite files
+(the Alembic CLI, table auto-creation) keep using a temporary SQLite file, and the
+`0001 -> 0002` upgrade/downgrade test runs once on SQLite and once more on the external database.
+The database must use UTF-8 encoding (the official `postgres` image does; a cluster created with
+`initdb` under the `C` locale needs `-E UTF8`).
+
+In GitHub Actions, add a `postgres:16` service with `POSTGRES_USER: oddvex`,
+`POSTGRES_PASSWORD: oddvex`, `POSTGRES_DB: oddvex_test`, port `5432:5432` and a `pg_isready`
+health check, then run the command above with `working-directory: services/api`.
 
 `openapi.json` is committed. CI regenerates it and fails on a diff, and `packages/types` is
 generated from it, so re-export (and run `pnpm types:generate` at the repo root) whenever a
@@ -71,6 +81,7 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
 | `ODDVEX_SYNC_MAX_ATTEMPTS` | `3` | Fetch attempts per import run |
+| `ODDVEX_MAX_BODY_BYTES` | `65536` | Largest request body accepted (minimum 1024). Larger requests get `413 payload_too_large` |
 | `ODDVEX_LOG_LEVEL` | `INFO` | Log level |
 
 ## API
@@ -92,8 +103,9 @@ Errors always use one envelope, including validation errors and 404s:
 | Events | `GET /v1/events`, `GET /v1/events/{id}`, `GET /v1/events/{id}/odds`, `GET /v1/events/{id}/line-history` |
 | Players | `GET /v1/players`, `GET /v1/players/{id}`, `GET /v1/players/{id}/props`, `GET /v1/props` |
 | Calculators | `POST /v1/quant/convert`, `/no-vig`, `/ev`, `/parlay`, `/clv` (each returns `steps`) |
-| Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/me`, `DELETE /v1/me` |
-| Bets | `GET/POST /v1/bets`, `GET /v1/bets/summary`, `GET/PATCH/DELETE /v1/bets/{id}`, `POST /v1/bets/{id}/settle` |
+| Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/me`, `DELETE /v1/me`, `POST /v1/me/password`, `GET /v1/me/export` |
+| Bets | `GET/POST /v1/bets`, `GET /v1/bets/summary`, `POST /v1/bets/auto-settle`, `GET/PATCH/DELETE /v1/bets/{id}`, `POST /v1/bets/{id}/settle` |
+| Watchlist | `GET/POST /v1/watchlist`, `GET /v1/watchlist/events`, `DELETE /v1/watchlist/{id}` |
 | Sync | `GET /v1/sync/providers`, `GET/POST /v1/sync/connections`, `POST .../{id}/sync`, `GET .../{id}/runs`, `DELETE .../{id}?delete_data=` |
 | Assistant | `POST /v1/assistant/query` |
 | Admin | `GET /v1/admin/overview` |
@@ -110,11 +122,48 @@ Behaviour worth knowing:
 - **Bets.** `status` is `pending` or `settled`; `result` carries the outcome. Odds are accepted
   as American, decimal or fractional and stored as decimal. Every bet query is filtered by the
   authenticated user, so another user's bet id returns 404.
+- **Bet list.** `GET /v1/bets` takes `status`, `sport`, `market` (any leg), `sportsbook` (exact,
+  case-insensitive), `bet_type`, `sort` (`placed_at`, `stake`, `profit`, each with a `-` prefix
+  for descending; default `-placed_at`), `limit` (1 to 1000, default 500) and `offset`. Pending
+  bets have no profit and sort last either way. An unknown `sort` is a 422.
+- **Structured legs.** A leg may carry `outcome_key` (`home`, `away`, `draw`, `over`, `under`)
+  next to `event_id`, `market` and, for spread and total, `line`. A spread `line` is the handicap
+  of the selected side. Such a leg is validated when the bet is created or its legs are replaced:
+  the event must exist (`422 unknown_event`), offer the market (`422 market_not_available`) and
+  the outcome must fit it (`422 invalid_selection`; `draw` only where the league is 3-way).
+  `league` and `event_label` are filled in from the event when left out. Legs without
+  `outcome_key` are free text, exactly as before, and `event_id` on them is not checked. Each leg
+  reports `gradeable`.
+- **Auto-settle.** `POST /v1/bets/auto-settle` looks at the caller's pending bets. A bet whose
+  legs are all gradeable and whose events are all final is graded from the final scores and
+  settled through the same code as a manual settle, with `settled_by: "auto"` (manual settles
+  are `"user"`; bets imported already settled have `null`). Everything else is returned under
+  `skipped` with `not_gradeable`, `event_not_final`, `event_unavailable` or
+  `manual_result_required` (a bet with its own price where a leg pushed). Calling it again
+  settles nothing new. Rules: `docs/QUANT_METHODOLOGY.md`.
+- **Watchlist.** Teams, players and events, at most 200 per user. Adding validates the id
+  against the provider (`404 not_found`), and adding the same thing twice returns the existing
+  item with 200 instead of 201. Items embed the current `team`, `player` or `event`; when the
+  provider no longer has it (an old event) the embed is null and `available` is false.
+  `GET /v1/watchlist/events` lists live and upcoming events for watched teams, watched players'
+  teams and directly watched events, live first.
+- **Password change.** `POST /v1/me/password` takes `current_password` and `new_password`
+  (10 to 128 characters, different from the current one) and returns a `TokenResponse` with a
+  **new token** (200, not 204), because every token issued before the change is rejected with
+  `401 invalid_token` from then on, including the one that made the request. A wrong current
+  password is `400 invalid_credentials` with a neutral message. It shares the auth rate limit.
+- **Data export.** `GET /v1/me/export` returns one JSON document (`format_version: 1`) with the
+  profile, bets, watchlist, sync connections, import runs and the caller's own audit entries. It
+  never contains the password hash. Each export is itself audited.
 - **Sync.** Re-running an import never duplicates a bet: bets are keyed on user + provider +
   external bet id. A provider failure that survives the retries is recorded as a failed run and
-  returned as `502 sync_failed` with `details.run_id` and `details.retryable`.
-- **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, sync connections and
-  import runs. The audit log keeps an entry with the opaque user id only.
+  returned as `502 sync_failed` with `details.run_id` and `details.retryable`. Two imports of
+  the same account at the same moment cannot both write: the one that loses the race gets
+  `409 sync_conflict` (`details.retryable: true`), writes nothing, and can simply be retried.
+- **Request size.** Bodies over `ODDVEX_MAX_BODY_BYTES` are refused with `413 payload_too_large`
+  in the usual envelope, whether the size is declared or the body is streamed.
+- **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, sync
+  connections and import runs. The audit log keeps an entry with the opaque user id only.
 
 ## Architecture
 
@@ -124,17 +173,21 @@ A modular monolith. One process, one database.
 src/oddvex_api/
   main.py            app factory, middleware, routers, OpenAPI post-processing
   config.py          settings from the environment; production safety checks
-  quant/             pure betting math. No I/O, no clock. Every number comes from here
+  quant/             pure betting math and grading. No I/O, no clock. Every number comes from here
   providers/         SportsDataProvider protocol, SyntheticProvider, vendor-payload normalizer
   board.py           read models: odds comparison, best price, consensus, prop research
   api/               public data routes, calculators, admin
-  auth/              argon2id passwords, HS256 JWT, register/login/me
-  bets/              tracker: schemas, service (settlement, summary), routes
+  auth/              argon2id passwords, HS256 JWT, register/login/me, password change
+  account/           data export
+  bets/              tracker: schemas, service (settlement, auto-settlement, summary), routes
+  watchlist/         watched teams, players and events
   sync/              SyncProvider protocol, MockSyncProvider, idempotent import
   assistant/         intent router, data tools, Explainer protocol + TemplateExplainer
   db/                SQLAlchemy 2 models, portable UTC datetime type, session factory
   errors.py middleware.py ratelimit.py cache.py logging_config.py deps.py
-alembic/             migrations (0001: users, bets, bet_legs, sync_connections, sync_import_runs, audit_log)
+alembic/             migrations (0001: users, bets, bet_legs, sync_connections, sync_import_runs, audit_log;
+                     0002: watchlist_items, users.token_version/password_changed_at, bets.settled_by,
+                     bet_legs.outcome_key)
 scripts/             export_openapi.py, seed_demo.py
 docs/QUANT_METHODOLOGY.md
 ```
@@ -145,8 +198,9 @@ docs/QUANT_METHODOLOGY.md
   account-linking provider can be added without touching routes. Provider records carry
   `provider`, `provider_id` and `fetched_at`.
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
-  security headers, CORS allowlist, in-memory per-IP sliding-window rate limit, audit log for
-  auth events, bet create/settle/delete, sync and account deletion.
+  security headers, CORS allowlist, request body size limit, in-memory per-IP sliding-window
+  rate limit, audit log for auth events, password changes, bet create/settle/auto-settle/delete,
+  watchlist changes, sync, data export and account deletion.
 
 ## What is synthetic or mocked
 
@@ -158,15 +212,24 @@ docs/QUANT_METHODOLOGY.md
 | Sportsbook sync | `MockSyncProvider` only: a fictional account with a fixed bet history and a simulated failure switch. No credentials, no real sportsbook |
 | Assistant | Keyword/regex intent router and templates. **No language model is connected** |
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
-| Demo account | Seeded sample bets, development only |
+| Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle |
 
 ## Limitations
 
 - No real odds, scores or statistics. Nothing here should be used to make a betting decision.
 - Rate limiting and caching are in process memory. With several workers each has its own
   counters; move them to a shared store before scaling out.
-- JWT access tokens only: no refresh tokens, no server-side revocation, no email verification,
-  no password reset. Deleting the account invalidates its tokens.
+- JWT access tokens only: no refresh tokens, no email verification, no password reset (a
+  forgotten password cannot be recovered), no per-session logout. Tokens are revoked in two
+  cases only: changing the password invalidates every earlier token, and deleting the account
+  invalidates all of them.
+- Auto-settlement grades full-game moneyline, spread and total from the provider's final score.
+  Props, futures, half results, voids and cash-outs stay manual, and the score is synthetic.
+  It runs when the client calls it; there is no background job.
+- The watchlist stores provider ids. A watched event the provider no longer serves stays on the
+  list as `available: false` until the user removes it.
+- The data export is built in memory in one response; fine for a personal bet history, not
+  designed for very large accounts.
 - Age is a self-attestation checkbox (`age_confirmed`), not verification.
 - Odds are not persisted; they are generated on request. The `providers` contract is where an
   `odds_snapshots` table would attach.

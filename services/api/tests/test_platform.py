@@ -341,3 +341,93 @@ def test_ttl_cache() -> None:
     assert cache.get("zero") is None
     cache.clear()
     assert cache.get("b") is None
+
+
+# ------------------------------------------------------------ body size limit
+def _big_login(size: int) -> bytes:
+    return json.dumps({"email": "nobody@example.test", "password": "x" * size}).encode()
+
+
+def test_request_bodies_over_the_limit_get_413(client: TestClient) -> None:
+    response = client.post(
+        "/v1/auth/login",
+        content=_big_login(70_000),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert_envelope(response.json(), "payload_too_large")
+    assert response.json()["error"]["details"] == {"max_body_bytes": 65536}
+    # Still a normal API response: request id, security headers.
+    assert response.headers["x-request-id"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    # The default limit is 64 KiB and applies to every route, authenticated or not.
+    assert Settings(_env_file=None).max_body_bytes == 64 * 1024  # type: ignore[call-arg]
+    other = client.post(
+        "/v1/quant/convert", content=b"x" * 70_000, headers={"content-type": "application/json"}
+    )
+    assert other.status_code == 413
+
+
+def test_body_limit_is_configurable_and_exact(make_app: AppFactory) -> None:
+    app = make_app(max_body_bytes=2048)
+    with TestClient(app) as client:
+        padding = 2048 - len(_big_login(0))
+        at_limit = _big_login(padding)
+        assert len(at_limit) == 2048
+        allowed = client.post(
+            "/v1/auth/login", content=at_limit, headers={"content-type": "application/json"}
+        )
+        # Reaches the route: rejected by validation (password too long), not by size.
+        assert allowed.status_code == 422
+        assert_envelope(allowed.json(), "validation_error")
+        too_big = client.post(
+            "/v1/auth/login",
+            content=_big_login(padding + 1),
+            headers={"content-type": "application/json"},
+        )
+        assert too_big.status_code == 413
+        assert_envelope(too_big.json(), "payload_too_large")
+        assert too_big.json()["error"]["details"] == {"max_body_bytes": 2048}
+        # Ordinary requests are unaffected.
+        assert client.post("/v1/quant/convert", json={"odds": -110}).status_code == 200
+        assert client.get("/v1/leagues").status_code == 200
+
+
+def test_body_limit_applies_to_chunked_bodies_without_a_content_length(
+    make_app: AppFactory,
+) -> None:
+    app = make_app(max_body_bytes=2048)
+
+    def chunks(total: int):  # type: ignore[no-untyped-def]
+        body = _big_login(total)
+        for start in range(0, len(body), 512):
+            yield body[start : start + 512]
+
+    with TestClient(app) as client:
+        small = client.post(
+            "/v1/auth/login", content=chunks(10), headers={"content-type": "application/json"}
+        )
+        assert "content-length" not in small.request.headers
+        assert small.status_code == 401  # read fine, then rejected as a bad login
+        big = client.post(
+            "/v1/auth/login", content=chunks(5000), headers={"content-type": "application/json"}
+        )
+        assert "content-length" not in big.request.headers
+        assert big.status_code == 413
+        assert_envelope(big.json(), "payload_too_large")
+        assert big.headers["x-request-id"]
+
+
+def test_body_limit_has_cors_headers_and_reads_the_environment(
+    make_app: AppFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with TestClient(make_app(max_body_bytes=1024)) as client:
+        response = client.post(
+            "/v1/auth/login",
+            content=_big_login(4000),
+            headers={"content-type": "application/json", "origin": "http://localhost:3000"},
+        )
+        assert response.status_code == 413
+        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    monkeypatch.setenv("ODDVEX_MAX_BODY_BYTES", "131072")
+    assert Settings(_env_file=None).max_body_bytes == 131072  # type: ignore[call-arg]

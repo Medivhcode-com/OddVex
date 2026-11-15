@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
+from .account import router as account_router
 from .api import admin, data, quant_routes
 from .assistant import router as assistant_router
 from .auth import router as auth_router
@@ -20,11 +21,12 @@ from .config import Settings, get_settings
 from .db import Base, make_engine, make_session_factory
 from .errors import ErrorResponse, install_error_handlers
 from .logging_config import configure_logging
-from .middleware import RequestContextMiddleware
+from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from .providers import SportsDataProvider, SyntheticProvider
 from .ratelimit import SlidingWindowRateLimiter
 from .sync import SyncRegistry, default_registry
 from .sync import router as sync_router
+from .watchlist import router as watchlist_router
 
 logger = logging.getLogger("oddvex.app")
 
@@ -48,6 +50,7 @@ TAGS = [
     {"name": "quant", "description": "Calculators. Each response shows its working in `steps`."},
     {"name": "auth", "description": "Accounts. Registration requires a 21+ attestation."},
     {"name": "bets", "description": "Bet tracker. Records bets placed elsewhere; owner-scoped."},
+    {"name": "watchlist", "description": "Watched teams, players and events; owner-scoped."},
     {"name": "sync", "description": "Sportsbook account import. Mock provider only."},
     {"name": "assistant", "description": "Rule-based assistant. No language model."},
     {"name": "admin", "description": "Administrator overview."},
@@ -112,7 +115,12 @@ def create_app(
             from .seed import seed_demo
 
             with app.state.session_factory() as session:
-                created = seed_demo(session, settings.demo_password, app.state.provider.now())
+                created = seed_demo(
+                    session,
+                    settings.demo_password,
+                    app.state.provider.now(),
+                    provider=app.state.provider,
+                )
             logger.info("demo_seed", extra={"created_bets": created})
         logger.info("startup", extra={"env": settings.env, "provider": app.state.provider.name})
         yield
@@ -135,6 +143,8 @@ def create_app(
     app.state.rate_limiter = SlidingWindowRateLimiter(settings.rate_limit_window_seconds)
     app.state.sync_registry = sync_registry or default_registry()
 
+    # Added first = innermost, so a 413 still gets the request id, security and CORS headers.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
     # Added last = outermost, so CORS headers are present on error responses too.
     app.add_middleware(RequestContextMiddleware, production=settings.is_production)
     app.add_middleware(
@@ -152,7 +162,9 @@ def create_app(
     app.include_router(data.router, prefix="/v1")
     app.include_router(quant_routes.router, prefix="/v1")
     app.include_router(auth_router.router, prefix="/v1")
+    app.include_router(account_router.router, prefix="/v1")
     app.include_router(bets_router.router, prefix="/v1")
+    app.include_router(watchlist_router.router, prefix="/v1")
     app.include_router(sync_router.router, prefix="/v1")
     app.include_router(assistant_router.router, prefix="/v1")
     app.include_router(admin.router, prefix="/v1")

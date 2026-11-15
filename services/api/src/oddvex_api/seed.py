@@ -17,11 +17,15 @@ from .auth.security import hash_password
 from .bets import service
 from .bets.schemas import BetCreate, BetLegIn, BetSettleRequest, LegResultIn
 from .db import Bet, User
+from .providers import Event, SportsDataProvider
 
 DEMO_EMAIL = "demo@oddvex.test"
 DEMO_DISPLAY_NAME = "Demo Bettor"
 SEED_PROVIDER = "demo-seed"
 DEMO_BET_COUNT = 40
+#: Extra pending bets with structured legs on events that are already final, so
+#: ``POST /v1/bets/auto-settle`` has something to settle. Only seeded with a provider.
+DEMO_GRADEABLE_COUNT = 4
 #: Fixed so the demo history is the same everywhere. Results are drawn at roughly the
 #: price-implied win rate; this seed gives a varied history with a small net loss.
 DEMO_SEED = 4424
@@ -119,11 +123,101 @@ def _grade(rng: random.Random, bet: Bet) -> BetSettleRequest:
     return BetSettleRequest(result="won" if won else "lost")
 
 
-def seed_demo(db: Session, password: str, now: datetime, seed: int = DEMO_SEED) -> int:
+_TOTAL_LINES = {"nba": 224.5, "nfl": 44.5, "mlb": 8.5, "nhl": 6.5, "soccer": 2.5}
+
+
+def _gradeable_bets(provider: SportsDataProvider, now: datetime) -> list[tuple[str, BetCreate]]:
+    """Pending bets with structured legs on finished synthetic events.
+
+    Deterministic for a given provider and ``now``: the four most recently started final
+    events, one bet each for moneyline and total, a spread (or second moneyline) and a
+    two-leg parlay.
+    """
+    finals = sorted(
+        (e for e in provider.list_events(status="final") if e.start_time <= now),
+        key=lambda e: (e.start_time, e.id),
+        reverse=True,
+    )
+    if len(finals) < 4:
+        return []
+    first, second, third, fourth = finals[:4]
+
+    def name(team_id: str) -> str:
+        team = provider.get_team(team_id)
+        return team.name if team else team_id
+
+    def moneyline(event: Event, side: str, odds: int) -> BetLegIn:
+        team = name(event.home_team_id if side == "home" else event.away_team_id)
+        return BetLegIn(
+            selection=f"{team} ML",
+            market="moneyline",
+            event_id=event.id,
+            outcome_key=side,  # type: ignore[arg-type]
+            odds=odds,
+        )
+
+    def total(event: Event, side: str, odds: int) -> BetLegIn:
+        line = _TOTAL_LINES.get(event.league, 2.5)
+        return BetLegIn(
+            selection=f"{side.capitalize()} {line:g}",
+            market="total",
+            event_id=event.id,
+            outcome_key=side,  # type: ignore[arg-type]
+            line=line,
+            odds=odds,
+        )
+
+    def spread_or_moneyline(event: Event) -> BetLegIn:
+        if "spread" not in event.markets:
+            return moneyline(event, "away", 120)
+        return BetLegIn(
+            selection=f"{name(event.home_team_id)} -1.5",
+            market="spread",
+            event_id=event.id,
+            outcome_key="home",
+            line=-1.5,
+            odds=-108,
+        )
+
+    def bet(event: Event, legs: list[BetLegIn], stake: float, book: str) -> BetCreate:
+        return BetCreate(
+            bet_type="parlay" if len(legs) > 1 else "straight",
+            legs=service.resolve_structured_legs(legs, provider),
+            stake=stake,
+            sportsbook=book,
+            placed_at=event.start_time - timedelta(hours=2),
+            notes="Demo data: can be settled automatically from the final score",
+        )
+
+    return [
+        ("demo-auto-01", bet(first, [moneyline(first, "home", -118)], 20, _BOOKS[0])),
+        ("demo-auto-02", bet(second, [total(second, "over", -110)], 15, _BOOKS[1])),
+        ("demo-auto-03", bet(third, [spread_or_moneyline(third)], 25, _BOOKS[2])),
+        (
+            "demo-auto-04",
+            bet(
+                fourth,
+                [moneyline(fourth, "away", 110), total(first, "under", -105)],
+                10,
+                _BOOKS[3],
+            ),
+        ),
+    ]
+
+
+def seed_demo(
+    db: Session,
+    password: str,
+    now: datetime,
+    seed: int = DEMO_SEED,
+    provider: SportsDataProvider | None = None,
+) -> int:
     """Create the demo user and any missing demo bets. Returns the number of bets created.
 
     Idempotent: each demo bet has a stable external id, so running this again
     creates nothing new. An existing demo user's password is left untouched.
+    With a ``provider``, ``DEMO_GRADEABLE_COUNT`` pending bets on already final
+    events are added as well (see :func:`_gradeable_bets`).
     """
     user = db.scalar(select(User).where(User.email == DEMO_EMAIL))
     if user is None:
@@ -195,5 +289,14 @@ def seed_demo(db: Session, password: str, now: datetime, seed: int = DEMO_SEED) 
             request.settled_at = min(placed + timedelta(hours=4), now)
             service.settle(bet, request)
         created += 1
+    if provider is not None:
+        for external_id, data in _gradeable_bets(provider, now):
+            if external_id in existing:
+                continue
+            bet = service.create_bet(user.id, data)
+            bet.external_provider = SEED_PROVIDER
+            bet.external_bet_id = external_id
+            db.add(bet)
+            created += 1
     db.commit()
     return created

@@ -3,6 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/app/event-bits";
 import { AutoRefresh } from "@/components/app/auto-refresh";
+import { QuickBet, type QuickBetOption } from "@/components/app/quick-bet";
+import { WatchButton } from "@/components/app/watch-button";
+import { ButtonLink } from "@/components/ui/primitives";
+import { currentUser } from "@/lib/session";
+import { getWatchlist, watchId } from "@/lib/watchlist";
 import { Freshness } from "@/components/app/freshness";
 import { OddsTable } from "@/components/app/odds-table";
 import { LineHistoryChart, type Series } from "@/components/ui/charts";
@@ -46,6 +51,17 @@ export default async function GamePage({ params, searchParams }: Props) {
     available.length ? api<OddsComparison>(`/v1/events/${id}/odds`, { query: { market } }) : null,
     available.length ? api<LineHistory>(`/v1/events/${id}/line-history`, { query: { market } }).catch(() => null) : null,
   ]);
+  const user = await currentUser().catch(() => null);
+  const watchlist = await getWatchlist(Boolean(user));
+  const returnTo = `/app/games/${id}`;
+  const quickOptions: QuickBetOption[] = (odds?.best ?? []).flatMap((best) => {
+    if (!["home", "away", "draw", "over", "under"].includes(best.outcome_key)) return [];
+    const name = odds?.consensus.outcomes.find((o) => o.key === best.outcome_key)?.name ?? best.outcome_key;
+    const book = odds?.books.find((b) => b.sportsbook.key === best.sportsbook_key)?.sportsbook.name ?? best.sportsbook_key;
+    const line = best.line ?? null;
+    const lineText = line === null ? "" : ` ${formatLine(line, { signed: market === "spread" })}`;
+    return [{ outcomeKey: best.outcome_key, label: `${name}${lineText}${market === "moneyline" ? " ML" : ""}`, line, american: best.price.american, sportsbook: book }];
+  });
   const bestBooks = new Set((odds?.best ?? []).map((b) => `${b.sportsbook_key}:${b.outcome_key}`));
   const chart = history ? historySeries(history, market, bestBooks) : null;
   const span = chart ? Math.max(...chart.series.flatMap((s) => s.points.map((p) => p.t))) : 0;
@@ -68,6 +84,11 @@ export default async function GamePage({ params, searchParams }: Props) {
                 {event.away_team.abbreviation} {event.score.away}, {event.home_team.abbreviation} {event.score.home}
               </span>
             ) : null}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <WatchButton kind="event" refId={event.id} name="this game" itemId={watchId(watchlist, "event", event.id)} signedIn={Boolean(user)} returnTo={returnTo} />
+            <WatchButton kind="team" refId={event.away_team.id} name={event.away_team.name} itemId={watchId(watchlist, "team", event.away_team.id)} signedIn={Boolean(user)} returnTo={returnTo} />
+            <WatchButton kind="team" refId={event.home_team.id} name={event.home_team.name} itemId={watchId(watchlist, "team", event.home_team.id)} signedIn={Boolean(user)} returnTo={returnTo} />
           </div>
         </div>
       </div>
@@ -102,6 +123,22 @@ export default async function GamePage({ params, searchParams }: Props) {
               </Link>
             </p>
           </Panel>
+
+          {event.status !== "final" && quickOptions.length ? (
+            <Panel aria-labelledby="quickbet-heading">
+              <PanelHeader id="quickbet-heading" title="Track a bet on this game" description="OddVex records the bet. It does not place it." />
+              {user ? (
+                <QuickBet key={market} eventId={event.id} eventLabel={`${event.away_team.name} at ${event.home_team.name}`} league={event.league} market={market} options={quickOptions} />
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+                  <p className="text-sm text-muted">Log in to add this game to your tracker.</p>
+                  <ButtonLink href={`/login?next=${encodeURIComponent(returnTo)}`} variant="secondary" size="sm">
+                    Log in
+                  </ButtonLink>
+                </div>
+              )}
+            </Panel>
+          ) : null}
 
           <Panel aria-labelledby="history-heading">
             <PanelHeader

@@ -1,6 +1,72 @@
 {
   "components": {
     "schemas": {
+      "AccountExportOut": {
+        "description": "Everything OddVex stores about one account. Never contains the password hash.",
+        "properties": {
+          "audit_log": {
+            "description": "Your own audit entries, oldest first, including this export.",
+            "items": {
+              "$ref": "#/components/schemas/ExportAuditEntryOut"
+            },
+            "title": "Audit Log",
+            "type": "array"
+          },
+          "bets": {
+            "items": {
+              "$ref": "#/components/schemas/BetOut"
+            },
+            "title": "Bets",
+            "type": "array"
+          },
+          "exported_at": {
+            "format": "date-time",
+            "title": "Exported At",
+            "type": "string"
+          },
+          "format_version": {
+            "default": 1,
+            "description": "Version of this document's layout.",
+            "title": "Format Version",
+            "type": "integer"
+          },
+          "sync_connections": {
+            "items": {
+              "$ref": "#/components/schemas/SyncConnectionOut"
+            },
+            "title": "Sync Connections",
+            "type": "array"
+          },
+          "sync_runs": {
+            "items": {
+              "$ref": "#/components/schemas/SyncRunOut"
+            },
+            "title": "Sync Runs",
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "watchlist": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistItemOut"
+            },
+            "title": "Watchlist",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exported_at",
+          "user",
+          "bets",
+          "watchlist",
+          "sync_connections",
+          "sync_runs",
+          "audit_log"
+        ],
+        "title": "AccountExportOut",
+        "type": "object"
+      },
       "AdminOverviewOut": {
         "properties": {
           "bet_count": {
@@ -245,6 +311,61 @@
           "action"
         ],
         "title": "AuditEntryOut",
+        "type": "object"
+      },
+      "AutoSettleOut": {
+        "properties": {
+          "checked": {
+            "description": "Pending bets examined.",
+            "title": "Checked",
+            "type": "integer"
+          },
+          "settled": {
+            "items": {
+              "$ref": "#/components/schemas/BetOut"
+            },
+            "title": "Settled",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/AutoSettleSkipOut"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checked",
+          "settled",
+          "skipped"
+        ],
+        "title": "AutoSettleOut",
+        "type": "object"
+      },
+      "AutoSettleSkipOut": {
+        "properties": {
+          "bet_id": {
+            "title": "Bet Id",
+            "type": "string"
+          },
+          "reason": {
+            "description": "not_gradeable: a leg has no structured selection. event_not_final: a leg's event has not finished. event_unavailable: the data provider no longer has a leg's event. manual_result_required: the bet carries its own price and a leg pushed, so the payout cannot be derived.",
+            "enum": [
+              "not_gradeable",
+              "event_not_final",
+              "event_unavailable",
+              "manual_result_required"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bet_id",
+          "reason"
+        ],
+        "title": "AutoSettleSkipOut",
         "type": "object"
       },
       "AveragesOut": {
@@ -571,6 +692,7 @@
                 "type": "null"
               }
             ],
+            "description": "Spread: the handicap of the selected side (home -3.5 is `-3.5`, the away side of that market is `+3.5`). Total: the points line.",
             "title": "Line"
           },
           "market": {
@@ -608,6 +730,25 @@
             ],
             "title": "Odds Format",
             "type": "string"
+          },
+          "outcome_key": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "away",
+                  "draw",
+                  "over",
+                  "under"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured selection. With `event_id`, a `market` of moneyline, spread or total and (for spread and total) `line`, the leg can be graded automatically from the final score. moneyline: home, away, or draw where the league has a 3-way market. spread: home or away. total: over or under.",
+            "title": "Outcome Key"
           },
           "selection": {
             "examples": [
@@ -673,6 +814,12 @@
             ],
             "title": "Event Label"
           },
+          "gradeable": {
+            "default": false,
+            "description": "True when the leg has event_id, a gradeable market, outcome_key and line.",
+            "title": "Gradeable",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -702,6 +849,24 @@
           "market": {
             "title": "Market",
             "type": "string"
+          },
+          "outcome_key": {
+            "anyOf": [
+              {
+                "enum": [
+                  "home",
+                  "away",
+                  "draw",
+                  "over",
+                  "under"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Key"
           },
           "position": {
             "title": "Position",
@@ -890,6 +1055,22 @@
               }
             ],
             "title": "Settled At"
+          },
+          "settled_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "user: settled by hand. auto: graded from final scores by auto-settle. Null while pending and for bets that were imported already settled.",
+            "title": "Settled By"
           },
           "source": {
             "enum": [
@@ -2074,6 +2255,86 @@
         "title": "EventSummaryOut",
         "type": "object"
       },
+      "ExportAuditEntryOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "action"
+        ],
+        "title": "ExportAuditEntryOut",
+        "type": "object"
+      },
       "GameLogEntryOut": {
         "properties": {
           "date": {
@@ -2951,6 +3212,28 @@
           "steps"
         ],
         "title": "ParlayResponse",
+        "type": "object"
+      },
+      "PasswordChangeRequest": {
+        "properties": {
+          "current_password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 128,
+            "minLength": 10,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "PasswordChangeRequest",
         "type": "object"
       },
       "PlayerDetailOut": {
@@ -3894,6 +4177,135 @@
         ],
         "title": "UserOut",
         "type": "object"
+      },
+      "WatchlistItemCreate": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "team",
+              "player",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref_id": {
+            "description": "Team, player or event id from the data routes.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ref Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref_id"
+        ],
+        "title": "WatchlistItemCreate",
+        "type": "object"
+      },
+      "WatchlistItemOut": {
+        "properties": {
+          "available": {
+            "default": true,
+            "description": "False when the data provider no longer has the referenced entity (for example an old event). `team`, `player` and `event` are then all null.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "team",
+              "player",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Display name captured when the item was added.",
+            "title": "Label",
+            "type": "string"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "player": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ref_id": {
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "ref_id",
+          "label",
+          "created_at"
+        ],
+        "title": "WatchlistItemOut",
+        "type": "object"
+      },
+      "WatchlistOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "WatchlistOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -4179,6 +4591,7 @@
     },
     "/v1/bets": {
       "get": {
+        "description": "Filters combine with AND. `market` matches bets with at least one leg in that market. `sort` takes a field name, prefixed with `-` for descending; bets without a profit (pending) sort last either way.",
         "operationId": "list_bets",
         "parameters": [
           {
@@ -4248,6 +4661,84 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Default: -placed_at (newest first)",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "-placed_at",
+              "description": "Default: -placed_at (newest first)",
+              "enum": [
+                "placed_at",
+                "-placed_at",
+                "stake",
+                "-stake",
+                "profit",
+                "-profit"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "description": "Exact name, case-insensitive",
+            "in": "query",
+            "name": "sportsbook",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact name, case-insensitive",
+              "title": "Sportsbook"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bet_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "straight",
+                    "parlay",
+                    "sgp",
+                    "future"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bet Type"
             }
           }
         ],
@@ -4348,6 +4839,53 @@
           }
         ],
         "summary": "Record a bet you placed elsewhere",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/bets/auto-settle": {
+      "post": {
+        "description": "Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new.",
+        "operationId": "auto_settle_bets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoSettleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Settle your pending bets from final scores",
         "tags": [
           "bets"
         ]
@@ -5002,7 +5540,7 @@
     },
     "/v1/me": {
       "delete": {
-        "description": "Permanently deletes the user, their bets, bet legs, sync connections and import runs. An audit entry containing only the opaque user id is retained.",
+        "description": "Permanently deletes the user, their bets, bet legs, watchlist, sync connections and import runs. An audit entry containing only the opaque user id is retained.",
         "operationId": "delete_me",
         "responses": {
           "204": {
@@ -5079,6 +5617,130 @@
           }
         ],
         "summary": "Current user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/me/export": {
+      "get": {
+        "description": "One JSON document with your profile, bets, watchlist, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.",
+        "operationId": "export_my_data",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountExportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download everything stored about your account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/me/password": {
+      "post": {
+        "description": "Every access token issued before the change stops working immediately, including the one used for this request. The response carries a replacement token.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The current password is not correct"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change the password and get a fresh access token",
         "tags": [
           "auth"
         ]
@@ -5954,6 +6616,16 @@
             },
             "description": "Resource not found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A concurrent import collided; try again"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6035,6 +6707,272 @@
           "sync"
         ]
       }
+    },
+    "/v1/watchlist": {
+      "get": {
+        "description": "Each item embeds the current team, player or event from the data provider. When the provider no longer has it, `available` is false and the embed is null.",
+        "operationId": "list_watchlist",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "team",
+                    "player",
+                    "event"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your watched teams, players and events, newest first",
+        "tags": [
+          "watchlist"
+        ]
+      },
+      "post": {
+        "description": "Idempotent: adding something you already watch returns the existing item with 200 instead of 201. A watchlist holds at most 200 items.",
+        "operationId": "add_watchlist_item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchlistItemCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistItemOut"
+                }
+              }
+            },
+            "description": "Already on the watchlist"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The watchlist is full"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Watch a team, player or event",
+        "tags": [
+          "watchlist"
+        ]
+      }
+    },
+    "/v1/watchlist/events": {
+      "get": {
+        "description": "Events involving a watched team or a watched player's team, plus events watched directly. De-duplicated; live events first, then by start time.",
+        "operationId": "list_watchlist_events",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EventSummaryOut"
+                  },
+                  "title": "Response List Watchlist Events",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Live and upcoming events for everything you watch",
+        "tags": [
+          "watchlist"
+        ]
+      }
+    },
+    "/v1/watchlist/{item_id}": {
+      "delete": {
+        "operationId": "remove_watchlist_item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stop watching",
+        "tags": [
+          "watchlist"
+        ]
+      }
     }
   },
   "tags": [
@@ -6061,6 +6999,10 @@
     {
       "description": "Bet tracker. Records bets placed elsewhere; owner-scoped.",
       "name": "bets"
+    },
+    {
+      "description": "Watched teams, players and events; owner-scoped.",
+      "name": "watchlist"
     },
     {
       "description": "Sportsbook account import. Mock provider only.",

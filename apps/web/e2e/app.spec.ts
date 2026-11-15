@@ -169,7 +169,7 @@ test.describe("accounts and tracking", () => {
     await expect(open.getByText("Harbor City Tides ML", { exact: true })).toBeVisible();
     await expect(open.getByText("$50.00", { exact: true })).toBeVisible(); // stake 20 at +150 returns 50
 
-    await open.getByRole("button", { name: "Settle" }).click();
+    await open.getByRole("button", { name: "Settle", exact: true }).click();
     const settled = page.getByRole("region", { name: "Settled bets" });
     await expect(settled.getByText("Harbor City Tides ML", { exact: true })).toBeVisible();
     await expect(settled.getByText("+$30.00", { exact: true })).toBeVisible();
@@ -234,6 +234,114 @@ test.describe("accounts and tracking", () => {
     await expect(pageB.getByText("Private pick of account A")).toHaveCount(0);
     await a.close();
     await b.close();
+  });
+
+  test("follow a game and a team, see them on the dashboard, then unfollow", async ({ page, request }) => {
+    await signUp(page, "watch");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    const event = events[0];
+    await page.goto(`/app/games/${event.id}`);
+    await page.getByRole("button", { name: "Follow this game" }).click();
+    await expect(page.getByRole("button", { name: "Following this game" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: `Follow ${event.home_team.name}` }).click();
+    await expect(page.getByRole("button", { name: `Following ${event.home_team.name}` })).toBeVisible();
+
+    await page.goto("/app");
+    const watch = page.getByRole("region", { name: "Your watchlist" });
+    await expect(watch.locator(`a[href="/app/games/${event.id}"]`)).toBeVisible();
+
+    await page.goto(`/app/games/${event.id}`);
+    await page.getByRole("button", { name: "Following this game" }).click();
+    await page.getByRole("button", { name: `Following ${event.home_team.name}` }).click();
+    await expect(page.getByRole("button", { name: "Follow this game" })).toBeVisible();
+    await page.goto("/app");
+    await expect(page.getByText("Nothing followed yet")).toBeVisible();
+  });
+
+  test("signed-out follow sends you to log in", async ({ page, request }) => {
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    await page.goto(`/app/games/${events[0].id}`);
+    await page.getByRole("button", { name: "Follow this game" }).click();
+    await expect(page).toHaveURL(/\/login\?next=/);
+  });
+
+  test("track a bet from a game page; it is tied to the game", async ({ page, request }) => {
+    await signUp(page, "quick");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    await page.goto(`/app/games/${events[0].id}`);
+    const panel = page.getByRole("region", { name: "Track a bet on this game" });
+    await panel.getByLabel("Stake ($)").fill("15");
+    await panel.getByRole("button", { name: "Add to tracker" }).click();
+    await expect(panel.getByText(/Bet saved\./)).toBeVisible();
+    await page.goto("/app/tracker");
+    const open = page.getByRole("region", { name: "Open bets" });
+    await expect(open.getByText("Tied to a game")).toBeVisible();
+    await expect(open.getByText("$15.00", { exact: true })).toBeVisible();
+    // The game has not been played, so nothing can be settled yet.
+    await open.getByRole("button", { name: "Settle from final scores" }).click();
+    await expect(open.getByText(/0 bets settled from final scores\. Left open: 1 game not finished\./)).toBeVisible();
+  });
+
+  test("a bet on a finished game settles itself from the final score", async ({ page, request }) => {
+    await signUp(page, "auto");
+    const finals = await (await request.get(`${API}/v1/events?status=final`)).json();
+    const event = finals.find((e: { score: { home: number; away: number } | null }) => e.score && e.score.home !== e.score.away);
+    const winner = event.score.home > event.score.away ? "home" : "away";
+    const created = await page.request.post("/api/ov/v1/bets", {
+      data: {
+        bet_type: "straight",
+        stake: 10,
+        sportsbook: "Northline",
+        legs: [{ selection: "Winner ML", market: "moneyline", league: event.league, event_id: event.id, outcome_key: winner, odds: "+100", odds_format: "american" }],
+      },
+    });
+    expect(created.status()).toBe(201);
+    await page.reload();
+    const open = page.getByRole("region", { name: "Open bets" });
+    await open.getByRole("button", { name: "Settle from final scores" }).click();
+    const settled = page.getByRole("region", { name: "Settled bets" });
+    await expect(settled.getByText("Settled from final score")).toBeVisible();
+    await expect(settled.getByText("+$10.00", { exact: true })).toBeVisible();
+    await expect(settled.getByText("Won", { exact: true })).toBeVisible();
+  });
+
+  test("change password: the new one works and the old one stops working", async ({ page }) => {
+    const email = await signUp(page, "pw");
+    await page.goto("/app/settings");
+    await page.getByLabel("Current password").fill("correct-horse-battery");
+    await page.getByLabel("New password").fill("an-even-better-passphrase");
+    await page.getByRole("button", { name: "Change password" }).click();
+    await expect(page.getByText("Password changed.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible(); // this session stays signed in
+    await page.getByRole("button", { name: "Log out" }).click();
+
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill("correct-horse-battery");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    // Start from a fresh form: React resets the fields when the failed attempt finishes.
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill("an-even-better-passphrase");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+  });
+
+  test("export downloads my data without any password material", async ({ page }) => {
+    const email = await signUp(page, "export");
+    await page.goto("/app/settings");
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download my data" }).click()]);
+    expect(download.suggestedFilename()).toMatch(/^oddvex-export-\d{4}-\d{2}-\d{2}\.json$/);
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    const text = Buffer.concat(chunks).toString("utf8");
+    const data = JSON.parse(text);
+    expect(data.user.email).toBe(email);
+    expect(Array.isArray(data.bets)).toBe(true);
+    expect(text.toLowerCase()).not.toContain("password_hash");
+    expect(text).not.toContain("correct-horse-battery");
   });
 
   test("mock sportsbook sync imports bets once and deletes them on disconnect", async ({ page }) => {

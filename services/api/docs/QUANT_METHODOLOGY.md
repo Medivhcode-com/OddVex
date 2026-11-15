@@ -184,6 +184,44 @@ that reason.
 `profit = returned - stake`. A parlay priced from its legs is settled from the leg results
 using the parlay rules above. A bet with its own price is settled at that price.
 
+## Grading a selection from a final score
+
+`quant/grading.py`, `grade_leg(market, outcome_key, line, home_score, away_score, three_way=False)`
+returns `won`, `lost` or `push`. It is what `POST /v1/bets/auto-settle` uses to grade a leg; the
+payout then comes from the settlement rules above, the same ones a manual settle uses.
+
+| Market | `outcome_key` | `line` | Rule |
+| --- | --- | --- | --- |
+| moneyline, 2-way | `home`, `away` | ignored | Higher score wins. A tie is a `push` |
+| moneyline, 3-way | `home`, `away`, `draw` | ignored | `draw` wins on a tie. `home` and `away` lose on a tie. Never a push |
+| spread | `home`, `away` | handicap of the **selected side** | `selected score + line - other score`: positive `won`, negative `lost`, zero `push` |
+| total | `over`, `under` | total points | `home + away` against the line; exactly on the line is a `push` |
+
+Conventions:
+
+- **A spread line is from the perspective of the selected side.** "Home -3.5" is
+  `outcome_key: "home", line: -3.5`. The other side of that same market is
+  `outcome_key: "away", line: 3.5`. Home 104, away 100: the first wins (104 - 3.5 > 100), the
+  second loses (100 + 3.5 < 104).
+- Half-point lines cannot push. Whole-number lines push when the margin (spread) or the combined
+  score (total) lands exactly on the number.
+- Whether a moneyline is 3-way comes from the league (`has_draw`). `draw` is rejected for a 2-way
+  market.
+- Lines are compared as exact decimals, not binary floats.
+
+A bet leg is **gradeable** when it has an `event_id`, a market of `moneyline`, `spread` or
+`total`, an `outcome_key`, and a `line` for spread and total. Auto-settlement only settles a bet
+when every leg is gradeable and every leg's event is final. For a multi-leg bet: any lost leg
+loses the bet, pushed legs drop out, and if every leg pushed the bet is a push. A multi-leg bet
+that carries its own price (typical for same-game parlays) is settled automatically only when
+every leg won, a leg lost, or every leg pushed; a mix of wins and pushes needs the book's reduced
+price, so it is left for the user (`manual_result_required`).
+
+Limitations: only full-game moneyline, spread and total are graded. Player props, futures,
+alternate periods, half-point results (`half_won`, `half_lost`), voids and cash-outs are not
+derived from scores and stay manual. The synthetic provider has no overtime or shoot-out rule
+variants; a real provider would need a per-league statement of which score a market settles on.
+
 Limitation: sportsbook house rules differ (dead heats, reduced-juice pushes, parlay
 reductions). OddVex records what the user or the import source reports and applies the
 standard rules above; the sportsbook's own settlement is authoritative.

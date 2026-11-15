@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from oddvex_api.config import get_settings
 from oddvex_api.db import Base, make_engine, make_session_factory
+from oddvex_api.providers import SyntheticProvider
 from oddvex_api.seed import DEMO_EMAIL, seed_demo
 
 
@@ -26,7 +27,10 @@ def main(argv: list[str]) -> int:
     if settings.should_auto_create_tables:
         Base.metadata.create_all(engine)
     with make_session_factory(engine)() as session:
-        created = seed_demo(session, settings.demo_password, datetime.now(UTC))
+        now = datetime.now(UTC)
+        # Same seed as the app, so the gradeable demo bets point at events the API serves.
+        provider = SyntheticProvider(seed=settings.synthetic_seed, clock=lambda: now)
+        created = seed_demo(session, settings.demo_password, now, provider=provider)
     print(f"Demo user {DEMO_EMAIL} ready; {created} bet(s) created this run.")
     return 0
 

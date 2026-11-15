@@ -70,7 +70,8 @@ def get_optional_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     user = db.get(User, str(claims["sub"]))
-    if user is None or not user.is_active:
+    # A password change bumps ``token_version``; tokens issued before it carry the old value.
+    if user is None or not user.is_active or claims.get("ver", 0) != user.token_version:
         raise ApiError(
             401,
             "invalid_token",

@@ -73,3 +73,20 @@ export async function deleteAccountAction(_: AuthState, form: FormData): Promise
   await clearSession();
   redirect("/?account=deleted");
 }
+
+export async function changePasswordAction(_: AuthState & { done?: boolean }, form: FormData): Promise<AuthState & { done?: boolean }> {
+  const current = String(form.get("current_password") ?? "");
+  const next = String(form.get("new_password") ?? "");
+  if (!current) return { error: "Enter your current password." };
+  if (next.length < 10) return { error: "Use at least 10 characters for the new password." };
+  if (next === current) return { error: "The new password must be different from the current one." };
+  let auth: AuthResponse;
+  try {
+    auth = await api<AuthResponse>("/v1/me/password", { method: "POST", auth: true, body: { current_password: current, new_password: next } });
+  } catch (error) {
+    return { error: describe(error, "The password was not changed.") };
+  }
+  // Changing the password invalidates every earlier session, so this one gets the fresh token.
+  await setSession(auth.access_token, auth.expires_in);
+  return { done: true };
+}

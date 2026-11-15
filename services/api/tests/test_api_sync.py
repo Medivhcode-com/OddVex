@@ -356,3 +356,58 @@ def test_sync_requires_authentication_and_is_owner_scoped(
     assert sync(client, other_headers, theirs["id"])["imported_count"] == 10
     with app.state.session_factory() as db:
         assert len(list(db.scalars(select(Bet)))) == 20
+
+
+# ---------------------------------------------------------- concurrent import
+def test_a_colliding_concurrent_import_is_a_clean_409(
+    client: TestClient, headers: Headers, app, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Two imports of one account race: the loser hits the unique constraint.
+
+    The first import's duplicate check runs, then a second import commits the same
+    external bets before the first one writes. The first one must answer 409
+    ``sync_conflict``, not 500, and leave nothing half-written.
+    """
+    from oddvex_api.sync import router as sync_router
+    from oddvex_api.sync import service as sync_service
+
+    connection = connect(client, headers)
+    real_run_import = sync_service.run_import
+    raced: list[str] = []
+
+    def run_import_then_lose_the_race(db, conn, provider, max_attempts, now=None):  # type: ignore[no-untyped-def]
+        run = real_run_import(db, conn, provider, max_attempts, now)
+        if not raced:
+            # The "other request": same account, its own transaction, commits first.
+            with app.state.session_factory() as other:
+                other_connection = other.get(SyncConnection, conn.id)
+                real_run_import(other, other_connection, provider, max_attempts, now)
+                other.commit()
+                raced.append(conn.id)
+        return run
+
+    monkeypatch.setattr(sync_router.service, "run_import", run_import_then_lose_the_race)
+    response = client.post(f"/v1/sync/connections/{connection['id']}/sync", headers=headers)
+    assert raced == [connection["id"]]
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert set(body) == {"error"} and body["error"]["code"] == "sync_conflict"
+    assert body["error"]["details"] == {"retryable": True}
+    assert "IntegrityError" not in response.text and "UNIQUE" not in response.text.upper()
+
+    # Exactly one copy of each bet exists (the winner's), and one recorded run.
+    with app.state.session_factory() as db:
+        external_ids = list(db.scalars(select(Bet.external_bet_id)))
+    assert external_ids and len(external_ids) == len(set(external_ids))
+    runs = client.get(f"/v1/sync/connections/{connection['id']}/runs", headers=headers).json()
+    assert len(runs) == 1 and runs[0]["status"] == "succeeded"
+    assert runs[0]["imported_count"] == len(external_ids)
+
+    # Trying again, as the error suggests, works and imports nothing twice. (The mock
+    # account has two newer bets on its second fetch; the first ten are duplicates.)
+    retry = sync(client, headers, connection["id"])
+    assert retry["status"] == "succeeded"
+    assert retry["duplicate_count"] == len(external_ids) == 10
+    assert retry["imported_count"] == 2
+    bets = client.get("/v1/bets", headers=headers).json()
+    assert len(bets) == 12 and len({b["external_bet_id"] for b in bets}) == 12
