@@ -22,6 +22,9 @@ DEMO_EMAIL = "demo@oddvex.test"
 DEMO_DISPLAY_NAME = "Demo Bettor"
 SEED_PROVIDER = "demo-seed"
 DEMO_BET_COUNT = 40
+#: Fixed so the demo history is the same everywhere. Results are drawn at roughly the
+#: price-implied win rate; this seed gives a varied history with a small net loss.
+DEMO_SEED = 4424
 
 _BOOKS = ("Northline", "Cardinal Sports", "Summit Wager", "BlueHarbor Book", "Kestrel Bets")
 # (league, away, home, total line, a player, prop market, prop line) - all fictional.
@@ -116,7 +119,7 @@ def _grade(rng: random.Random, bet: Bet) -> BetSettleRequest:
     return BetSettleRequest(result="won" if won else "lost")
 
 
-def seed_demo(db: Session, password: str, now: datetime, seed: int = 4242) -> int:
+def seed_demo(db: Session, password: str, now: datetime, seed: int = DEMO_SEED) -> int:
     """Create the demo user and any missing demo bets. Returns the number of bets created.
 
     Idempotent: each demo bet has a stable external id, so running this again

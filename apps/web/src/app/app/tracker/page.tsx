@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import { BetActions } from "@/components/app/bet-actions";
 import { BetForm } from "@/components/app/bet-form";
+import { SyncPanel } from "@/components/app/sync-panel";
+import type { Schemas } from "@oddvex/types";
 import { Price } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
 import { ProfitChart } from "@/components/ui/charts";
 import { Badge, ButtonLink, EmptyState, Panel, PanelHeader, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
-import { formatDay, formatMoney, formatPercent, titleCase } from "@/lib/format";
+import { formatDay, formatMoney, formatPercent, formatSignedPercent, titleCase } from "@/lib/format";
 import { getLeagues, leagueLabel } from "@/lib/leagues";
 import { currentUser } from "@/lib/session";
 import type { Bet, BetSummary, Book, Breakdown, League } from "@/lib/types";
@@ -125,11 +127,13 @@ export default async function TrackerPage() {
     );
   }
 
-  const [summary, bets, leagues, books] = await Promise.all([
+  const [summary, bets, leagues, books, syncProviders, syncConnections] = await Promise.all([
     api<BetSummary>("/v1/bets/summary", { auth: true }),
     api<Bet[]>("/v1/bets", { auth: true }),
     getLeagues(),
     api<Book[]>("/v1/sportsbooks"),
+    api<Schemas["SyncProviderOut"][]>("/v1/sync/providers", { auth: true }).catch(() => []),
+    api<Schemas["SyncConnectionOut"][]>("/v1/sync/connections", { auth: true }).catch(() => []),
   ]);
   const { totals } = summary;
   const open = bets.filter((bet) => bet.status === "pending");
@@ -146,7 +150,7 @@ export default async function TrackerPage() {
             <Stat label="Profit" value={formatMoney(totals.profit, { signed: true })} tone={totals.profit > 0 ? "accent" : totals.profit < 0 ? "error" : undefined} />
             <Stat label="ROI" value={formatPercent(totals.roi)} hint={`${formatMoney(totals.staked)} staked`} />
             <Stat label="Record" value={`${totals.wins}-${totals.losses}-${totals.pushes}`} hint="Won, lost, push" />
-            <Stat label="Closing line value" value={totals.avg_clv === null || totals.avg_clv === undefined ? "n/a" : `${totals.avg_clv > 0 ? "+" : ""}${(totals.avg_clv * 100).toFixed(1)}%`} hint="Average, where a closing price was recorded" />
+            <Stat label="Closing line value" value={formatSignedPercent(totals.avg_clv)} hint="Average, where a closing price was recorded" />
             <Stat label="Open bets" value={totals.pending_count} hint={`${formatMoney(totals.pending_exposure)} at risk`} />
           </dl>
           <div className="border-t border-line p-3 sm:p-5">
@@ -170,6 +174,11 @@ export default async function TrackerPage() {
           <BreakdownTable title="By sportsbook" rows={summary.by_sportsbook} label={(key) => key} />
           <BreakdownTable title="By bet type" rows={summary.by_bet_type} label={(key) => (key === "sgp" ? "Same-game parlay" : titleCase(key))} />
         </div>
+
+        <Panel aria-labelledby="sync-heading">
+          <PanelHeader id="sync-heading" title="Sportsbook sync" description="Import bets from a connected account without typing them in." />
+          <SyncPanel providers={syncProviders} connections={syncConnections} />
+        </Panel>
 
         <Panel aria-labelledby="settled-heading">
           <PanelHeader id="settled-heading" title="Settled bets" description={`${settled.length} settled, most recent first`} />

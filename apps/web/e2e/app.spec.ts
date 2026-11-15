@@ -199,6 +199,25 @@ test.describe("accounts and tracking", () => {
     await b.close();
   });
 
+  test("mock sportsbook sync imports bets once and deletes them on disconnect", async ({ page }) => {
+    await signUp(page, "sync");
+    const sync = page.getByRole("region", { name: "Sportsbook sync" });
+    await expect(sync.getByText("Demonstration only")).toBeVisible();
+    await sync.getByRole("button", { name: /^Connect / }).click();
+    await sync.getByRole("button", { name: "Sync now" }).click();
+    await expect(sync.getByText(/Sync finished\. [1-9]\d* new bets? imported/)).toBeVisible();
+    await expect(page.getByText("Synced", { exact: true }).first()).toBeVisible();
+    // The mock account gains a couple of bets after the first sync. Earlier ones must be recognized, not duplicated.
+    await sync.getByRole("button", { name: "Sync now" }).click();
+    await expect(sync.getByText(/, [1-9]\d* already here\./)).toBeVisible();
+    // With nothing new on the account, a further sync imports nothing.
+    await sync.getByRole("button", { name: "Sync now" }).click();
+    await expect(sync.getByText(/Sync finished\. 0 new bets imported/)).toBeVisible();
+    await sync.getByRole("button", { name: /^Disconnect / }).click();
+    await expect(sync.getByText(/Disconnected\. [1-9]\d* synced bets? deleted/)).toBeVisible();
+    await expect(page.getByText("Synced", { exact: true })).toHaveCount(0);
+  });
+
   test("delete account removes access", async ({ page }) => {
     const email = await signUp(page, "del");
     await page.goto("/app/settings");

@@ -25,7 +25,17 @@ export function formatLine(line: number | null | undefined, opts: { signed?: boo
 
 export function formatPercent(probability: number | null | undefined, digits = 1): string {
   if (probability === null || probability === undefined || Number.isNaN(probability)) return "n/a";
-  return `${(probability * 100).toFixed(digits)}%`;
+  const text = Math.abs(probability * 100).toFixed(digits);
+  // A true minus sign, and never a "-0.0%".
+  return `${probability < 0 && Number(text) !== 0 ? "−" : ""}${text}%`;
+}
+
+/** A fraction as a signed percentage: 0.125 is "+12.5%", -0.02 is "−2.0%", zero is unsigned. */
+export function formatSignedPercent(fraction: number | null | undefined, digits = 1): string {
+  if (fraction === null || fraction === undefined || Number.isNaN(fraction)) return "n/a";
+  const text = Math.abs(fraction * 100).toFixed(digits);
+  if (Number(text) === 0) return `${text}%`;
+  return `${fraction > 0 ? "+" : "−"}${text}%`;
 }
 
 export function formatMoney(amount: number, opts: { signed?: boolean } = {}): string {
