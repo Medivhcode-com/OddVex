@@ -8,6 +8,7 @@ export default function GamesLayout() {
     <Stack screenOptions={options}>
       <Stack.Screen name="index" options={{ title: 'Games' }} />
       <Stack.Screen name="event/[id]" options={{ title: 'Game' }} />
+      <Stack.Screen name="assistant" options={{ title: 'OddVex AI' }} />
     </Stack>
   );
 }

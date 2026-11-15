@@ -1,19 +1,58 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, View, type DimensionValue } from 'react-native';
 
 import { ApiError, ApiUnavailableError } from '@/api/client';
-import { Txt } from '@/components/text';
+import { Num, Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
-import { radius, space, touchTarget } from '@/theme';
+import { fontSize, radius, space, touchTarget } from '@/theme';
 
-export function Button({ label, onPress }: { label: string; onPress: () => void }) {
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+
+/**
+ * The one button. `primary` is the filled accent action; `secondary` and `ghost` are quieter; `danger` deletes.
+ * Disabled buttons say so to assistive technology and dim, and their label still reads the same.
+ */
+export function Button({
+  label,
+  onPress,
+  variant = 'primary',
+  disabled = false,
+  compact = false,
+  accessibilityLabel,
+  accessibilityHint,
+  selected,
+}: {
+  label: string;
+  onPress: () => void;
+  variant?: ButtonVariant;
+  disabled?: boolean;
+  /** Hugs its label and drops the minimum width. Height stays at the 44pt touch target. */
+  compact?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  selected?: boolean;
+}) {
   const theme = useTheme();
+  const fill = variant === 'primary' ? theme.accent : variant === 'secondary' ? theme.raised : 'transparent';
+  const border =
+    variant === 'danger' ? theme.error : variant === 'secondary' ? theme.borderStrong : variant === 'ghost' ? theme.border : fill;
+  const tone = variant === 'primary' ? 'accentInk' : variant === 'danger' ? 'error' : 'text';
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled, ...(selected === undefined ? null : { selected }) }}
+      disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.button, { backgroundColor: theme.accent }, pressed && styles.pressed]}>
-      <Txt variant="body" weight="semibold" tone="accentInk">
+      style={({ pressed }) => [
+        styles.button,
+        compact && styles.compact,
+        { backgroundColor: fill, borderColor: border },
+        pressed && styles.pressed,
+        disabled && styles.disabled,
+      ]}>
+      <Txt variant={compact ? 'secondary' : 'body'} weight="semibold" tone={tone}>
         {label}
       </Txt>
     </Pressable>
@@ -46,7 +85,7 @@ export function SkeletonCards({ count = 3, label }: { count?: number; label: str
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
+export function EmptyState({ title, body, children }: { title: string; body: string; children?: React.ReactNode }) {
   return (
     <Panel>
       <View style={styles.message}>
@@ -56,6 +95,7 @@ export function EmptyState({ title, body }: { title: string; body: string }) {
         <Txt variant="secondary" tone="muted" style={styles.center}>
           {body}
         </Txt>
+        {children}
       </View>
     </Panel>
   );
@@ -95,16 +135,110 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => 
   );
 }
 
-/** Inline caution, used when a refresh fails but earlier data is still on screen. */
-export function Notice({ text }: { text: string }) {
+type NoticeTone = 'warn' | 'error' | 'accent' | 'neutral';
+
+/**
+ * Inline message. `warn` is the default (a refresh failed but earlier data is still on screen). Errors and
+ * cautions are announced as alerts; confirmations and notes are announced politely. Each tone has its own
+ * leading word or title, so the tone is never carried by color alone.
+ */
+export function Notice({ text, title, tone = 'warn', children }: { text?: string; title?: string; tone?: NoticeTone; children?: React.ReactNode }) {
   const theme = useTheme();
+  const palette = {
+    warn: { bg: theme.warnSoft, edge: theme.warn, ink: 'warn' },
+    error: { bg: theme.errorSoft, edge: theme.error, ink: 'error' },
+    accent: { bg: theme.accentSoft, edge: theme.accent, ink: 'text' },
+    neutral: { bg: theme.raised, edge: theme.borderStrong, ink: 'muted' },
+  } as const;
+  const { bg, edge, ink } = palette[tone];
+  const urgent = tone === 'warn' || tone === 'error';
   return (
     <View
-      accessibilityRole="alert"
-      style={[styles.notice, { backgroundColor: theme.warnSoft, borderColor: theme.warn }]}>
-      <Txt variant="secondary" tone="warn">
-        {text}
+      accessible
+      accessibilityRole={urgent ? 'alert' : undefined}
+      accessibilityLiveRegion={urgent ? 'assertive' : 'polite'}
+      style={[styles.notice, { backgroundColor: bg, borderColor: edge }]}>
+      {title ? (
+        <Txt variant="secondary" weight="semibold" tone={tone === 'neutral' ? 'text' : ink}>
+          {title}
+        </Txt>
+      ) : null}
+      {text ? (
+        <Txt variant="secondary" tone={title && tone !== 'error' ? 'muted' : ink}>
+          {text}
+        </Txt>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+/** Panel title with an optional one-line description. */
+export function PanelHeading({ title, description }: { title: string; description?: string }) {
+  return (
+    <View style={styles.heading}>
+      <Txt variant="heading" accessibilityRole="header">
+        {title}
       </Txt>
+      {description ? (
+        <Txt variant="secondary" tone="muted">
+          {description}
+        </Txt>
+      ) : null}
+    </View>
+  );
+}
+
+/** A label over a monospace value, with an optional hint. Read out as one phrase. */
+export function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'accent' | 'error' }) {
+  return (
+    <View accessible accessibilityLabel={[label, value, hint].filter(Boolean).join(', ')} style={styles.stat}>
+      <Txt variant="caption" tone="muted">
+        {label}
+      </Txt>
+      <Num size={fontSize.score} tone={tone ?? 'text'} weight="semibold">
+        {value}
+      </Num>
+      {hint ? (
+        <Txt variant="caption" tone="muted">
+          {hint}
+        </Txt>
+      ) : null}
+    </View>
+  );
+}
+
+/** Two-column grid for `Stat`s. */
+export function StatGrid({ children }: { children: React.ReactNode }) {
+  return <View style={styles.statGrid}>{children}</View>;
+}
+
+/** The API's `steps`, behind a "Show the working" toggle. */
+export function Working({ steps }: { steps: readonly string[] }) {
+  const theme = useTheme();
+  const [open, setOpen] = useState(false);
+  if (!steps.length) return null;
+  return (
+    <View style={[styles.working, { borderColor: theme.border }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={open ? 'Hide the working' : 'Show the working'}
+        onPress={() => setOpen((value) => !value)}
+        style={styles.workingToggle}>
+        <Txt variant="secondary" weight="medium">
+          {open ? 'Hide the working' : 'Show the working'}
+        </Txt>
+      </Pressable>
+      {open ? (
+        <View style={[styles.steps, { borderTopColor: theme.border }]}>
+          {steps.map((step, index) => (
+            <Num key={index} size={fontSize.caption} tone="muted" weight="regular">
+              {index + 1}. {step}
+            </Num>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -122,8 +256,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: space[5],
     borderRadius: radius.cell,
-    marginTop: space[1],
+    borderWidth: 1,
   },
+  compact: { minWidth: touchTarget, paddingHorizontal: space[3], alignSelf: 'flex-start' },
   pressed: { opacity: 0.8 },
-  notice: { borderLeftWidth: 3, borderRadius: radius.cell, padding: space[3] },
+  disabled: { opacity: 0.5 },
+  notice: { borderLeftWidth: 3, borderRadius: radius.cell, padding: space[3], gap: space[1] },
+  heading: { gap: 2 },
+  stat: { width: '47%', flexGrow: 1, gap: 2 },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: space[4], rowGap: space[4] },
+  working: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.cell },
+  workingToggle: { minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: space[3] },
+  steps: { borderTopWidth: StyleSheet.hairlineWidth, padding: space[3], gap: space[2] },
 });

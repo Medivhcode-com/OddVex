@@ -1,13 +1,17 @@
 import Constants from 'expo-constants';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { StyleSheet, View } from 'react-native';
 
 import { API_URL } from '@/api/client';
 import { Segmented } from '@/components/choice';
-import { Button, Panel } from '@/components/states';
+import { ChangePasswordForm, DeleteAccountForm } from '@/components/account-forms';
+import { Screen } from '@/components/screen';
+import { Button, Panel, PanelHeading } from '@/components/states';
 import { Num, Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
 import { isSynthetic, useMeta } from '@/providers/meta';
 import { useOddsFormat } from '@/providers/odds-format';
+import { openLogin, useSession } from '@/providers/session';
 import { fontSize, space } from '@/theme';
 import type { OddsFormat } from '@/utils/format';
 
@@ -61,29 +65,74 @@ function DataSource() {
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, plain = false }: { label: string; value: string; plain?: boolean }) {
   return (
-    <View style={styles.fact}>
+    <View style={styles.fact} accessible accessibilityLabel={`${label}: ${value}`}>
       <Txt variant="secondary" tone="muted">
         {label}
       </Txt>
-      <Num size={fontSize.secondary} selectable style={styles.factValue}>
-        {value}
-      </Num>
+      {plain ? (
+        <Txt variant="secondary" selectable style={styles.factValue}>
+          {value}
+        </Txt>
+      ) : (
+        <Num size={fontSize.secondary} selectable style={styles.factValue}>
+          {value}
+        </Num>
+      )}
+    </View>
+  );
+}
+
+function Account() {
+  const router = useRouter();
+  const session = useSession();
+  if (session.status === 'loading') {
+    return (
+      <Txt variant="secondary" tone="muted">
+        Checking your account.
+      </Txt>
+    );
+  }
+  if (!session.user) {
+    return (
+      <View style={styles.block}>
+        <Txt variant="secondary" tone="muted">
+          You are not logged in. Odds, props and calculators work without an account; the tracker and watchlist need one.
+        </Txt>
+        <View style={styles.row}>
+          <Button label="Log in" variant="secondary" onPress={openLogin} />
+          <Button label="Create an account" variant="ghost" onPress={() => router.push('/signup')} />
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.block}>
+      <Fact label="Name" value={session.user.display_name} plain />
+      <Fact label="Email" value={session.user.email} plain />
+      <Button label="Log out" variant="secondary" onPress={() => void session.logOut()} />
     </View>
   );
 }
 
 export function SettingsScreen() {
-  const theme = useTheme();
+  const router = useRouter();
+  const session = useSession();
   const meta = useMeta();
   const { format, setFormat } = useOddsFormat();
 
   return (
-    <ScrollView
-      style={{ backgroundColor: theme.bg }}
-      contentContainerStyle={styles.content}
-      contentInsetAdjustmentBehavior="automatic">
+    <Screen>
+      <Panel>
+        <View style={styles.block}>
+          <Txt variant="heading" accessibilityRole="header">
+            Account
+          </Txt>
+          <Account />
+        </View>
+      </Panel>
+
       <Panel>
         <View style={styles.block}>
           <Txt variant="heading" accessibilityRole="header">
@@ -119,6 +168,33 @@ export function SettingsScreen() {
 
       <Panel>
         <View style={styles.block}>
+          <PanelHeading title="OddVex AI" description="Answers from OddVex data and its calculation engine, with sources. It doesn't make picks." />
+          <Button label="Ask OddVex AI" variant="secondary" onPress={() => router.push('/assistant')} />
+        </View>
+      </Panel>
+
+      {session.user ? (
+        <>
+          <Panel>
+            <View style={styles.block}>
+              <PanelHeading title="Password" description="Changing it signs out every other device." />
+              <ChangePasswordForm />
+            </View>
+          </Panel>
+          <Panel>
+            <View style={styles.block}>
+              <PanelHeading
+                title="Delete account"
+                description="Removes your account, every bet you logged and any sync connections. This can't be undone."
+              />
+              <DeleteAccountForm />
+            </View>
+          </Panel>
+        </>
+      ) : null}
+
+      <Panel>
+        <View style={styles.block}>
           <Txt variant="heading" accessibilityRole="header">
             About
           </Txt>
@@ -127,13 +203,13 @@ export function SettingsScreen() {
           <Fact label="Data service address" value={API_URL} />
         </View>
       </Panel>
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { padding: space[4], paddingBottom: space[8], gap: space[4] },
   block: { gap: space[3] },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: space[3] },
   synthetic: { gap: space[2], padding: space[3], borderLeftWidth: 3, borderRadius: 6 },
   fact: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: space[3] },
   factValue: { flexShrink: 1, textAlign: 'right' },

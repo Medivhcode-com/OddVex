@@ -4,7 +4,7 @@ import { Txt, type Tone } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
 import { radius, space } from '@/theme';
 
-type BadgeTone = 'neutral' | 'accent' | 'warn';
+type BadgeTone = 'neutral' | 'accent' | 'warn' | 'error';
 
 /** A small status pill. The mark is a shape cue (dot or diamond) so tone never relies on color alone. */
 export function Badge({
@@ -15,8 +15,9 @@ export function Badge({
   ...rest
 }: ViewProps & { label: string; tone?: BadgeTone; mark?: 'dot' | 'diamond' }) {
   const theme = useTheme();
-  const textTone: Tone = tone === 'accent' ? 'accent' : tone === 'warn' ? 'warn' : 'muted';
-  const background = tone === 'accent' ? theme.accentSoft : tone === 'warn' ? theme.warnSoft : theme.raised;
+  const textTone: Tone = tone === 'neutral' ? 'muted' : tone;
+  const background =
+    tone === 'accent' ? theme.accentSoft : tone === 'warn' ? theme.warnSoft : tone === 'error' ? theme.errorSoft : theme.raised;
   return (
     <View {...rest} style={[styles.badge, { backgroundColor: background }, style]}>
       {mark ? <Mark shape={mark} color={theme[textTone]} /> : null}

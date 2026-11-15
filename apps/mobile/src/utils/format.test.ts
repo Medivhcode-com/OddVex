@@ -1,4 +1,18 @@
-import { formatAge, formatAmerican, formatDecimal, formatLine, formatPercent, formatPrice, formatStart } from '@/utils/format';
+import {
+  cleanOdds,
+  formatAge,
+  formatAmerican,
+  formatDay,
+  formatDecimal,
+  formatLine,
+  formatMoney,
+  formatPercent,
+  formatPrice,
+  formatSignedPercent,
+  formatStart,
+  showTypedAmerican,
+  titleCase,
+} from '@/utils/format';
 
 describe('formatAmerican', () => {
   it('signs positive prices and uses a true minus for negatives', () => {
@@ -68,5 +82,58 @@ describe('formatStart', () => {
     expect(text).toContain('Sun');
     expect(text).toContain('Nov 15');
     expect(text).toMatch(/1:00\sPM/);
+  });
+});
+
+describe('formatMoney', () => {
+  it('groups thousands and always shows cents', () => {
+    expect(formatMoney(1250)).toBe('$1,250.00');
+    expect(formatMoney(1234567.891)).toBe('$1,234,567.89');
+    expect(formatMoney(0)).toBe('$0.00');
+    expect(formatMoney(999.999)).toBe('$1,000.00');
+  });
+  it('uses a true minus sign before the dollar sign for losses', () => {
+    expect(formatMoney(-25)).toBe('−$25.00');
+    expect(formatMoney(-25)).not.toContain('-');
+  });
+  it('signs profit when asked, and leaves zero unsigned', () => {
+    expect(formatMoney(22.73, { signed: true })).toBe('+$22.73');
+    expect(formatMoney(-25, { signed: true })).toBe('−$25.00');
+    expect(formatMoney(0, { signed: true })).toBe('$0.00');
+  });
+});
+
+describe('formatPercent and formatSignedPercent', () => {
+  it('never shows a negative zero', () => {
+    expect(formatPercent(-0.0004)).toBe('0.0%');
+    expect(formatSignedPercent(-0.0004)).toBe('0.0%');
+    expect(formatSignedPercent(0)).toBe('0.0%');
+  });
+  it('uses a true minus sign for negatives', () => {
+    expect(formatPercent(-0.052)).toBe('−5.2%');
+    expect(formatPercent(-0.052)).not.toContain('-');
+  });
+  it('signs gains and losses', () => {
+    expect(formatSignedPercent(0.125)).toBe('+12.5%');
+    expect(formatSignedPercent(-0.02)).toBe('−2.0%');
+    expect(formatSignedPercent(0.0125, 2)).toBe('+1.25%');
+  });
+  it('says n/a when there is no value', () => {
+    expect(formatPercent(null)).toBe('n/a');
+    expect(formatSignedPercent(undefined)).toBe('n/a');
+    expect(formatSignedPercent(Number.NaN)).toBe('n/a');
+  });
+});
+
+describe('small display helpers', () => {
+  it('formats a day, title-cases API keys and tidies typed odds', () => {
+    expect(formatDay('2026-11-15T20:00:00Z', 'UTC')).toBe('Nov 15');
+    expect(titleCase('player_prop')).toBe('Player Prop');
+    expect(titleCase('half_won')).toBe('Half Won');
+    expect(cleanOdds('  −110 ')).toBe('-110');
+    expect(cleanOdds('–250')).toBe('-250');
+    expect(showTypedAmerican('150')).toBe('+150');
+    expect(showTypedAmerican('-110')).toBe('−110');
+    expect(showTypedAmerican('+120')).toBe('+120');
   });
 });

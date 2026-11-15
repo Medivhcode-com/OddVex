@@ -17,11 +17,13 @@ type Settled<T> = { key: string; token: string; data: T | undefined; error: unkn
 /**
  * Loads a resource and reloads it when `key` changes or `reload()` is called.
  * Deliberately small: no cache, no retries, no polling. Stale responses are dropped.
+ * A change of `revision` reloads like `reload()` does, keeping the current data on screen meanwhile; screens
+ * pass the session's bet or watchlist counter so a change made on one tab shows up on the others.
  */
-export function useResource<T>(key: string, fetcher: (signal: AbortSignal) => Promise<T>): Resource<T> {
+export function useResource<T>(key: string, fetcher: (signal: AbortSignal) => Promise<T>, revision = 0): Resource<T> {
   const [attempt, setAttempt] = useState(0);
   const [settled, setSettled] = useState<Settled<T>>({ key: '', token: '', data: undefined, error: undefined });
-  const token = `${key}#${attempt}`;
+  const token = `${key}#${attempt}#${revision}`;
   const load = useEffectEvent(fetcher);
 
   useEffect(() => {
