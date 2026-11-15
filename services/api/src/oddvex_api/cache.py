@@ -5,9 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, Protocol, TypeVar
-
-T = TypeVar("T")
+from typing import Any, Protocol
 
 
 class Cache(Protocol):
@@ -64,7 +62,7 @@ class InMemoryTTLCache:
             self._data.clear()
 
 
-def cached(cache: Cache, key: str, ttl_seconds: float, compute: Callable[[], T]) -> T:
+def cached[T](cache: Cache, key: str, ttl_seconds: float, compute: Callable[[], T]) -> T:
     """Return the cached value for ``key`` or compute and store it."""
     hit = cache.get(key)
     if hit is not None:

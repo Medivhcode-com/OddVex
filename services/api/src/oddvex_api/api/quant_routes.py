@@ -86,7 +86,10 @@ def quant_convert(body: ConvertRequest) -> ConvertResponse:
 # --------------------------------------------------------------------- no-vig
 class NoVigRequest(BaseModel):
     odds: list[OddsValue] = Field(
-        min_length=2, max_length=20, description="Every outcome of one market.", examples=[[-110, -110]]
+        min_length=2,
+        max_length=20,
+        description="Every outcome of one market.",
+        examples=[[-110, -110]],
     )
     odds_format: OddsFormatIn = "american"
     labels: list[str] | None = Field(default=None, description="Optional outcome names.")
@@ -312,7 +315,11 @@ def quant_parlay(body: ParlayRequest) -> ParlayResponse:
     if result.combined_probability is not None:
         steps.append(
             "Combined probability = "
-            + " x ".join(f"{leg.win_probability:.4f}" for leg in body.legs if leg.win_probability)
+            + " x ".join(
+                f"{leg.win_probability:.4f}"
+                for leg in body.legs
+                if leg.win_probability is not None and leg.result not in ("push", "void")
+            )
             + f" = {_pct(result.combined_probability)} (assumes independence)"
         )
     else:
@@ -423,9 +430,7 @@ def quant_clv(body: CLVRequest) -> CLVResponse:
             else None
         ),
         ev_at_close_percent=(
-            round(result.ev_at_close_percent, 4)
-            if result.ev_at_close_percent is not None
-            else None
+            round(result.ev_at_close_percent, 4) if result.ev_at_close_percent is not None else None
         ),
         steps=steps,
     )

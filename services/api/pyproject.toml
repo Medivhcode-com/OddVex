@@ -37,6 +37,7 @@ testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = [
     "ignore:Dialect sqlite\\+pysqlite does \\*not\\* support Decimal objects natively",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
 
 [tool.ruff]

@@ -109,7 +109,9 @@ def normalize_event(raw: dict[str, Any], provider: str, fetched_at: datetime) ->
     )
 
 
-def normalize_odds_snapshot(raw: dict[str, Any], provider: str, fetched_at: datetime) -> OddsSnapshot:
+def normalize_odds_snapshot(
+    raw: dict[str, Any], provider: str, fetched_at: datetime
+) -> OddsSnapshot:
     event_id = str(_require(raw, "eventId"))
     market = _lookup(_MARKET_TYPES, _require(raw, "marketType"), "market type")
     book = str(_require(raw, "book")).lower()
@@ -142,7 +144,9 @@ def normalize_odds_snapshot(raw: dict[str, Any], provider: str, fetched_at: date
     )
 
 
-def normalize_game_log(raw: dict[str, Any], provider: str, fetched_at: datetime) -> list[GameLogEntry]:
+def normalize_game_log(
+    raw: dict[str, Any], provider: str, fetched_at: datetime
+) -> list[GameLogEntry]:
     player_id = str(_require(raw, "playerId"))
     entries: list[GameLogEntry] = []
     for game in _require(raw, "games"):

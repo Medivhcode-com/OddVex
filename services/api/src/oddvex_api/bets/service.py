@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..db import Bet, BetLeg, utcnow
@@ -109,7 +109,7 @@ def create_bet(user_id: str, data: BetCreate) -> Bet:
         sportsbook=data.sportsbook.strip(),
         stake=to_money(data.stake),
         notes=data.notes,
-        placed_at=data.placed_at or utcnow(),
+        placed_at=data.placed_at.astimezone(UTC) if data.placed_at else utcnow(),
         source="manual",
     )
     bet.legs = [build_leg(leg, i) for i, leg in enumerate(data.legs)]
@@ -146,7 +146,7 @@ def update_bet(bet: Bet, data: BetUpdate) -> None:
     if "sportsbook" in fields and data.sportsbook is not None:
         bet.sportsbook = data.sportsbook.strip()
     if "placed_at" in fields and data.placed_at is not None:
-        bet.placed_at = data.placed_at
+        bet.placed_at = data.placed_at.astimezone(UTC)
     if "notes" in fields:
         bet.notes = data.notes
     if data.closing_odds:
@@ -235,7 +235,7 @@ def settle(bet: Bet, data: BetSettleRequest) -> None:
     bet.result = settlement.result
     bet.payout = settlement.payout
     bet.profit = settlement.profit
-    bet.settled_at = data.settled_at or utcnow()
+    bet.settled_at = data.settled_at.astimezone(UTC) if data.settled_at else utcnow()
     bet.updated_at = utcnow()
 
 

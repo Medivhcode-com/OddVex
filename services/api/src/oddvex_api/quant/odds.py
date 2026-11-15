@@ -75,10 +75,7 @@ def american_to_decimal(american: Number) -> Decimal:
 def decimal_to_american(decimal_odds: Number) -> int:
     """Nearest whole-number American price. Even money (2.0) is reported as +100."""
     value = validate_decimal_odds(decimal_odds)
-    if value >= 2:
-        raw = (value - _ONE) * _HUNDRED
-    else:
-        raw = -_HUNDRED / (value - _ONE)
+    raw = (value - _ONE) * _HUNDRED if value >= 2 else -_HUNDRED / (value - _ONE)
     rounded = int(raw.quantize(_ONE, rounding=ROUND_HALF_UP))
     if rounded == -100:
         return 100

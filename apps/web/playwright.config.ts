@@ -37,9 +37,9 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: "node .next/standalone/apps/web/server.js",
+      command: "bash ./e2e/start-web.sh",
       url: `http://localhost:${WEB_PORT}`,
-      env: { PORT: String(WEB_PORT), HOSTNAME: "localhost", ODDVEX_API_URL: `http://localhost:${API_PORT}` },
+      env: { PORT: String(WEB_PORT), HOSTNAME: "localhost", ODDVEX_API_URL: `http://localhost:${API_PORT}`, ODDVEX_INSECURE_COOKIES: "true" },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },

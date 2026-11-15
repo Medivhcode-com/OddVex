@@ -91,7 +91,9 @@ class Board:
         self.settings = settings
         self.cache = cache
         self.now: datetime = provider.now()
-        self._books = {b.id: SportsbookRef(key=b.key, name=b.name) for b in self._sportsbooks()}
+        self._books = {
+            b.id: SportsbookRef(key=b.key, name=b.name) for b in provider.list_sportsbooks()
+        }
         self._summaries: dict[str, EventSummaryOut] = {}
 
     # ------------------------------------------------------------ references
@@ -115,7 +117,9 @@ class Board:
         ]
 
     def book_ref(self, sportsbook_id: str) -> SportsbookRef:
-        return self._books.get(sportsbook_id) or SportsbookRef(key=sportsbook_id, name=sportsbook_id)
+        return self._books.get(sportsbook_id) or SportsbookRef(
+            key=sportsbook_id, name=sportsbook_id
+        )
 
     def team_ref(self, team_id: str) -> TeamRef:
         team: Team | None = self.provider.get_team(team_id)
@@ -482,11 +486,7 @@ class Board:
                 home=_mean([e.stats[market] for e in log if e.is_home]),
                 away=_mean([e.stats[market] for e in log if not e.is_home]),
                 vs_opponent=_mean(
-                    [
-                        e.stats[market]
-                        for e in log
-                        if opponent and e.opponent_team_id == opponent.id
-                    ]
+                    [e.stats[market] for e in log if opponent and e.opponent_team_id == opponent.id]
                 ),
             ),
             caveat=HIT_RATE_CAVEAT,

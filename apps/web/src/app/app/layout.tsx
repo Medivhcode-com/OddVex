@@ -40,9 +40,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <Logo size={24} />
             </Link>
             {meta?.data_mode === "synthetic" ? (
-              <Badge tone="second" className="hidden sm:inline-flex">
-                Synthetic data
-              </Badge>
+              <span className="hidden sm:inline">
+                <Badge tone="second">Synthetic data</Badge>
+              </span>
             ) : null}
             <div className="ml-auto flex items-center gap-2">
               <OddsFormatToggle />

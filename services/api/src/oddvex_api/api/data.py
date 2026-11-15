@@ -118,9 +118,7 @@ def list_events(
     board: BoardDep,
     league: Annotated[LeagueKey | None, Query()] = None,
     status: Annotated[EventStatus | None, Query()] = None,
-    on_date: Annotated[
-        date | None, Query(alias="date", description="UTC date, YYYY-MM-DD")
-    ] = None,
+    on_date: Annotated[date | None, Query(alias="date", description="UTC date, YYYY-MM-DD")] = None,
 ) -> list[EventSummaryOut]:
     events = board.provider.list_events(league=league, status=status, on_date=on_date)
     return [board.event_summary(event) for event in events]

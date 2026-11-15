@@ -27,12 +27,12 @@ function Side({ name, abbr, score, best, winner }: { name: string; abbr: string;
       <span aria-hidden="true" className="num grid size-8 shrink-0 place-items-center rounded-cell bg-raised text-[0.6875rem] font-semibold text-muted">
         {abbr}
       </span>
-      <span className={`min-w-0 flex-1 truncate ${winner ? "font-semibold" : "font-medium"}`}>{name}</span>
+      <span className={`min-w-0 flex-1 leading-snug ${winner ? "font-semibold" : "font-medium"}`}>{name}</span>
       {score !== undefined ? <span className={`num text-lg ${winner ? "font-semibold" : "text-muted"}`}>{score}</span> : null}
       {best ? (
-        <span className="flex w-24 flex-col items-end leading-tight">
+        <span className="flex w-20 shrink-0 flex-col items-end leading-tight">
           <Price price={best.price} className="font-medium" />
-          <span className="max-w-24 truncate text-[0.6875rem] text-muted">{best.sportsbook.name}</span>
+          <span className="max-w-20 truncate text-[0.6875rem] text-muted">{best.sportsbook.name}</span>
         </span>
       ) : score === undefined ? (
         <span className="w-24 text-right text-xs text-muted">No price</span>

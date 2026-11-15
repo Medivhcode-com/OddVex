@@ -618,9 +618,7 @@ class SyntheticProvider:
                 sigma_total=cfg.sigma_total,
             )
         if at >= core.end:
-            return _State(
-                "final", 1.0, core.final_home, core.final_away, 0.0, 1.0, 0.0, 1.0
-            )
+            return _State("final", 1.0, core.final_home, core.final_away, 0.0, 1.0, 0.0, 1.0)
         fraction = (at - core.start).total_seconds() / (core.end - core.start).total_seconds()
         if cfg.score_model == "events":
             home_score = sum(1 for t in core.home_times if t <= fraction)
@@ -910,7 +908,9 @@ class SyntheticProvider:
                     name, points = per_outcome.setdefault(outcome.key, (outcome.name, []))
                     points.append(
                         LinePoint(
-                            timestamp=stamp, price_american=outcome.price_american, line=outcome.line
+                            timestamp=stamp,
+                            price_american=outcome.price_american,
+                            line=outcome.line,
                         )
                     )
             for key, (name, points) in per_outcome.items():
@@ -938,7 +938,9 @@ class SyntheticProvider:
     def _stat_value(self, player: Player, market: str, core: _EventCore) -> float:
         spec = self._player_specs[player.id][market]
         mean = self._adjusted_mean(player, market, core)
-        return float(max(0, round(mean + spec.game_sd * self._z("stat", player.id, core.id, market))))
+        return float(
+            max(0, round(mean + spec.game_sd * self._z("stat", player.id, core.id, market)))
+        )
 
     def get_player_game_log(self, player_id: str, limit: int | None = None) -> list[GameLogEntry]:
         player = self._players.get(player_id)

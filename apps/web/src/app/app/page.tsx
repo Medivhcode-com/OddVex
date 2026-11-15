@@ -22,7 +22,12 @@ export default async function DashboardPage() {
   const live = events.filter((event) => event.status === "live");
   const upcoming = events.filter((event) => event.status === "upcoming").sort((a, b) => a.start_time.localeCompare(b.start_time));
   const board = [...live, ...upcoming].slice(0, 6);
-  const topProps = props.filter((row) => row.l10_hit_rate !== null && row.l10_hit_rate !== undefined && row.best_over).slice(0, 5);
+  // One prop per player, so the panel shows a spread of the board and not one player's every market.
+  const seen = new Set<string>();
+  const topProps = props
+    .filter((row) => row.l10_hit_rate !== null && row.l10_hit_rate !== undefined && row.best_over)
+    .filter((row) => (seen.has(row.player.id) ? false : Boolean(seen.add(row.player.id))))
+    .slice(0, 5);
 
   return (
     <>
