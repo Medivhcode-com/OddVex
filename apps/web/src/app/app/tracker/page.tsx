@@ -73,6 +73,7 @@ function BetRow({ bet, leagues }: { bet: Bet; leagues: League[] }) {
             {[bet.legs.length === 1 ? bet.legs[0].event_label : null, league ? leagueLabel(leagues, league) : null, bet.sportsbook, formatDay(bet.placed_at)].filter(Boolean).join(", ")}
             {bet.source === "sync" ? <Badge className="ml-2">Synced</Badge> : null}
           </p>
+          {bet.notes ? <p className="mt-1 text-sm text-muted">Note: {bet.notes}</p> : null}
         </div>
         <dl className="flex shrink-0 items-start gap-5 text-right text-sm">
           <div>
@@ -83,6 +84,12 @@ function BetRow({ bet, leagues }: { bet: Bet; leagues: League[] }) {
             <dt className="text-xs text-muted">Stake</dt>
             <dd className="num">{formatMoney(bet.stake)}</dd>
           </div>
+          {bet.clv !== null && bet.clv !== undefined ? (
+            <div>
+              <dt className="text-xs text-muted">CLV</dt>
+              <dd className="num">{formatSignedPercent(bet.clv)}</dd>
+            </div>
+          ) : null}
           {bet.status === "pending" ? (
             <div>
               <dt className="text-xs text-muted">To return</dt>
@@ -98,7 +105,7 @@ function BetRow({ bet, leagues }: { bet: Bet; leagues: League[] }) {
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         {bet.status === "settled" && bet.result ? <Badge tone={RESULT_TONE[bet.result] ?? "neutral"}>{titleCase(bet.result)}</Badge> : <Badge tone="second">Open</Badge>}
-        <BetActions betId={bet.id} pending={bet.status === "pending"} label={title} />
+        <BetActions key={`${bet.id}-${bet.status}-${bet.updated_at}`} bet={bet} label={title} />
       </div>
     </li>
   );

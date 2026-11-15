@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { StatusBadge } from "@/components/app/event-bits";
 import { Price } from "@/components/app/odds-format";
+import { AutoRefresh } from "@/components/app/auto-refresh";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState, Panel, Segmented } from "@/components/ui/primitives";
 import { api, withQuery } from "@/lib/api";
@@ -30,7 +31,7 @@ export default async function OddsPage({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <PageHeader title="Odds" description="The best open price for every outcome, and what the market implies once the vig is removed." />
+      <PageHeader title="Odds" description="The best open price for every outcome, and what the market implies once the vig is removed." actions={<AutoRefresh seconds={60} />} />
       <div className="mb-6 space-y-1">
         <Segmented label="League" current={league} options={leagues.map((l) => ({ value: l.key, label: l.name, href: href({ league: l.key }) }))} />
         <Segmented label="Market" current={market} options={MARKETS.map((m) => ({ value: m.value, label: m.label, href: href({ market: m.value }) }))} />

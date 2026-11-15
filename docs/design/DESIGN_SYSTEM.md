@@ -21,7 +21,7 @@ Semantic tokens only. Components never use raw hex.
 | `line` / `line-strong` | `#2A3648` / `#3B4A61` | `#D3DAE5` / `#AAB5C5` | Borders, input outlines |
 | `ink` | `#F5F8FC` | `#0D1422` | Primary text |
 | `muted` | `#98A7BA` | `#515F75` | Secondary text |
-| `accent` | `#43E6B1` | `#08805C` | Best price, primary action, positive result |
+| `accent` | `#43E6B1` | `#06694B` | Best price, primary action, positive result |
 | `second` | `#748BFF` | `#3F52D0` | Focus ring, reference lines, information |
 | `warn` | `#F5B84B` | `#8F5A00` | Stale data, cautions |
 | `error` | `#F16B77` | `#BD2F40` | Errors, losses |

@@ -21,7 +21,7 @@ test.describe("research screens (signed out)", () => {
     await page.goto("/app");
     await expect(page.getByText(/synthetic data/i).filter({ visible: true }).first()).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tonight's board");
-    await expect(page.getByRole("link", { name: / at .+/ }).first()).toBeVisible();
+    await expect(page.locator('a[href^="/app/games/evt_"]').first()).toBeVisible();
   });
 
   test("games filter by league and open a game with an odds table", async ({ page, request }) => {
@@ -178,6 +178,43 @@ test.describe("accounts and tracking", () => {
     await settled.getByRole("button", { name: /^Delete Harbor/ }).click();
     await settled.getByRole("button", { name: "Delete bet" }).click();
     await expect(page.getByText("Nothing settled yet")).toBeVisible();
+  });
+
+  test("edit an open bet and record closing odds for CLV", async ({ page }) => {
+    await signUp(page, "edit");
+    await page.getByLabel("Pick").fill("Granite Peak Rams ML");
+    await page.getByLabel("Odds", { exact: true }).fill("+150");
+    await page.getByLabel("Stake ($)").fill("20");
+    await page.getByRole("button", { name: "Save bet" }).click();
+    const open = page.getByRole("region", { name: "Open bets" });
+    await open.getByRole("button", { name: /^Edit Granite/ }).click();
+    await open.getByLabel("Stake ($)").fill("40");
+    await open.getByLabel("Closing odds (American)").fill("+120");
+    await open.getByLabel("Notes").fill("Took the early number");
+    await open.getByRole("button", { name: "Save changes" }).click();
+    await expect(open.getByText("$100.00", { exact: true })).toBeVisible(); // 40 at +150 returns 100
+    await expect(open.getByText("Note: Took the early number")).toBeVisible();
+    // 2.50 taken against 2.20 at the close is +13.6%.
+    await expect(open.getByText("+13.6%", { exact: true })).toBeVisible();
+  });
+
+  test("settle a parlay leg by leg: a pushed leg drops out", async ({ page }) => {
+    await signUp(page, "legs");
+    await page.getByLabel("Bet type").selectOption("parlay");
+    await page.getByLabel("Pick").nth(0).fill("Leg one wins");
+    await page.getByLabel("Odds", { exact: true }).nth(0).fill("+100");
+    await page.getByLabel("Pick").nth(1).fill("Leg two pushes");
+    await page.getByLabel("Odds", { exact: true }).nth(1).fill("+100");
+    await page.getByLabel("Stake ($)").fill("10");
+    await page.getByRole("button", { name: "Save bet" }).click();
+    const open = page.getByRole("region", { name: "Open bets" });
+    await expect(open.getByText("$40.00", { exact: true })).toBeVisible(); // 2.0 x 2.0 on 10
+    await open.getByRole("button", { name: "Settle by leg" }).click();
+    await open.getByLabel("Leg two pushes").selectOption("push");
+    await open.getByRole("button", { name: "Settle parlay" }).click();
+    const settled = page.getByRole("region", { name: "Settled bets" });
+    // With the pushed leg removed it pays as a single +100 bet: 10 profit, not 30.
+    await expect(settled.getByText("+$10.00", { exact: true })).toBeVisible();
   });
 
   test("one account cannot see another account's bets", async ({ browser }) => {

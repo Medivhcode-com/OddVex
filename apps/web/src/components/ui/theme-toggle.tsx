@@ -25,13 +25,15 @@ export function ThemeToggle() {
         } catch {}
       }}
       className="inline-flex min-h-9 items-center gap-2 rounded-cell px-2.5 text-sm text-muted hover:bg-raised hover:text-ink"
-      aria-label={`Switch to ${next} theme`}
     >
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
         <path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor" />
       </svg>
-      <span suppressHydrationWarning>{theme === "dark" ? "Dark" : "Light"}</span>
+      <span suppressHydrationWarning>
+        {theme === "dark" ? "Dark" : "Light"}
+        <span className="sr-only"> theme. Switch to {next}.</span>
+      </span>
     </button>
   );
 }

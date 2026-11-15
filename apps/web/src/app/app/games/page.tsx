@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { EventCard } from "@/components/app/event-bits";
+import { AutoRefresh } from "@/components/app/auto-refresh";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState, Panel, Segmented } from "@/components/ui/primitives";
 import { api, withQuery } from "@/lib/api";
@@ -31,7 +32,7 @@ export default async function GamesPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHeader title="Games" description="Scores and the best moneyline on each side. Open a game to compare every book." />
+      <PageHeader title="Games" description="Scores and the best moneyline on each side. Open a game to compare every book." actions={<AutoRefresh seconds={60} />} />
       <div className="mb-6 space-y-1">
         <Segmented
           label="League"

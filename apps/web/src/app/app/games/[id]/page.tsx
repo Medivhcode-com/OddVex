@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/app/event-bits";
+import { AutoRefresh } from "@/components/app/auto-refresh";
 import { Freshness } from "@/components/app/freshness";
 import { OddsTable } from "@/components/app/odds-table";
 import { LineHistoryChart, type Series } from "@/components/ui/charts";
@@ -78,11 +79,14 @@ export default async function GamePage({ params, searchParams }: Props) {
           {event.status === "final" ? (
             <Notice title="This game is over">Its markets are closed, so there are no current prices. Line movement below runs up to the close.</Notice>
           ) : null}
-          <Segmented
-            label="Market"
-            current={market}
-            options={available.map((m) => ({ value: m.value, label: m.label, href: `/app/games/${id}?market=${m.value}` }))}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Segmented
+              label="Market"
+              current={market}
+              options={available.map((m) => ({ value: m.value, label: m.label, href: `/app/games/${id}?market=${m.value}` }))}
+            />
+            {event.status !== "final" ? <AutoRefresh seconds={event.status === "live" ? 20 : 60} /> : null}
+          </div>
           <Panel aria-labelledby="odds-heading">
             <PanelHeader
               id="odds-heading"

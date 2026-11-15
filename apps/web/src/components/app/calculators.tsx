@@ -134,7 +134,7 @@ export function NoVigCalculator() {
     >
       {calc.result ? (
         <>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Table, scrolls sideways">
             <table className="w-full min-w-[26rem] border-collapse text-sm">
               <caption className="sr-only">No-vig result</caption>
               <thead>

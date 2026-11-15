@@ -26,7 +26,7 @@ export function OddsTable({ odds }: { odds: OddsComparison }) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Table, scrolls sideways">
       <table className="w-full min-w-[34rem] border-collapse text-sm">
         <caption className="sr-only">
           {odds.market} prices by sportsbook. {open.length} of {odds.books.length} books are open.
@@ -86,7 +86,7 @@ export function OddsTable({ odds }: { odds: OddsComparison }) {
                           )}
                         >
                           <span className="flex items-baseline gap-1.5">
-                            {line ? <span className="num text-xs opacity-80">{line}</span> : null}
+                            {line ? <span className="num text-xs">{line}</span> : null}
                             <Price price={outcome.price} className="font-medium" />
                           </span>
                           <span className="text-[0.6875rem] leading-4">

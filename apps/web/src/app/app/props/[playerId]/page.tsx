@@ -115,7 +115,7 @@ export default async function PropAnalyzerPage({ params, searchParams }: Props) 
 
         <Panel aria-labelledby="offers-heading">
           <PanelHeader id="offers-heading" title="Lines and prices by book" description="Books can post different lines. Best is marked among books at the consensus line." />
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Table, scrolls sideways">
             <table className="w-full min-w-[30rem] border-collapse text-sm">
               <caption className="sr-only">Prop offers by sportsbook</caption>
               <thead>
@@ -163,7 +163,7 @@ export default async function PropAnalyzerPage({ params, searchParams }: Props) 
 
         <Panel aria-labelledby="log-heading">
           <PanelHeader id="log-heading" title="Game log" description={`${log.length} games in this view, most recent first`} />
-          <div className="max-h-96 overflow-auto">
+          <div className="max-h-96 overflow-auto" tabIndex={0} role="region" aria-label="Game log, scrollable">
             <table className="w-full border-collapse text-sm">
               <caption className="sr-only">Game log</caption>
               <thead className="sticky top-0 bg-surface">

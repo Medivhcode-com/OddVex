@@ -50,7 +50,6 @@ export function EventCard({ event, leagueName }: { event: EventSummary; leagueNa
     <Link
       href={`/app/games/${event.id}`}
       className="block rounded-panel border border-line bg-surface p-4 transition-colors hover:border-line-strong"
-      aria-label={`${event.away_team.name} at ${event.home_team.name}, ${leagueName}`}
     >
       <div className="mb-3 flex items-center justify-between gap-3">
         <StatusBadge event={event} />

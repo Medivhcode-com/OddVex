@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 function Formula({ children }: { children: React.ReactNode }) {
-  return <pre className="num mb-4 max-w-full overflow-x-auto rounded-cell border border-line bg-surface px-4 py-3 text-sm text-ink">{children}</pre>;
+  return <pre tabIndex={0} role="region" aria-label="Formula" className="num mb-4 max-w-full overflow-x-auto rounded-cell border border-line bg-surface px-4 py-3 text-sm text-ink">{children}</pre>;
 }
 
 export default function Page() {

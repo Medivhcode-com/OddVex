@@ -42,7 +42,7 @@ export default async function PropsPage({ searchParams }: { searchParams: Promis
         {rows.length === 0 ? (
           <EmptyState title="No props posted for this league">Props appear when sportsbooks open player markets for upcoming games.</EmptyState>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Table, scrolls sideways">
             <table className="w-full min-w-[44rem] border-collapse text-sm">
               <caption className="sr-only">Player props board</caption>
               <thead>
