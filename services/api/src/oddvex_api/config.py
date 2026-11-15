@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     stale_live_seconds: int = 120
     stale_pregame_seconds: int = 900
 
+    #: Trust ``X-Forwarded-For`` for the rate-limit client IP (only behind a trusted proxy).
+    trust_proxy: bool = False
+    #: Comma-separated emails that receive the admin role at registration / login.
+    admin_emails: str = ""
+
+    rate_limit_enabled: bool = True
     rate_limit_auth_per_minute: int = 10
     rate_limit_assistant_per_minute: int = 20
     rate_limit_window_seconds: int = 60
@@ -45,6 +51,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
 
     @property
     def should_auto_create_tables(self) -> bool:

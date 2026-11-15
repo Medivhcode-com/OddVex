@@ -18,13 +18,24 @@ def normalize_email(value: str) -> str:
 
 class RegisterRequest(BaseModel):
     email: str = Field(max_length=320, json_schema_extra={"format": "email"})
-    password: str = Field(min_length=8, max_length=128)
-    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    password: str = Field(min_length=10, max_length=128)
+    display_name: str = Field(min_length=1, max_length=80)
     age_confirmed: bool = Field(
         description="Attestation that the user is 21 or older. Must be true."
     )
 
-    _email = field_validator("email")(normalize_email)
+    @field_validator("email")
+    @classmethod
+    def _email(cls, value: str) -> str:
+        return normalize_email(value)
+
+    @field_validator("display_name")
+    @classmethod
+    def _display_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("display name cannot be blank")
+        return cleaned
 
     @field_validator("age_confirmed")
     @classmethod
@@ -49,7 +60,7 @@ class UserOut(BaseModel):
 
     id: str
     email: str
-    display_name: str | None
+    display_name: str
     role: Literal["user", "admin"]
     age_confirmed_at: datetime
     created_at: datetime

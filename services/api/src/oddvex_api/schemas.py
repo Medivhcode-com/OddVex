@@ -37,19 +37,39 @@ def price_from_american(american: int) -> PriceOut:
     return price_out(parse_odds("american", american))
 
 
-class OddsInput(BaseModel):
-    """A price in any supported format, e.g. american -110, decimal 1.91, fractional "10/11"."""
+OddsFormatIn = Literal["american", "decimal", "fractional"]
+#: A price as typed by a user: -110, 2.5, "+150" or "5/2".
+OddsValue = float | str
 
-    format: Literal["american", "decimal", "fractional"]
-    value: float | str = Field(examples=[-110, 2.5, "5/2"])
 
-    def to_decimal(self) -> Decimal:
-        return parse_odds(self.format, self.value)
+def odds_to_decimal(value: float | str, odds_format: str) -> Decimal:
+    """Normalise a user-supplied price to decimal odds (raises ``QuantError``)."""
+    if isinstance(value, str):
+        text = value.strip()
+        if odds_format != "fractional" and text.startswith("+"):
+            text = text[1:]
+        return parse_odds(odds_format, text)
+    if odds_format == "american" and float(value).is_integer():
+        return parse_odds(odds_format, int(value))
+    return parse_odds(odds_format, value)
 
 
 class SportsbookRef(BaseModel):
+    key: str
+    name: str
+
+
+class TeamRef(BaseModel):
     id: str
     name: str
+    abbreviation: str
+
+
+class BestPriceOut(BaseModel):
+    """The best available price for one side and the sportsbook offering it."""
+
+    price: PriceOut
+    sportsbook: SportsbookRef
 
 
 class MessageOut(BaseModel):

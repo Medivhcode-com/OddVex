@@ -97,7 +97,7 @@ Purpose: a single at-a-glance starting point at `/app`.
 
 Acceptance criteria (M1):
 - AC-HOME-1: With no bets logged, tracker module shows an empty state with a "Log a bet" action, not zeros presented as results.
-- AC-HOME-2: Demo-data indicator is visible on every `/app/*` route while `is_synthetic=true`.
+- AC-HOME-2: Demo-data indicator is visible on every `/app/*` route while `data_mode` is synthetic.
 - AC-HOME-3: Each module handles loading, empty, stale and error states independently (one failing module does not blank the page).
 
 ### B. Games & Live Scores — `GAME`
@@ -205,6 +205,7 @@ Acceptance criteria (M1):
 | TRKR-10 | Spending-awareness insights (RG) | M3 | Later |
 | TRKR-11 | Mobile tracker | M3 | Later |
 | TRKR-12 | Multi-leg (parlay) bets | M1 | M1? |
+| TRKR-13 | Advanced analytics (deeper breakdowns, custom ranges) | M4 | Later |
 
 Acceptance criteria (M1):
 - AC-TRKR-1: P/L and ROI are computed only from settled bets; pending bets are shown separately.
@@ -343,7 +344,7 @@ Acceptance criteria (M1): AC-ADMN-1: endpoint returns 401 unauthenticated and 40
 | DATA-01 | Synthetic fixture data layer (fictional teams/players/sportsbooks) | M1 | M1 |
 | DATA-02 | Data-provider abstraction interface | M1 | M1 |
 | DATA-03 | Licensed data provider integration | M2 | Later — licence gate |
-| DATA-04 | Freshness metadata on every payload (`as_of`, `source`, `is_synthetic`) | M1 | M1 |
+| DATA-04 | Freshness and provenance metadata on every payload (`last_updated`, `is_stale`, `provider`, `fetched_at`, `data_mode`) per ADR-0002 | M1 | M1 |
 | DATA-05 | Historical odds storage | M2 | Later |
 | MKT-01 | Marketing website (routes in SCREEN_MAP) | M1 | M1 |
 | MKT-02 | Legal pages as drafts pending counsel | M1 | M1 (draft copy) |
@@ -379,8 +380,8 @@ Acceptance criteria (M1): AC-ADMN-1: endpoint returns 401 unauthenticated and 40
 
 | ID | Requirement |
 |---|---|
-| NFR-01 | Every odds, score and stat payload carries `as_of`, `source`, `is_synthetic`. UI shows "as of" time for each data block. |
-| NFR-02 | Stale thresholds are configurable per data type. Proposed defaults (to tune with a real provider): live scores 60 s; live odds 60 s; pre-game odds 10 min; stats 24 h. |
+| NFR-01 | Every odds, score and stat payload carries freshness and provenance metadata (`last_updated`, `is_stale`, `provider`, `fetched_at`, response-level `data_mode`; see `docs/architecture/ADR-0002-data-and-freshness.md`). The API, not the client, decides staleness. UI shows an "as of" time for each data block. |
+| NFR-02 | Stale thresholds are configurable per data type. Current defaults per ADR-0002: 120 s for live prices, 15 min for pre-game prices (to tune with a real provider). Thresholds for scores and stats are not yet defined — proposal: live scores 120 s; stats 24 h. |
 | NFR-03 | Stale data is visibly marked, excluded from "best line", and never silently presented as current. |
 | NFR-04 | While fixtures are in use, a "Demo data" indicator is shown on all data screens and in assistant answers. |
 | NFR-05 | If the data source is unavailable, show last known data with its age, or an error state — never fabricated placeholders. |

@@ -45,7 +45,18 @@ class SlidingWindowRateLimiter:
 
 
 def client_ip(request: Request) -> str:
-    """Direct peer address. Proxy headers are not trusted here; terminate them upstream."""
+    """Client address used for rate limiting and audit rows.
+
+    The direct peer address is used unless ``ODDVEX_TRUST_PROXY=true``, in which
+    case the left-most ``X-Forwarded-For`` entry is trusted. Only enable that
+    behind a proxy that overwrites the header.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None and settings.trust_proxy:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first[:64]
     return request.client.host if request.client else "unknown"
 
 
@@ -54,6 +65,8 @@ def rate_limit(bucket: str) -> Callable[[Request], None]:
 
     def dependency(request: Request) -> None:
         settings = request.app.state.settings
+        if not settings.rate_limit_enabled:
+            return
         limiter: SlidingWindowRateLimiter = request.app.state.rate_limiter
         limit = int(getattr(settings, f"rate_limit_{bucket}_per_minute"))
         allowed, retry_after = limiter.check(f"{bucket}:{client_ip(request)}", limit)

@@ -39,7 +39,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    display_name: Mapped[str | None] = mapped_column(String(80))
+    display_name: Mapped[str] = mapped_column(String(80), default="")
     role: Mapped[str] = mapped_column(String(16), default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     age_confirmed_at: Mapped[datetime] = mapped_column(UTCDateTime)
@@ -68,7 +68,10 @@ class Bet(Base):
         String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     bet_type: Mapped[str] = mapped_column(String(16))
+    #: "pending" or "settled".
     status: Mapped[str] = mapped_column(String(16), default="pending")
+    #: won | lost | push | void | half_won | half_lost | cashout once settled.
+    result: Mapped[str | None] = mapped_column(String(16))
     sport: Mapped[str] = mapped_column(String(32), default="unknown")
     sportsbook: Mapped[str] = mapped_column(String(80))
     stake: Mapped[Decimal] = mapped_column(MONEY)
@@ -111,11 +114,13 @@ class BetLeg(Base):
     market: Mapped[str] = mapped_column(String(40))
     league: Mapped[str | None] = mapped_column(String(32))
     event_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    event_label: Mapped[str | None] = mapped_column(String(200))
     line: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     odds_decimal: Mapped[Decimal] = mapped_column(ODDS)
     closing_odds_decimal: Mapped[Decimal | None] = mapped_column(ODDS)
     closing_opposite_odds_decimal: Mapped[Decimal | None] = mapped_column(ODDS)
-    status: Mapped[str] = mapped_column(String(16), default="pending")
+    #: won | lost | push | void | half_won | half_lost once graded.
+    result: Mapped[str | None] = mapped_column(String(16))
 
     bet: Mapped[Bet] = relationship(back_populates="legs")
 
@@ -129,7 +134,7 @@ class SyncConnection(Base):
     )
     provider: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(16), default="active")
-    account_label: Mapped[str] = mapped_column(String(120))
+    label: Mapped[str] = mapped_column(String(120))
     #: Opaque provider state (cursor, mock failure counters). Never credentials.
     provider_state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

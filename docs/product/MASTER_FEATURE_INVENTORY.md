@@ -208,7 +208,7 @@ Important caveats:
 | DATA-01 | Synthetic fixtures | Fictional teams/players/sportsbooks | n/a | M1 | Built in M1 | — |
 | DATA-02 | Provider abstraction | Swap fixtures for a real feed | n/a | M1 | Built in M1 | — |
 | DATA-03 | Licensed provider integration | Real odds/scores/stats | n/a | M2 | Planned | **Founder gate** (paid data licence); licence terms review |
-| DATA-04 | Freshness metadata | `as_of`, `source`, `is_synthetic` | n/a | M1 | Built in M1 | — |
+| DATA-04 | Freshness & provenance metadata | `last_updated`, `is_stale`, `provider`, `fetched_at`, `data_mode` (ADR-0002) | n/a | M1 | Built in M1 | — |
 | DATA-05 | Historical odds store | For movement, CLV, backtests | n/a | M2 | Planned | Licence must permit storage/history |
 | MKT-01 | Marketing website | Pages listed in SCREEN_MAP | Free | M1 | Built in M1 | Not deployed publicly without Founder approval |
 | MKT-02 | Legal pages (draft) | Privacy, Terms, Responsible Gambling | Free | M1 | Built in M1 (draft copy) | Counsel sign-off before launch |
