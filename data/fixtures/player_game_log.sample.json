@@ -1,0 +1,9 @@
+{
+  "_note": "SYNTHETIC sample data. Fictional player and stat lines.",
+  "playerId": "plr_nba_hct_1",
+  "games": [
+    {"eventId": "evt_nba_20260105_1", "date": "2026-01-05T06:00:00Z", "opp": "team_nba_psl", "venue": "A", "statLine": {"PTS": 22, "REB": 4, "AST": 9, "3PM": 2}},
+    {"eventId": "evt_nba_20260108_3", "date": "2026-01-08T18:00:00Z", "opp": "team_nba_emb", "venue": "H", "statLine": {"PTS": 31, "REB": 6, "AST": 7, "3PM": 5}},
+    {"eventId": "evt_nba_20260106_0", "date": "2026-01-06T00:00:00Z", "opp": "team_nba_ngt", "venue": "H", "statLine": {"PTS": 18, "REB": 3, "AST": 11, "3PM": 1}}
+  ]
+}
