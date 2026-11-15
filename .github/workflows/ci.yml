@@ -87,7 +87,7 @@ jobs:
       - run: pnpm --filter @oddvex/web build
 
   mobile:
-    name: Mobile (lint, types, unit)
+    name: Mobile (lint, types, unit, bundle)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -100,6 +100,8 @@ jobs:
       - run: pnpm --filter @oddvex/mobile lint
       - run: pnpm --filter @oddvex/mobile typecheck
       - run: pnpm --filter @oddvex/mobile test
+      - name: Bundle for iOS and Android
+        run: pnpm --filter @oddvex/mobile export:check
 
   e2e:
     name: End to end (Playwright)
