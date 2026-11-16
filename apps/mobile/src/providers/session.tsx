@@ -16,6 +16,13 @@ export type SessionValue = {
   logOut: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
+  /** Reads `GET /v1/me` again, after something outside this provider changed the user (a confirmed email). */
+  refreshUser: () => Promise<void>;
+  /**
+   * True after the API said the account is suspended (401 on a call, or 403 on log in). The session on this
+   * device has been cleared; the log in screen explains. Cleared by the next successful log in.
+   */
+  suspended: boolean;
   /**
    * Counters that go up when the user's bets, watchlist, alert rules, notifications or staking reminder change,
    * so every screen showing them reloads.
@@ -34,6 +41,8 @@ const signedOut: SessionValue = {
   logOut: async () => {},
   changePassword: async () => {},
   deleteAccount: async () => {},
+  refreshUser: async () => {},
+  suspended: false,
   revision: NO_CHANGES,
   changed: () => {},
 };
@@ -46,14 +55,16 @@ export const SessionContext = createContext<SessionValue>(signedOut);
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ status: SessionValue['status']; user: User | null }>({ status: 'loading', user: null });
+  const [suspended, setSuspended] = useState(false);
   const [revision, setRevision] = useState<Record<Topic, number>>(NO_CHANGES);
   // Bumped whenever the session changes, so a slow launch-time check cannot overwrite a newer log in or log out.
   const epoch = useRef(0);
 
-  const end = useCallback(async () => {
+  const end = useCallback(async (reason?: 'suspended') => {
     epoch.current += 1;
     api.setAuthToken(null);
     setState({ status: 'signedOut', user: null });
+    setSuspended(reason === 'suspended');
     await clearSession();
   }, []);
 
@@ -61,6 +72,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     epoch.current += 1;
     api.setAuthToken(auth.access_token);
     setState({ status: 'signedIn', user: auth.user });
+    setSuspended(false);
     try {
       await saveSession(auth);
     } catch {
@@ -69,8 +81,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    api.setUnauthorizedHandler(() => {
-      void end();
+    api.setUnauthorizedHandler((error) => {
+      void end(api.isAccountSuspended(error) ? 'suspended' : undefined);
       router.push('/login');
     });
     return () => api.setUnauthorizedHandler(null);
@@ -102,16 +114,30 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       ...state,
       revision,
       changed: (topic) => setRevision((current) => ({ ...current, [topic]: current[topic] + 1 })),
-      logIn: async (email, password) => begin(await api.login(email, password)),
+      suspended,
+      logIn: async (email, password) => {
+        try {
+          await begin(await api.login(email, password));
+        } catch (error) {
+          // 403 `account_suspended`: nothing of this account stays on the device.
+          if (api.isAccountSuspended(error)) await end('suspended');
+          throw error;
+        }
+      },
       createAccount: async (input) => begin(await api.register(input)),
-      logOut: end,
+      logOut: () => end(),
+      refreshUser: async () => {
+        const started = epoch.current;
+        const user = await api.getMe();
+        if (epoch.current === started) setState({ status: 'signedIn', user });
+      },
       changePassword: async (currentPassword, newPassword) => begin(await api.changePassword(currentPassword, newPassword)),
       deleteAccount: async () => {
         await api.deleteAccount();
         await end();
       },
     }),
-    [state, revision, begin, end],
+    [state, suspended, revision, begin, end],
   );
 
   return <SessionContext value={value}>{children}</SessionContext>;

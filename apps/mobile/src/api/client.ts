@@ -7,6 +7,7 @@ import type {
   AuthResponse,
   AutoSettle,
   Bet,
+  BetAnalytics,
   BetCreate,
   BetSettle,
   BetSummary,
@@ -14,12 +15,16 @@ import type {
   Book,
   ClvResult,
   ConvertResult,
+  EmailVerification,
+  Entitlements,
   EventDetail,
   EventStatus,
   EventSummary,
   EvResult,
+  Flags,
   League,
   Market,
+  Message,
   Meta,
   Notification,
   NotificationList,
@@ -29,6 +34,8 @@ import type {
   OddsComparison,
   ParlayRequest,
   ParlayResult,
+  PasswordResetConfirm,
+  PasswordResetRequest,
   PropAnalysis,
   PropBoardRow,
   PropSplit,
@@ -39,6 +46,7 @@ import type {
   SyncProvider,
   SyncRun,
   User,
+  ValueScreen,
   WatchItem,
   WatchKind,
 } from '@/api/types';
@@ -82,7 +90,7 @@ export function withQuery(path: string, query?: Query): string {
 // The bearer token lives in memory here and in SecureStore (see src/session/store.ts). The session provider
 // is the only caller of these two setters.
 let authToken: string | null = null;
-let unauthorizedHandler: (() => void) | null = null;
+let unauthorizedHandler: ((error: ApiError) => void) | null = null;
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
@@ -92,8 +100,11 @@ export function getAuthToken(): string | null {
   return authToken;
 }
 
-/** Called when the API rejects the token the app holds (401 on a request that sent it). */
-export function setUnauthorizedHandler(handler: (() => void) | null): void {
+/**
+ * Called when the API rejects the token the app holds (401 on a request that sent it). The error says why:
+ * an expired or replaced token, or `account_suspended`.
+ */
+export function setUnauthorizedHandler(handler: ((error: ApiError) => void) | null): void {
   unauthorizedHandler = handler;
 }
 
@@ -163,7 +174,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (!response.ok) {
     const error = await parseError(response);
     // Only a rejected token ends the session, and only if it is still the one in use.
-    if (response.status === 401 && token && token === authToken) unauthorizedHandler?.();
+    if (response.status === 401 && token && token === authToken) unauthorizedHandler?.(error);
     throw error;
   }
   if (response.status === 204) return undefined as T;
@@ -234,6 +245,22 @@ export function register(input: { email: string; password: string; display_name:
   return apiRequest<AuthResponse>('/v1/auth/register', { body: { ...input, age_confirmed: true } });
 }
 
+/** Every known feature flag and whether it is on. Public. */
+export async function getFlags(signal?: AbortSignal): Promise<Flags> {
+  return (await apiGet<{ flags: Flags }>('/v1/flags', { signal })).flags;
+}
+
+/** Best price against the consensus of the other books. Behind the `value_screen` flag. */
+export function getValueScreen(
+  filters: { league?: string | null; market?: Market | null; minEdge?: number | null } = {},
+  signal?: AbortSignal,
+): Promise<ValueScreen> {
+  return apiGet<ValueScreen>('/v1/value', {
+    query: { league: filters.league, market: filters.market, min_edge: filters.minEdge || undefined },
+    signal,
+  });
+}
+
 export function getMe(signal?: AbortSignal): Promise<User> {
   return apiRequest<User>('/v1/me', { auth: 'required', signal });
 }
@@ -250,6 +277,35 @@ export function deleteAccount(): Promise<void> {
   return apiRequest<void>('/v1/me', { method: 'DELETE', auth: 'required' });
 }
 
+/** The plan and what it includes. `preview` is true while plans are not enforced. There is no purchase route. */
+export function getEntitlements(signal?: AbortSignal): Promise<Entitlements> {
+  return apiRequest<Entitlements>('/v1/me/entitlements', { auth: 'required', signal });
+}
+
+// Email flows, behind the `email_flows` flag. The API queues the message in an outbox; in this preview no
+// email is actually sent.
+
+export function requestEmailVerification(): Promise<Message> {
+  return apiRequest<Message>('/v1/auth/verify-email/request', { method: 'POST', auth: 'required', body: {} });
+}
+
+/** No sign-in needed: the token from the link identifies the account. It works once. */
+export function confirmEmailVerification(token: string): Promise<EmailVerification> {
+  return apiRequest<EmailVerification>('/v1/auth/verify-email/confirm', { body: { token } });
+}
+
+/** Always answers the same way, whether or not an account exists for the address. */
+export function requestPasswordReset(email: string): Promise<Message> {
+  const body: PasswordResetRequest = { email };
+  return apiRequest<Message>('/v1/auth/password-reset/request', { body });
+}
+
+/** Signs out every earlier session and returns no token: the user logs in again with the new password. */
+export function confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+  const body: PasswordResetConfirm = { token, new_password: newPassword };
+  return apiRequest<void>('/v1/auth/password-reset/confirm', { body });
+}
+
 // Bet tracker
 
 export function getBets(signal?: AbortSignal): Promise<Bet[]> {
@@ -258,6 +314,11 @@ export function getBets(signal?: AbortSignal): Promise<Bet[]> {
 
 export function getBetSummary(signal?: AbortSignal): Promise<BetSummary> {
   return apiRequest<BetSummary>('/v1/bets/summary', { auth: 'required', signal });
+}
+
+/** Breakdowns of the user's settled bets. Behind the `tracker_analytics` flag. */
+export function getBetAnalytics(signal?: AbortSignal): Promise<BetAnalytics> {
+  return apiRequest<BetAnalytics>('/v1/bets/analytics', { auth: 'required', signal });
 }
 
 export function createBet(bet: BetCreate): Promise<Bet> {
@@ -434,11 +495,24 @@ export function setStakeReminder(weeklyStakeThreshold: number | null): Promise<S
   });
 }
 
+export const FEATURE_UNAVAILABLE = "This feature isn't available right now.";
+
+/** A route behind a feature flag that is off answers 404 `feature_disabled`. */
+export function isFeatureDisabled(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && error.code === 'feature_disabled';
+}
+
+/** 401 on any call that carried the token, or 403 on log in with the right password. */
+export function isAccountSuspended(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'account_suspended';
+}
+
 /** One sentence for an inline error, with the web app's wording for the two cases that need their own. */
 export function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiUnavailableError) return "OddVex can't reach its data service right now. Try again in a moment.";
   if (error instanceof ApiError) {
     if (error.status === 429) return 'Too many attempts. Wait a minute, then try again.';
+    if (isFeatureDisabled(error)) return FEATURE_UNAVAILABLE;
     return error.message || fallback;
   }
   return fallback;

@@ -21,6 +21,22 @@ export type League = Schemas['LeagueOut'];
 
 export type User = Schemas['UserOut'];
 export type AuthResponse = Schemas['TokenResponse'];
+export type Plan = NonNullable<User['plan']>;
+export type Flags = Schemas['FlagsOut']['flags'];
+export type Entitlements = Schemas['EntitlementsOut'];
+export type Message = Schemas['MessageOut'];
+export type EmailVerification = Schemas['EmailVerificationOut'];
+export type PasswordResetRequest = Schemas['PasswordResetRequest'];
+export type PasswordResetConfirm = Schemas['PasswordResetConfirmRequest'];
+
+export type ValueScreen = Schemas['ValueScreenOut'];
+export type ValueRow = Schemas['ValueRowOut'];
+/**
+ * `streak_note` is not in the published schema yet. It is declared here as optional so the analytics screen
+ * can show it the day the API starts sending it; drop this addition once the generated type has the field.
+ */
+export type BetAnalytics = Schemas['BetAnalyticsOut'] & { streak_note?: string | null };
+export type AnalyticsRow = Schemas['AnalyticsRowOut'];
 
 export type Bet = Schemas['BetOut'];
 export type BetLeg = Schemas['BetLegOut'];

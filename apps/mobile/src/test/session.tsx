@@ -14,6 +14,8 @@ export function fakeSession(overrides: Partial<SessionValue> = {}): SessionValue
     logOut: jest.fn(async () => {}),
     changePassword: jest.fn(async () => {}),
     deleteAccount: jest.fn(async () => {}),
+    refreshUser: jest.fn(async () => {}),
+    suspended: false,
     revision: NO_CHANGES,
     changed: jest.fn(),
     ...overrides,
