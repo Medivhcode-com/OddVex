@@ -78,6 +78,8 @@ def test_export_contains_everything_of_mine_and_nothing_else(client: TestClient,
         "notifications",
         "notification_preferences",
         "stake_reminder",
+        # Added with the community; older clients ignore it.
+        "community",
     }
     assert body["format_version"] == 1
     assert body["user"] == ada["user"]

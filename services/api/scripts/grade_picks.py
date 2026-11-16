@@ -58,7 +58,7 @@ def main(argv: list[str]) -> int:
     totals = run(get_settings(), dry_run=dry_run)
     prefix = "Dry run, nothing saved: " if dry_run else ""
     print(
-        f"{prefix}{totals['checked']} pending pick(s) past their start time checked, "
+        f"{prefix}{totals['checked']} started event(s) with pending picks checked, "
         f"{totals['graded']} graded, {totals['voided']} voided."
     )
     return 0

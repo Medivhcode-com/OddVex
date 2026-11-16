@@ -8,9 +8,10 @@ import { api } from "@/lib/api";
 import type { Schemas } from "@oddvex/types";
 import { OddsFormatToggle } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
-import { Badge, ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
+import { Badge, Button, ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
 import { titleCase } from "@/lib/format";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { logoutEverywhereAction } from "@/lib/auth-actions";
 import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -60,7 +61,7 @@ export default async function SettingsPage() {
                   </dd>
                   <dt className="text-muted">Plan</dt>
                   <dd>
-                    {plan ? titleCase(plan) : "Not available right now"}
+                    <span>{plan ? titleCase(plan) : "Not available right now"}</span>
                     {entitlements?.preview ? <span className="mt-1 block text-muted">Preview: every feature is included</span> : null}
                   </dd>
                 </dl>
@@ -112,6 +113,15 @@ export default async function SettingsPage() {
               <div className="p-4 sm:p-5">
                 <ChangePasswordForm />
               </div>
+            </Panel>
+            <Panel aria-labelledby="settings-sessions">
+              <PanelHeader id="settings-sessions" title="Sessions" description="Ends every session of this account, on this device and any other. You then log in again." />
+              <form action={logoutEverywhereAction} className="space-y-3 p-4 sm:p-5">
+                <Button type="submit" variant="secondary">
+                  Log out of all devices
+                </Button>
+                <p className="text-sm text-muted">OddVex does not keep separate sessions per device yet, so the Log out button at the top of the page does the same.</p>
+              </form>
             </Panel>
             <Panel>
               <PanelHeader title="Your data" description="A JSON file with your account details, bets, watchlist, sync history and security log." />

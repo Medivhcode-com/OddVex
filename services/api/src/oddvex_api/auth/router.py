@@ -327,11 +327,11 @@ def confirm_email_verification(
     user = mailer.consume_token(db, body.token, mailer.VERIFY_EMAIL)
     if user.email_verified_at is None:
         user.email_verified_at = utcnow()
-    # A listed address becomes an administrator once it is confirmed.
-    sync_admin_role(db, request, user, request.app.state.settings)
     write_audit(
         db, request, "auth.email_verified", user_id=user.id, entity_type="user", entity_id=user.id
     )
+    # A listed address becomes an administrator once it is confirmed.
+    sync_admin_role(db, request, user, request.app.state.settings)
     db.commit()
     return EmailVerificationOut(email_verified=True)
 

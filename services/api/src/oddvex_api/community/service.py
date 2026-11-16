@@ -730,6 +730,7 @@ def picks_page(
 # -------------------------------------------------------------------- grading
 @dataclass(frozen=True, slots=True)
 class GradingTotals:
+    #: Events that have started and still had pending picks.
     checked: int
     graded: int
     voided: int
@@ -755,24 +756,26 @@ def grade_due_picks(
     # picks are few (the ones in play, plus any the provider dropped), however many picks
     # there are. Picks on events that are not final yet therefore never crowd out picks
     # that can be graded.
-    event_ids = list(
-        db.scalars(
-            select(CommunityPick.event_id)
-            .where(*pending)
-            .group_by(CommunityPick.event_id)
-            .order_by(func.min(CommunityPick.event_start_time), CommunityPick.event_id)
-            .limit(GRADE_EVENT_BATCH)
-        )
-    )
-    if not event_ids:
+    started = db.execute(
+        select(CommunityPick.event_id, func.min(CommunityPick.event_start_time))
+        .where(*pending)
+        .group_by(CommunityPick.event_id)
+        .order_by(func.min(CommunityPick.event_start_time), CommunityPick.event_id)
+        .limit(GRADE_EVENT_BATCH)
+    ).all()
+    if not started:
         return GradingTotals(0, 0, 0)
     three_way = _three_way(provider)
-    events = {event_id: provider.get_event(event_id) for event_id in event_ids}
-    settled = [
-        event_id
-        for event_id, event in events.items()
-        if event is None or (event.status == "final" and event.score is not None)
-    ]
+    events: dict[str, Event | None] = {}
+    settled: list[str] = []
+    for event_id, start_time in started:
+        event = events[event_id] = provider.get_event(event_id)
+        if event is None:
+            # Gone from the provider: nothing to do until the pick is old enough to void.
+            if now - start_time >= VOID_AFTER:
+                settled.append(event_id)
+        elif event.status == "final" and event.score is not None:
+            settled.append(event_id)
     due = (
         list(
             db.scalars(
@@ -788,13 +791,11 @@ def grade_due_picks(
     graded = voided = 0
     for pick in due:
         event = events[pick.event_id]
-        if event is None:
-            if now - pick.event_start_time >= VOID_AFTER:
-                pick.status = "void"
-                pick.graded_at = now
-                voided += 1
+        if event is None or event.score is None:
+            pick.status = "void"
+            pick.graded_at = now
+            voided += 1
             continue
-        assert event.score is not None
         try:
             result = grade_leg(
                 pick.market,
@@ -805,7 +806,12 @@ def grade_due_picks(
                 three_way=three_way.get(event.league, False),
             )
         except QuantError:
+            # Cannot happen for a pick created through the API. Voided, not left pending,
+            # so that it is not looked at again on every pass.
             logger.warning("pick_not_gradeable", extra={"pick_id": pick.id})
+            pick.status = "void"
+            pick.graded_at = now
+            voided += 1
             continue
         pick.status = "graded"
         pick.result = result
@@ -837,7 +843,7 @@ def grade_due_picks(
         if delivered == "delivered":
             db.flush()
             notifications.trim(db, pick.user_id)
-    return GradingTotals(len(due), graded, voided)
+    return GradingTotals(len(started), graded, voided)
 
 
 def grade_if_due(request: Request, db: Session, provider: SportsDataProvider) -> None:

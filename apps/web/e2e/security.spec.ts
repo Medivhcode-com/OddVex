@@ -95,7 +95,7 @@ test.describe("security headers", () => {
     await page.getByLabel("Password").fill("correct-horse-battery");
     await page.getByRole("checkbox").check();
     await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
     for (const path of ["/app/tracker", "/app", "/app/alerts", "/app/settings"]) {
       await page.goto(path);
       await expect(page.locator("h1")).toHaveCount(1);

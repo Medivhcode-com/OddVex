@@ -19,6 +19,7 @@ from .conftest import admin_headers, auth_headers, set_flag
 
 DEFAULTS = {
     "community": False,
+    "community_leaderboard": False,
     "value_screen": True,
     "tracker_analytics": True,
     "email_flows": True,

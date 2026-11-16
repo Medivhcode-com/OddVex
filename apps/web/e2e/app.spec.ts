@@ -145,7 +145,7 @@ test.describe("accounts and tracking", () => {
 
   test("a failed login keeps the email, focuses the error, and a second try works on the same page", async ({ page }) => {
     const email = await signUp(page, "retry");
-    await page.getByRole("button", { name: "Log out" }).click();
+    await page.getByRole("button", { name: "Log out", exact: true }).click();
     await page.goto("/login?next=/app/tracker");
     await page.evaluate(() => ((window as unknown as { __samePage: boolean }).__samePage = true));
     await page.getByLabel("Email").fill(email);
@@ -161,12 +161,12 @@ test.describe("accounts and tracking", () => {
     await page.getByLabel("Password").fill("correct-horse-battery");
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(/\/app\/tracker$/);
-    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
   });
 
   test("forgot password: neutral answer, then the link sets a new password that works once", async ({ page, request }) => {
     const email = await signUp(page, "reset");
-    await page.getByRole("button", { name: "Log out" }).click();
+    await page.getByRole("button", { name: "Log out", exact: true }).click();
     await page.goto("/login");
     await page.getByRole("link", { name: "Forgot password?" }).click();
     await expect(page).toHaveURL(/\/forgot-password$/);
@@ -204,7 +204,7 @@ test.describe("accounts and tracking", () => {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill("a-brand-new-passphrase");
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
 
     // The link is single use.
     await page.goto(`/reset-password?token=${encodeURIComponent(token)}`);
@@ -390,8 +390,8 @@ test.describe("accounts and tracking", () => {
     await page.getByLabel("New password").fill("an-even-better-passphrase");
     await page.getByRole("button", { name: "Change password" }).click();
     await expect(page.getByText("Password changed.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible(); // this session stays signed in
-    await page.getByRole("button", { name: "Log out" }).click();
+    await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible(); // this session stays signed in
+    await page.getByRole("button", { name: "Log out", exact: true }).click();
 
     await page.goto("/login");
     await page.getByLabel("Email").fill(email);
@@ -403,7 +403,7 @@ test.describe("accounts and tracking", () => {
     await expect(page.getByLabel("Password")).toHaveValue("");
     await page.getByLabel("Password").fill("an-even-better-passphrase");
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
   });
 
   test("export downloads my data without any password material", async ({ page }) => {

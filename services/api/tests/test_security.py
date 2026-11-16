@@ -22,7 +22,7 @@ from oddvex_api.config import DEV_JWT_SECRET
 from oddvex_api.db import Bet, User
 from oddvex_api.ratelimit import SlidingWindowRateLimiter
 
-from .conftest import PASSWORD, AppFactory, auth_headers, register
+from .conftest import PASSWORD, AppFactory, admin_headers, auth_headers, register, set_flag
 
 Headers = dict[str, str]
 BET = {
@@ -318,11 +318,20 @@ def test_every_owner_scoped_route_requires_a_token(client: TestClient) -> None:
         "/v1/auth/verify-email/confirm",
         "/v1/auth/password-reset",
     )
+    #: Behind the ``community`` flag, which is off here: 404 for everyone, token or not.
+    #: ``test_every_community_route_requires_a_token`` repeats this with the flag on.
+    flagged_off = ("/v1/community", "/v1/admin/community")
     checked = 0
     for path, item in schema["paths"].items():
         if path.startswith(public_prefixes):
             continue
         for method in item:
+            if path.startswith(flagged_off):
+                url = path.replace("{", "").replace("}", "")
+                response = client.request(method.upper(), url, json={})
+                assert response.status_code == 404, (method, path, response.status_code)
+                assert response.json()["error"]["code"] == "feature_disabled", path
+                continue
             url = path.replace("{", "").replace("}", "")
             response = client.request(method.upper(), url, json={})
             assert response.status_code == 401, (method, path, response.status_code)
@@ -556,7 +565,7 @@ def test_hostile_text_in_account_fields(client: TestClient, payload: str) -> Non
 
 def test_hostile_text_in_admin_search(make_app: AppFactory) -> None:
     with TestClient(make_app(admin_emails="boss@example.test")) as client:
-        admin = auth_headers(client, "boss@example.test")
+        admin = admin_headers(client, "boss@example.test")
         auth_headers(client)
         for payload in PAYLOADS:
             users = client.get("/v1/admin/users", params={"q": payload[:120]}, headers=admin)

@@ -26,6 +26,13 @@ ADMIN_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("GET", "/v1/admin/audit", None),
     ("GET", "/v1/admin/email-outbox", None),
 ]
+#: Behind the ``community`` flag: 404 for everyone while it is off (see
+#: tests/test_api_community_moderation.py for the same checks with the flag on).
+COMMUNITY_ADMIN_ROUTES = {
+    ("GET", "/v1/admin/community/overview"),
+    ("GET", "/v1/admin/community/reports"),
+    ("POST", "/v1/admin/community/reports/{report_id}/resolve"),
+}
 
 
 def me(client: TestClient, headers: Headers) -> dict[str, Any]:
@@ -60,10 +67,11 @@ def test_every_admin_route_is_403_for_a_user_and_401_without_a_token(
         for method in item
         if path.startswith("/v1/admin")
     }
-    assert documented == {
-        (method, path.replace("{id}", "{user_id}").replace("/community", "/{key}"))
+    assert documented - COMMUNITY_ADMIN_ROUTES == {
+        (method, path.replace("{id}", "{user_id}").replace("/flags/community", "/flags/{key}"))
         for method, path, _ in ADMIN_CALLS
     }, "every admin route is covered by this test"
+    assert documented >= COMMUNITY_ADMIN_ROUTES
     for method, template, body in ADMIN_CALLS:
         path = template.replace("{id}", victim["id"])
         anonymous = admin_client.request(method, path, json=body)
@@ -199,8 +207,9 @@ def test_suspend_rejects_tokens_and_login_then_unsuspend_restores(
     assert suspended.status_code == 200, suspended.text
     assert suspended.json()["status"] == "suspended" and suspended.json()["id"] == victim_id
 
-    # The token that worked a moment ago is rejected everywhere.
-    for path in ("/v1/me", "/v1/bets", "/v1/me/export", "/v1/notifications", "/v1/alerts"):
+    # The token that worked a moment ago is rejected everywhere, except on the two
+    # data-rights routes (tests/test_api_account.py covers those).
+    for path in ("/v1/me", "/v1/bets", "/v1/notifications", "/v1/alerts"):
         rejected = admin_client.get(path, headers=victim)
         assert rejected.status_code == 401, path
         assert rejected.json()["error"]["code"] == "account_suspended"
@@ -248,8 +257,8 @@ def test_suspend_rejects_tokens_and_login_then_unsuspend_restores(
 def test_an_admin_cannot_suspend_themselves_or_another_admin(make_app) -> None:  # type: ignore[no-untyped-def]
     app = make_app(admin_emails=f"{ADMIN_EMAIL}, chief@example.test")
     with TestClient(app) as client:
-        boss = auth_headers(client, ADMIN_EMAIL)
-        chief = auth_headers(client, "chief@example.test")
+        boss = admin_headers(client, ADMIN_EMAIL)
+        chief = admin_headers(client, "chief@example.test")
         boss_id, chief_id = me(client, boss)["id"], me(client, chief)["id"]
 
         own = client.post(
@@ -334,6 +343,7 @@ def test_admin_flags_list_and_set(admin_client: TestClient) -> None:
     listed = admin_client.get("/v1/admin/flags", headers=admin).json()["items"]
     assert [f["key"] for f in listed] == [
         "community",
+        "community_leaderboard",
         "value_screen",
         "tracker_analytics",
         "email_flows",
@@ -349,7 +359,10 @@ def test_admin_flags_list_and_set(admin_client: TestClient) -> None:
         "updated_at": None,
     }
     assert all(f["description"] and not f["overridden"] for f in listed)
-    assert "Founder approval" in listed[4]["description"]
+    by_key = {f["key"]: f for f in listed}
+    assert "Founder approval" in by_key["premium_gating"]["description"]
+    assert "responsible-gambling review" in by_key["community_leaderboard"]["description"]
+    assert by_key["email_flows"]["default"] is True  # not production
 
     on = admin_client.put("/v1/admin/flags/community", json={"enabled": True}, headers=admin)
     assert on.status_code == 200
@@ -416,6 +429,9 @@ def test_audit_log_filters_and_cursor(admin_client: TestClient) -> None:
         "admin.user_plan_set",
         "admin.flag_set",
         "auth.register",
+        # The administrator: registered, confirmed the address, and only then got the role.
+        "role.granted",
+        "auth.email_verified",
         "auth.register",
     ]  # newest first
     assert set(everything["items"][0]) == {
@@ -439,15 +455,16 @@ def test_audit_log_filters_and_cursor(admin_client: TestClient) -> None:
         "admin.user_plan_set",
         "auth.register",
     ]
-    assert len(page(user_id=admin_id)["items"]) == 5
+    # The administrator: register, email confirmed, role granted, then the four changes.
+    assert len(page(user_id=admin_id)["items"]) == 7
     assert [e["action"] for e in page(user_id=ada_id, action="auth.register")["items"]] == [
         "auth.register"
     ]
 
-    # Cursor: three pages of two, no overlap, no gap.
+    # Cursor: four pages of two, no overlap, no gap.
     seen: list[str] = []
     cursor: str | None = None
-    for expected_more in (True, True, False):
+    for expected_more in (True, True, True, False):
         params: dict[str, Any] = {"limit": 2}
         if cursor:
             params["before"] = cursor

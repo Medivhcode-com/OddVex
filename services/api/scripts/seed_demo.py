@@ -83,7 +83,8 @@ def main(argv: list[str]) -> int:
     print(f"The demo user has {alerts} alert rule(s) and {notifications} notification(s).")
     if community_on:
         print(
-            f"Community: {profiles} fictional profile(s), {picks} pick(s), {graded} graded. "
+            f"Community: {profiles} profile(s) (fictional, plus the demo user), {picks} pick(s), "
+            f"{graded} graded. "
             "The demo user's handle is demo_bettor."
         )
     else:

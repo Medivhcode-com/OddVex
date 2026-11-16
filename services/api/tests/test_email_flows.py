@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from oddvex_api.auth import router as auth_router
 from oddvex_api.db import AuditLog, Base, EmailOutbox, EmailToken, User, utcnow
+from oddvex_api.flags import service as flags
 from oddvex_api.mailer import templates
 from oddvex_api.mailer.sender import (
     LINK_WITHHELD,
@@ -438,6 +439,11 @@ def test_dev_outbox_route_is_404_in_production_and_no_link_is_stored(
     app = make_app(env="production", jwt_secret="k" * 48, admin_emails="boss@example.test")
     Base.metadata.create_all(app.state.engine)  # production never creates tables itself
     with TestClient(app) as client:
+        # ``email_flows`` is off by default in production; an operator turned it on here.
+        assert request_reset(client).status_code == 404
+        with app.state.session_factory() as db:
+            flags.set_flag(db, "email_flows", True, app.state.settings)
+            db.commit()
         register(client)
         assert request_reset(client).status_code == 202
         gone = client.get("/v1/dev/email-outbox/latest", params={"to": EMAIL})
@@ -452,6 +458,11 @@ def test_dev_outbox_route_is_404_in_production_and_no_link_is_stored(
             assert LINK_WITHHELD in row.body_text and "token=" not in row.body_text
         # The token hashes are there; nothing in the database can be turned back into a link.
         assert len(rows(client, EmailToken)) == 2
+        # Back to the production default, under which a listed address is an
+        # administrator from registration (there is no way to confirm it here).
+        with app.state.session_factory() as db:
+            flags.set_flag(db, "email_flows", False, app.state.settings)
+            db.commit()
         admin = admin_headers(client)
         listed = client.get("/v1/admin/email-outbox", headers=admin)
         assert listed.status_code == 200 and "token=" not in listed.text

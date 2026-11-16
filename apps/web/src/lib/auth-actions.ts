@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { api, ApiError, ApiUnavailableError } from "@/lib/api";
+import { api, ApiError, ApiUnavailableError, sessionToken } from "@/lib/api";
 import { clearSession, safeNext, setSession } from "@/lib/session";
 import type { AuthResponse } from "@/lib/types";
 
@@ -58,9 +58,30 @@ export async function signupAction(_: AuthState, form: FormData): Promise<AuthSt
   redirect(safeNext(String(form.get("next") ?? "")));
 }
 
+/**
+ * Tells the API to end the session before the cookie is dropped, so a copied token stops
+ * working too. `POST /v1/auth/logout` revokes every access token of the account (there are no
+ * per-session tokens in this build), so logging out here also signs out other devices. If the
+ * API can't be reached or rejects the token, the cookie is still cleared.
+ */
+async function revokeSession() {
+  if (!(await sessionToken())) return;
+  try {
+    await api("/v1/auth/logout", { method: "POST", auth: true });
+  } catch {}
+}
+
 export async function logoutAction() {
+  await revokeSession();
   await clearSession();
   redirect("/");
+}
+
+/** The explicit control in Settings. Same API call; the confirmation says what it did. */
+export async function logoutEverywhereAction() {
+  await revokeSession();
+  await clearSession();
+  redirect("/login?signedout=all");
 }
 
 export type ResetRequestState = { error?: string; fields?: Record<string, string>; values?: Record<string, string>; done?: boolean };

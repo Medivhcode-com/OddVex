@@ -55,6 +55,13 @@ TABLES = {
     "feature_flags",
     "email_tokens",
     "email_outbox",
+    "community_profiles",
+    "community_picks",
+    "community_comments",
+    "community_follows",
+    "community_likes",
+    "community_blocks",
+    "community_reports",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -312,7 +319,7 @@ def test_upgrade_from_0002_with_existing_data_then_downgrade(
         }
         assert client.get("/v1/alerts", headers=headers).json() == {"items": []}
         preferences = client.get("/v1/me/notification-preferences", headers=headers).json()
-        assert all(preferences["in_app"].values()) and len(preferences["in_app"]) == 7
+        assert all(preferences["in_app"].values()) and len(preferences["in_app"]) == 10
         # The bet from before the migration counts towards this week's total.
         reminder = client.get("/v1/me/stake-reminder", headers=headers).json()
         assert reminder["weekly_stake_threshold"] is None and reminder["staked_this_week"] == 40.0
@@ -473,10 +480,10 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
         analytics = client.get("/v1/bets/analytics", headers=headers).json()
         assert analytics["settled_count"] == 1 and analytics["sample_note"]
         assert client.get("/v1/value").status_code == 200
-        requested = client.post("/v1/auth/verify-email/request", headers=headers)
-        assert requested.status_code == 202, requested.text
-        reset = client.post("/v1/auth/password-reset/request", json={"email": user["email"]})
-        assert reset.status_code == 202
+        # Production: ``email_flows`` is off until an operator turns it on.
+        assert client.get("/v1/flags").json()["flags"]["email_flows"] is False
+        off = client.post("/v1/auth/verify-email/request", headers=headers)
+        assert off.status_code == 404 and off.json()["error"]["code"] == "feature_disabled"
 
         admin = client.post(
             "/v1/auth/register",
@@ -488,6 +495,14 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
             },
         ).json()
         admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        turned_on = client.put(
+            "/v1/admin/flags/email_flows", json={"enabled": True}, headers=admin_headers
+        )
+        assert turned_on.status_code == 200, turned_on.text
+        requested = client.post("/v1/auth/verify-email/request", headers=headers)
+        assert requested.status_code == 202, requested.text
+        reset = client.post("/v1/auth/password-reset/request", json={"email": user["email"]})
+        assert reset.status_code == 202
         listed = client.get("/v1/admin/users", headers=admin_headers).json()
         assert listed["total"] == 2
         old = next(u for u in listed["items"] if u["email"] == "old@example.test")
@@ -511,9 +526,10 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
     app.state.engine.dispose()
     engine = make_engine(url)
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT count(*) FROM feature_flags")).scalar() == 1
-        # Three emails queued (two for the old user, one for the new admin), none sent.
-        assert connection.execute(text("SELECT count(*) FROM email_outbox")).scalar() == 3
+        assert connection.execute(text("SELECT count(*) FROM feature_flags")).scalar() == 2
+        # Two emails queued for the old user, none sent. The administrator registered
+        # while ``email_flows`` was still off, so no confirmation email was queued.
+        assert connection.execute(text("SELECT count(*) FROM email_outbox")).scalar() == 2
         # Production: the outbox never holds a usable link.
         assert (
             connection.execute(
@@ -919,6 +935,33 @@ EXPECTED_OPERATIONS = {
     ("POST", "/v1/auth/password-reset/request"): "request_password_reset",
     ("POST", "/v1/auth/password-reset/confirm"): "confirm_password_reset",
     ("GET", "/v1/dev/email-outbox/latest"): "dev_latest_email",
+    ("POST", "/v1/auth/logout"): "logout",
+    ("GET", "/v1/community/guidelines"): "get_community_guidelines",
+    ("PUT", "/v1/community/profile"): "upsert_my_profile",
+    ("GET", "/v1/community/profile"): "get_my_profile",
+    ("GET", "/v1/community/profiles/{handle}"): "get_profile",
+    ("POST", "/v1/community/picks"): "create_pick",
+    ("GET", "/v1/community/picks"): "list_picks",
+    ("GET", "/v1/community/picks/{pick_id}"): "get_pick",
+    ("DELETE", "/v1/community/picks/{pick_id}"): "delete_pick",
+    ("GET", "/v1/community/feed"): "get_feed",
+    ("PUT", "/v1/community/picks/{pick_id}/like"): "like_pick",
+    ("DELETE", "/v1/community/picks/{pick_id}/like"): "unlike_pick",
+    ("POST", "/v1/community/picks/{pick_id}/comments"): "create_comment",
+    ("GET", "/v1/community/picks/{pick_id}/comments"): "list_comments",
+    ("DELETE", "/v1/community/comments/{comment_id}"): "delete_comment",
+    ("POST", "/v1/community/follows/{handle}"): "follow_profile",
+    ("DELETE", "/v1/community/follows/{handle}"): "unfollow_profile",
+    ("GET", "/v1/community/following"): "list_following",
+    ("GET", "/v1/community/followers"): "list_followers",
+    ("PUT", "/v1/community/blocks/{handle}"): "block_profile",
+    ("DELETE", "/v1/community/blocks/{handle}"): "unblock_profile",
+    ("GET", "/v1/community/blocks"): "list_blocks",
+    ("POST", "/v1/community/reports"): "create_report",
+    ("GET", "/v1/community/leaderboard"): "get_leaderboard",
+    ("GET", "/v1/admin/community/overview"): "admin_community_overview",
+    ("GET", "/v1/admin/community/reports"): "admin_list_reports",
+    ("POST", "/v1/admin/community/reports/{report_id}/resolve"): "admin_resolve_report",
 }
 
 

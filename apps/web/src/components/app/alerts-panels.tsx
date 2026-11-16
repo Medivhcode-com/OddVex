@@ -19,6 +19,10 @@ const KIND_LABEL: Record<Notification["kind"], string> = {
   bet_settled: "Settled bet",
   sync_finished: "Sync",
   stake_reminder: "Staking reminder",
+  // Community kinds exist in the API schema but nothing creates them while the community flag is off.
+  new_follower: "New follower",
+  pick_comment: "Comment",
+  pick_graded: "Graded pick",
 };
 
 function useAction() {

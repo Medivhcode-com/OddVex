@@ -197,6 +197,38 @@ test.describe("account status in settings", () => {
     await expect(page.getByText("no email is actually sent", { exact: false })).toBeVisible();
   });
 
+  test("log out of all devices ends every session, and an ordinary log out revokes the token too", async ({ page, browser, request }) => {
+    const email = await signUp(page, "everywhere");
+    const other = await browser.newContext();
+    try {
+      const second = await other.newPage();
+      await logIn(second, email, "correct-horse-battery");
+      const token = (await other.cookies()).find((cookie) => cookie.name === "ov_session")?.value ?? "";
+      expect((await request.get(`${API}/v1/me`, { headers: { authorization: `Bearer ${token}` } })).status()).toBe(200);
+
+      await page.goto("/app/settings");
+      await page.getByRole("region", { name: "Sessions" }).getByRole("button", { name: "Log out of all devices" }).click();
+      await expect(page).toHaveURL(/\/login\?signedout=all$/);
+      await expect(page.getByText("You are logged out on every device.")).toBeVisible();
+
+      // The other device's token is rejected, and its next page load is signed out.
+      expect((await request.get(`${API}/v1/me`, { headers: { authorization: `Bearer ${token}` } })).status()).toBe(401);
+      await second.goto("/app/tracker");
+      await expect(second.getByText("Log in to track your bets")).toBeVisible();
+
+      // The ordinary Log out tells the API as well, so a copied token stops working.
+      await logIn(page, email, "correct-horse-battery");
+      const cookies = await page.context().cookies();
+      const current = cookies.find((cookie) => cookie.name === "ov_session")?.value ?? "";
+      expect((await request.get(`${API}/v1/me`, { headers: { authorization: `Bearer ${current}` } })).status()).toBe(200);
+      await page.getByRole("button", { name: "Log out", exact: true }).click();
+      await expect(page).toHaveURL(/\/$/);
+      expect((await request.get(`${API}/v1/me`, { headers: { authorization: `Bearer ${current}` } })).status()).toBe(401);
+    } finally {
+      await other.close();
+    }
+  });
+
   test("the login page explains a suspended account only when asked to", async ({ page }) => {
     await page.goto("/login");
     await expect(page.getByText("This account is suspended")).toHaveCount(0);
@@ -207,6 +239,6 @@ test.describe("account status in settings", () => {
     await signUp(page, "ended");
     await page.goto("/api/session/ended");
     await expect(page).toHaveURL(/\/app$/);
-    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
   });
 });

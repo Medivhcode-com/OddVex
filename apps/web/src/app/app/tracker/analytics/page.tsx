@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Tracker analytics" };
 type Analytics = Schemas["BetAnalyticsOut"] & { streak_note?: string | null };
 type GroupRow = Schemas["AnalyticsRowOut"];
 
-const DESCRIPTION = "Your settled bets by price, weekday and month, with runs, closing line value and stake sizes. A record of what happened, not a forecast.";
+const DESCRIPTION = "Your settled bets by price, weekday and month, with streaks, closing line value and stake sizes. A record of what happened, not a forecast.";
 
 function profitClass(profit: number) {
   return profit > 0 ? "text-accent" : profit < 0 ? "text-error" : "";
@@ -39,7 +39,7 @@ function ScrollTable({ children, minWidth = "min-w-[38rem]" }: { children: React
   );
 }
 
-function GroupTable({ id, title, description, groupLabel, rows, total }: { id: string; title: string; description: string; groupLabel: string; rows: GroupRow[]; total: number }) {
+function GroupTable({ id, title, description, groupLabel, rows, total, figures = false }: { id: string; title: string; description: string; groupLabel: string; rows: GroupRow[]; total: number; figures?: boolean }) {
   return (
     <Panel aria-labelledby={id}>
       <PanelHeader id={id} title={title} description={description} />
@@ -63,7 +63,7 @@ function GroupTable({ id, title, description, groupLabel, rows, total }: { id: s
               const label = typographicMinus(row.label);
               return (
                 <tr key={row.key} className="border-t border-line">
-                  <th scope="row" className="num whitespace-nowrap px-4 py-2.5 text-left font-medium sm:px-5">{label}</th>
+                  <th scope="row" className={`${figures ? "num " : ""}whitespace-nowrap px-4 py-2.5 text-left font-medium sm:px-5`}>{label}</th>
                   <td className="px-2 py-2.5"><CountWithBar count={row.bets} total={total} label={label} /></td>
                   <td className="num px-2 py-2.5 text-right text-muted">{formatMoney(row.staked)}</td>
                   <td className={`num px-2 py-2.5 text-right ${profitClass(row.profit)}`}>{formatMoney(row.profit, { signed: true })}</td>
@@ -155,7 +155,7 @@ export default async function TrackerAnalyticsPage() {
           {data.streak_note ? <p className="border-t border-line px-4 py-2.5 text-sm text-muted sm:px-5">{data.streak_note}</p> : null}
         </Panel>
 
-        <GroupTable id="analytics-bands" title="By odds band" description="Grouped by the price of the bet. A parlay uses its combined price." groupLabel="American odds" rows={data.by_odds_band} total={total} />
+        <GroupTable id="analytics-bands" title="By odds band" description="Grouped by the price of the bet. A parlay uses its combined price." groupLabel="American odds" rows={data.by_odds_band} total={total} figures />
         <GroupTable id="analytics-weekdays" title="By weekday" description="The day the bet was placed, in UTC." groupLabel="Day" rows={data.by_weekday} total={total} />
         <GroupTable id="analytics-months" title="By month" description="The month the bet was settled, in UTC." groupLabel="Month" rows={data.by_month} total={total} />
 

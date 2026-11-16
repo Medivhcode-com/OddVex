@@ -106,6 +106,7 @@ def test_analytics_match_the_hand_computed_history(client: TestClient, history: 
         "longest_win_streak",
         "longest_loss_streak",
         "current_streak",
+        "streak_note",
         "average_stake",
         "average_odds",
         "clv",

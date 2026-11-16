@@ -41,7 +41,7 @@ export function NotificationPreferences({ initial }: { initial: Prefs }) {
           <li key={key}>
             <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 py-1.5">
               <span>{label}</span>
-              <input type="checkbox" role="switch" checked={prefs[key]} onChange={() => toggle(key)} className="size-5 accent-[var(--ov-accent)]" />
+              <input type="checkbox" role="switch" checked={prefs[key] ?? false} onChange={() => toggle(key)} className="size-5 accent-[var(--ov-accent)]" />
             </label>
           </li>
         ))}

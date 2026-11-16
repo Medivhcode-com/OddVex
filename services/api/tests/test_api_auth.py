@@ -11,7 +11,7 @@ from oddvex_api.auth.security import create_access_token, hash_password, verify_
 from oddvex_api.config import DEV_JWT_SECRET
 from oddvex_api.db import AuditLog, Bet, SyncConnection, SyncImportRun, User
 
-from .conftest import PASSWORD, AppFactory, register
+from .conftest import PASSWORD, AppFactory, register, verify_email
 
 VALID = {
     "email": "ada@example.test",
@@ -193,5 +193,13 @@ def test_auth_events_are_audited(client: TestClient, app) -> None:  # type: igno
 def test_admin_role_comes_from_configuration(make_app: AppFactory) -> None:
     app = make_app(admin_emails="boss@example.test, other@example.test")
     with TestClient(app) as client:
-        assert register(client, "boss@example.test")["user"]["role"] == "admin"
+        # ``email_flows`` is on outside production, so a listed address is an ordinary
+        # user until it is confirmed: registering it first proves nothing.
+        boss = register(client, "boss@example.test")
+        assert boss["user"]["role"] == "user"
+        headers = {"Authorization": f"Bearer {boss['access_token']}"}
+        assert client.get("/v1/admin/overview", headers=headers).status_code == 403
+        verify_email(client, "boss@example.test")
+        assert client.get("/v1/me", headers=headers).json()["role"] == "admin"
+        assert client.get("/v1/admin/overview", headers=headers).status_code == 200
         assert register(client, "ada@example.test")["user"]["role"] == "user"
