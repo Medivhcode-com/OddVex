@@ -7,9 +7,9 @@ result.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from itertools import pairwise
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import pairwise
 
 from .errors import QuantError
 from .odds import Number, decimal_to_american, to_decimal_number
