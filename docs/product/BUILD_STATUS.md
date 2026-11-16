@@ -1,13 +1,18 @@
-# Build status (milestone 1 and the approval-free part of milestone 2)
+# Build status
 
 ## Founder-action verification — 2026-11-16
 
-The launch-action receipt is [FOUNDER_ACTION_STATUS.md](FOUNDER_ACTION_STATUS.md) (MED-71). PR #10 head c044583 remains draft and has one failed mobile CI job: its analytics route imports a missing screen. Seven other jobs pass. The older test counts below are historical build-session results and do not verify mobile at the current PR head.
+The launch-action receipt is [FOUNDER_ACTION_STATUS.md](FOUNDER_ACTION_STATUS.md) (MED-71).
 
-A free Neon preview database was provisioned and a read-only connectivity query passed. It has no OddVex schema or application connection yet. Vercel is connected but medivh-code team access returns 403; no Vercel deployment was changed. The counsel and provider inquiries are saved drafts, not sent. Organization store enrollment, working mailboxes and physical-phone testing remain incomplete.
+Pull request #10 was merged to `main` on 2026-11-16 after all eight CI jobs passed. The mobile lint failure that the
+receipt recorded at commit `c044583` was fixed before the merge. The test counts below are from the merged commit.
 
-See the dated counsel addendum and phone guide for corrections to the original founder checklist. This documentation work does not finish or merge PR #10's application code.
+A free Neon preview database was provisioned and a read-only connectivity query passed. It has no OddVex schema or
+application connection yet. Vercel is connected but medivh-code team access returns 403; no Vercel deployment was
+changed. The counsel and provider inquiries are saved drafts, not sent. Organization store enrollment, working
+mailboxes and physical-phone testing remain incomplete.
 
+See the dated counsel addendum and phone guide for corrections to the original founder checklist.
 
 What exists on the branch, and the evidence for it. Everything runs on synthetic data with fictional teams, players
 and sportsbooks. Nothing has been deployed, purchased or published.

@@ -38,11 +38,11 @@ This is an execution receipt, not a launch approval. The founder asked to work o
 
 No connection string, API key, password, sign-in code or temporary authorization link belongs in this file. The provider rejected a requested suspend-interval override on the free account; provisioning succeeded with account defaults, without a plan upgrade.
 
-## Current build blocker
+## Build state (updated after this receipt was written)
 
-[CI run 43936894832](https://github.com/Medivhcode-com/OddVex/actions/runs/43936894832) at c044583 has seven successful jobs and one failed mobile job. Mobile lint reports import/no-unresolved: apps/mobile/src/app/(tabs)/(tracker)/analytics.tsx imports @/screens/analytics, whose screen file is absent. Mobile type checks, tests and bundling were skipped after lint failed. These are current CI observations; no local application suite was rerun in this founder-action session.
-
-Community is not yet implemented at that head; the disabled community flag is not a community module. Do not merge or declare mobile verified until the missing screen and remaining checks pass.
+The blocker recorded here at commit `c044583` is resolved. The missing mobile analytics screen landed, the remaining
+mobile checks passed, and pull request #10 was merged to `main` on 2026-11-16 with all eight CI jobs green. The
+community module now exists in code and is switched off by default; see `BUILD_STATUS.md`.
 
 ## Handoff and next inputs
 
@@ -50,7 +50,7 @@ Community is not yet implemented at that head; the disabled community flag is no
 2. Confirm legal entity and D-U-N-S details through provider intake, and authorize the specific known recurring/one-time costs and payment route. No card or credential should be pasted in chat.
 3. Complete Vercel team-access authorization and GitHub authentication; then re-check actual project, billing and protection state.
 4. Answer: affiliate revenue yes/no; web first/both; community on/off; Premium price and included features. A practical launch recommendation is web first with community and sportsbook affiliate links disabled pending review; this remains a recommendation.
-5. Claude's build handoff must include the failed mobile import, packet corrections, free Neon receipt and remaining deployment/email work. Preserve counsel's eventual requested changes verbatim before implementing them.
+5. Claude's build handoff must include the packet corrections, free Neon receipt and remaining deployment/email work. (The failed mobile import is fixed.) Preserve counsel's eventual requested changes verbatim before implementing them.
 
 ## Primary references
 
