@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Create the demo account and its sample bets. Safe to run more than once.
+"""Create the demo account, its sample bets, alert rules and notifications. Safe to run
+more than once.
 
     python scripts/seed_demo.py
 
@@ -12,8 +13,10 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime
 
+from sqlalchemy import func, select
+
 from oddvex_api.config import get_settings
-from oddvex_api.db import Base, make_engine, make_session_factory
+from oddvex_api.db import AlertRule, Base, Notification, User, make_engine, make_session_factory
 from oddvex_api.providers import SyntheticProvider
 from oddvex_api.seed import DEMO_EMAIL, seed_demo
 
@@ -30,8 +33,18 @@ def main(argv: list[str]) -> int:
         now = datetime.now(UTC)
         # Same seed as the app, so the gradeable demo bets point at events the API serves.
         provider = SyntheticProvider(seed=settings.synthetic_seed, clock=lambda: now)
-        created = seed_demo(session, settings.demo_password, now, provider=provider)
+        created = seed_demo(
+            session, settings.demo_password, now, provider=provider, settings=settings
+        )
+        user_id = session.scalar(select(User.id).where(User.email == DEMO_EMAIL))
+        alerts = session.scalar(
+            select(func.count()).select_from(AlertRule).where(AlertRule.user_id == user_id)
+        )
+        notifications = session.scalar(
+            select(func.count()).select_from(Notification).where(Notification.user_id == user_id)
+        )
     print(f"Demo user {DEMO_EMAIL} ready; {created} bet(s) created this run.")
+    print(f"The demo user has {alerts} alert rule(s) and {notifications} notification(s).")
     return 0
 
 

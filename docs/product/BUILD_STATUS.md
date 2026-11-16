@@ -7,12 +7,12 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 
 | Area | Check | Result |
 |---|---|---|
-| API | `pytest` in `services/api` (SQLite) | 569 passed |
-| API | Same suite on PostgreSQL 16 | 570 passed (run once locally by the backend build; now a CI job) |
+| API | `pytest` in `services/api` (SQLite) | 754 passed, 1 skipped (PostgreSQL-only concurrency test) |
+| API | Same suite on PostgreSQL 16 | 757 passed (run locally by the backend build; also a CI job) |
 | API | `ruff check`, `ruff format --check`, OpenAPI export `--check` | Clean |
-| Web | Playwright end to end, real API + production build, desktop and phone viewports, including automated WCAG A/AA checks in both themes | 149 passed |
+| Web | Playwright end to end, real API + production build, desktop and phone viewports, including automated WCAG A/AA checks in both themes | 171 passed |
 | Web | ESLint, `tsc --noEmit`, Vitest | Clean, 12 unit tests passed |
-| Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 192 tests passed |
+| Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 256 tests passed |
 | Mobile | `expo export` for iOS and Android (JS bundle only) | Bundled |
 
 ## Built
@@ -43,6 +43,20 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 - **Operations:** request size limit, bet list sorting and filters in the API, Docker images built and smoke-tested
   in CI, PostgreSQL test job in CI.
 
+## Added from milestone 3 (no approval gate involved)
+
+- **Alerts:** rules for a price reaching a threshold, a line moving, a game about to start and a final score, set
+  from a game page on web and mobile. One-shot rules can be set again; team rules keep firing for each game.
+- **Notifications:** an in-app list with an unread count, mark as read, delete, and per-type on/off preferences.
+  Settled bets and sync results also notify.
+- **Weekly staking reminder:** a self-set amount. Reaching it produces one reminder a week with the helpline number.
+  It is a reminder, not a limit: bets are still saved.
+- **Admin overview (web):** a read-only page with service counts, provider health and the recent audit log, visible
+  only to accounts the API marks as admin.
+
+Limits: alerts are evaluated when the user opens the app or when `scripts/evaluate_alerts.py` runs. There is no
+background worker, and nothing is delivered by push or email, both of which need Founder approval.
+
 ## Milestone 2 items that need Founder approval and are not started
 
 Licensed data provider, production infrastructure, counsel review of legal pages and age gating, closed beta, real
@@ -58,13 +72,13 @@ email (verification, password reset), historical odds storage against a real fee
 
 ## Not built
 
-Real data provider, alerts and notifications, community, premium billing and entitlements, admin console
-UI, LLM-backed assistant, model projections and backtesting, password reset by email, refresh tokens, production
+Real data provider, push and email notifications, a background worker for alerts, community, premium billing and entitlements, admin actions
+(user management, moderation, feature flags), LLM-backed assistant, model projections and backtesting, password reset by email, refresh tokens, production
 infrastructure, store submission, analytics instrumentation, error monitoring.
 
 ## Known gaps inside what is built
 
 - The assistant matches keywords. It handles a small set of question types and declines the rest.
 - Prices refresh on a timer, not by push.
-- Watchlist items do not trigger alerts.
+- Alerts only fire when the app is opened; a start-time alert nobody checks before the game begins expires silently.
 - Legal pages are unreviewed drafts and say so. The contact page has no address until one is configured.

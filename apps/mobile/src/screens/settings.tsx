@@ -5,6 +5,12 @@ import { StyleSheet, View } from 'react-native';
 import { API_URL } from '@/api/client';
 import { Segmented } from '@/components/choice';
 import { ChangePasswordForm, DeleteAccountForm } from '@/components/account-forms';
+import {
+  NOTIFICATIONS_IN_APP_ONLY,
+  NotificationPreferencesForm,
+  STAKE_REMINDER_DESCRIPTION,
+  StakeReminderForm,
+} from '@/components/notification-settings';
 import { Screen } from '@/components/screen';
 import { Button, Panel, PanelHeading } from '@/components/states';
 import { Num, Txt } from '@/components/text';
@@ -175,6 +181,18 @@ export function SettingsScreen() {
 
       {session.user ? (
         <>
+          <Panel>
+            <View style={styles.block}>
+              <PanelHeading title="Notifications" description={NOTIFICATIONS_IN_APP_ONLY} />
+              <NotificationPreferencesForm userId={session.user.id} />
+            </View>
+          </Panel>
+          <Panel>
+            <View style={styles.block}>
+              <PanelHeading title="Weekly staking reminder" description={STAKE_REMINDER_DESCRIPTION} />
+              <StakeReminderForm userId={session.user.id} />
+            </View>
+          </Panel>
           <Panel>
             <View style={styles.block}>
               <PanelHeading title="Password" description="Changing it signs out every other device." />

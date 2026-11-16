@@ -18,7 +18,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import DateTime, bindparam, inspect, select, text
 
 from oddvex_api.auth.security import hash_password
-from oddvex_api.db import Base, Bet, User, make_engine, make_session_factory
+from oddvex_api.db import (
+    AlertRule,
+    Base,
+    Bet,
+    Notification,
+    User,
+    make_engine,
+    make_session_factory,
+)
+from oddvex_api.providers import SyntheticProvider
 from oddvex_api.seed import DEMO_BET_COUNT, DEMO_EMAIL, DEMO_GRADEABLE_COUNT, seed_demo
 
 from .conftest import EXTERNAL_DATABASE_URL, AppFactory, _reset_external_database
@@ -33,6 +42,10 @@ TABLES = {
     "sync_import_runs",
     "audit_log",
     "watchlist_items",
+    "alert_rules",
+    "notifications",
+    "notification_preferences",
+    "stake_reminders",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -199,6 +212,157 @@ def test_upgrade_from_0001_with_existing_data_then_downgrade(
         _reset_external_database(url)
 
 
+NEW_TABLES = {"alert_rules", "notifications", "notification_preferences", "stake_reminders"}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0002_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0003.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0002")
+    engine = make_engine(url)
+    assert not NEW_TABLES & set(inspect(engine).get_table_names())
+
+    # Rows written by the 0002 release: a user, a bet placed this week and a watched team.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+                "age_confirmed_at, created_at, token_version) VALUES (:id, :email, :hash, "
+                "'Old', 'user', :active, :at, :at, 0)"
+            ).bindparams(bindparam("at", type_=DateTime(timezone=True))),
+            {
+                "id": "u" * 32,
+                "email": "old@example.test",
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, stake, "
+                "odds_decimal, odds_source, placed_at, source, created_at, updated_at) VALUES "
+                "(:id, :user, 'straight', 'pending', 'nba', 'Northline', 40, 2.0, 'legs', :at, "
+                "'manual', :at, :at)"
+            ).bindparams(bindparam("at", type_=DateTime(timezone=True))),
+            {"id": "b" * 32, "user": "u" * 32, "at": stamp},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bet_legs (id, bet_id, position, selection, market, odds_decimal) "
+                "VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', 2.0)"
+            ),
+            {"id": "B" * 32, "bet": "b" * 32},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO watchlist_items (id, user_id, kind, ref_id, label, league, "
+                "created_at) VALUES (:id, :user, 'team', 'team_nba_cpr', 'Copper Ridge "
+                "Kestrels', 'nba', :at)"
+            ).bindparams(bindparam("at", type_=DateTime(timezone=True))),
+            {"id": "w" * 32, "user": "u" * 32, "at": stamp},
+        )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) >= NEW_TABLES
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Nothing was invented for existing users.
+        for table in sorted(NEW_TABLES):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: old login and bet, defaults, then the new features.
+    app = make_app(
+        database_url=url, env="production", jwt_secret="k" * 48, alert_eval_min_seconds=0
+    )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        assert len(client.get("/v1/bets", headers=headers).json()) == 1
+        assert len(client.get("/v1/watchlist", headers=headers).json()["items"]) == 1
+        assert client.get("/v1/notifications", headers=headers).json() == {
+            "items": [],
+            "unread_count": 0,
+            "next_before": None,
+        }
+        assert client.get("/v1/alerts", headers=headers).json() == {"items": []}
+        preferences = client.get("/v1/me/notification-preferences", headers=headers).json()
+        assert all(preferences["in_app"].values()) and len(preferences["in_app"]) == 7
+        # The bet from before the migration counts towards this week's total.
+        reminder = client.get("/v1/me/stake-reminder", headers=headers).json()
+        assert reminder["weekly_stake_threshold"] is None and reminder["staked_this_week"] == 40.0
+
+        event = client.get("/v1/events", params={"status": "upcoming"}).json()[0]
+        alert = client.post(
+            "/v1/alerts", json={"kind": "game_final", "event_id": event["id"]}, headers=headers
+        )
+        assert alert.status_code == 201, alert.text
+        client.put("/v1/me/stake-reminder", json={"weekly_stake_threshold": 50}, headers=headers)
+        client.put(
+            "/v1/me/notification-preferences",
+            json={"in_app": {"sync_finished": False}},
+            headers=headers,
+        )
+        bet = {
+            "bet_type": "straight",
+            "stake": 10,
+            "sportsbook": "Northline",
+            "legs": [{"selection": "x", "market": "moneyline", "odds": -110}],
+            "placed_at": "2026-03-14T12:00:00Z",
+        }
+        assert client.post("/v1/bets", json=bet, headers=headers).status_code == 201
+        items = client.get("/v1/notifications", headers=headers).json()["items"]
+        assert [n["kind"] for n in items] == ["stake_reminder"]  # 40 + 10 reached 50
+        export = client.get("/v1/me/export", headers=headers).json()
+        assert len(export["alerts"]) == 1 and len(export["notifications"]) == 1
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0003 added; the 0002 data is untouched.
+    command.downgrade(config, "0002")
+    engine = make_engine(url)
+    tables = set(inspect(engine).get_table_names())
+    assert not NEW_TABLES & tables and "watchlist_items" in tables
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT email FROM users")).scalar() == "old@example.test"
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 2
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 2
+        assert connection.execute(text("SELECT count(*) FROM watchlist_items")).scalar() == 1
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002"
+        )
+    engine.dispose()
+
+    # Up again (the new tables start empty), then all the way down.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        for table in sorted(NEW_TABLES):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
 def test_app_works_on_a_migrated_database_without_auto_create(
     tmp_path: Path, make_app: AppFactory
 ) -> None:
@@ -320,6 +484,49 @@ def test_seed_is_idempotent_and_deterministic(session_factory, tmp_path: Path) -
     assert again == first
 
 
+def test_seed_with_a_provider_adds_alert_rules_and_notifications(session_factory) -> None:  # type: ignore[no-untyped-def]
+    provider = SyntheticProvider(seed=20260101, clock=lambda: NOW)
+    with session_factory() as db:
+        assert seed_demo(db, "demo-password-123", NOW, provider=provider) == 44
+    with session_factory() as db:
+        rules = list(db.scalars(select(AlertRule).order_by(AlertRule.created_at, AlertRule.id)))
+        notifications = list(db.scalars(select(Notification)))
+        demo = db.scalar(select(User).where(User.email == DEMO_EMAIL))
+    assert demo is not None
+    assert {r.user_id for r in rules} == {demo.id} == {n.user_id for n in notifications}
+    assert {r.kind for r in rules} == {"price_at_least", "line_move", "game_start", "game_final"}
+    by_state: dict[str, list[AlertRule]] = {}
+    for rule in rules:
+        by_state.setdefault(rule.state, []).append(rule)
+    # One price alert was already met and fired; the rest are still waiting.
+    assert [r.kind for r in by_state["triggered"]] == ["price_at_least"]
+    assert {r.kind for r in by_state["active"]} >= {"price_at_least", "line_move"}
+    assert set(by_state) == {"triggered", "active"}
+
+    kinds = [n.kind for n in notifications]
+    assert kinds.count("price_alert") == 1 and kinds.count("game_final") == 2
+    assert 3 <= len(notifications) <= 6
+    assert all(n.read_at is None and n.rule_id in {r.id for r in rules} for n in notifications)
+    price = next(n for n in notifications if n.kind == "price_alert")
+    assert re.fullmatch(r"Price reached [+-]\d{3,}", price.title)
+    assert re.search(r"at or above your [+-]\d{3,} alert\.$", price.body)
+    text = " ".join(f"{n.title} {n.body}" for n in notifications).lower()
+    assert not any(real in text for real in REAL_NAMES)
+    assert "!" not in text
+
+    # Seeding again adds neither rules nor notifications.
+    with session_factory() as db:
+        assert seed_demo(db, "demo-password-123", NOW, provider=provider) == 0
+        assert len(list(db.scalars(select(AlertRule)))) == len(rules)
+        assert len(list(db.scalars(select(Notification)))) == len(notifications)
+    # Without a provider there is nothing to build rules on.
+    engine = make_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with make_session_factory(engine)() as db:
+        assert seed_demo(db, "demo-password-123", NOW) == 40
+        assert list(db.scalars(select(AlertRule))) == []
+
+
 def test_demo_user_can_log_in_and_see_a_summary(make_app: AppFactory) -> None:
     app = make_app(auto_seed_demo=True, demo_password="demo-password-123")
     with TestClient(app) as client:
@@ -337,6 +544,12 @@ def test_demo_user_can_log_in_and_see_a_summary(make_app: AppFactory) -> None:
         assert summary["totals"]["avg_clv"] is not None
         assert len(summary["timeline"]) >= 15
         assert len(summary["by_sport"]) >= 4
+        # The seeded alert rules and their notifications are there to look at.
+        alerts = client.get("/v1/alerts", headers=headers).json()["items"]
+        assert {a["state"] for a in alerts} == {"triggered", "active"}
+        assert all(a["summary"] and a["available"] for a in alerts)
+        listed = client.get("/v1/notifications", headers=headers).json()
+        assert listed["unread_count"] == len(listed["items"]) >= 3
 
 
 def test_production_never_auto_seeds(tmp_path: Path, make_app: AppFactory) -> None:
@@ -406,6 +619,20 @@ EXPECTED_OPERATIONS = {
     ("POST", "/v1/watchlist"): "add_watchlist_item",
     ("GET", "/v1/watchlist/events"): "list_watchlist_events",
     ("DELETE", "/v1/watchlist/{item_id}"): "remove_watchlist_item",
+    ("GET", "/v1/alerts"): "list_alerts",
+    ("POST", "/v1/alerts"): "create_alert",
+    ("POST", "/v1/alerts/evaluate"): "evaluate_alerts",
+    ("PATCH", "/v1/alerts/{alert_id}"): "update_alert",
+    ("DELETE", "/v1/alerts/{alert_id}"): "delete_alert",
+    ("GET", "/v1/notifications"): "list_notifications",
+    ("GET", "/v1/notifications/unread-count"): "get_unread_count",
+    ("POST", "/v1/notifications/read-all"): "mark_all_notifications_read",
+    ("POST", "/v1/notifications/{notification_id}/read"): "mark_notification_read",
+    ("DELETE", "/v1/notifications/{notification_id}"): "delete_notification",
+    ("GET", "/v1/me/notification-preferences"): "get_notification_preferences",
+    ("PUT", "/v1/me/notification-preferences"): "update_notification_preferences",
+    ("GET", "/v1/me/stake-reminder"): "get_stake_reminder",
+    ("PUT", "/v1/me/stake-reminder"): "update_stake_reminder",
     ("POST", "/v1/bets/auto-settle"): "auto_settle_bets",
     ("GET", "/v1/bets"): "list_bets",
     ("POST", "/v1/bets"): "create_bet",

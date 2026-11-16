@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request, Response
@@ -9,8 +10,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import Bet, BetLeg
-from ..deps import CurrentUserDep, DbDep, ProviderDep, write_audit
+from ..deps import CurrentUserDep, DbDep, NowDep, ProviderDep, write_audit
 from ..errors import AUTH_ERROR_RESPONSES, NOT_FOUND_RESPONSE, ErrorResponse, not_found
+from ..notifications import service as notifications
+from ..notifications import templates
 from . import service
 from .schemas import (
     AutoSettleOut,
@@ -102,16 +105,27 @@ def list_bets(
     status_code=201,
     operation_id="create_bet",
     summary="Record a bet you placed elsewhere",
-    description="OddVex never places wagers. This only records a bet for tracking.",
+    description=(
+        "OddVex never places wagers. This only records a bet for tracking. If you set a "
+        "weekly staking reminder and this bet takes the week's total to or past it, a "
+        "`stake_reminder` notification is created; the bet is saved either way."
+    ),
 )
 def create_bet(
-    body: BetCreate, user: CurrentUserDep, db: DbDep, request: Request, provider: ProviderDep
+    body: BetCreate,
+    user: CurrentUserDep,
+    db: DbDep,
+    request: Request,
+    provider: ProviderDep,
+    now: NowDep,
 ) -> BetOut:
     body.legs = service.resolve_structured_legs(body.legs, provider)
     bet = service.create_bet(user.id, body)
+    staked_before = notifications.staked_this_week(db, user.id, now)
     db.add(bet)
     db.flush()
     write_audit(db, request, "bet.create", user_id=user.id, entity_type="bet", entity_id=bet.id)
+    notifications.check_stake_reminder(db, user.id, staked_before, now, request)
     db.commit()
     return service.bet_out(bet)
 
@@ -137,7 +151,8 @@ def get_bet_summary(user: CurrentUserDep, db: DbDep) -> BetSummaryOut:
         "structured selection (`gradeable`) and every leg's event is final: the legs are "
         "graded from the final score and the bet goes through the same settlement as a "
         "manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with "
-        "a reason. Calling this again settles nothing new."
+        "a reason. Calling this again settles nothing new. Each settled bet also creates a "
+        "`bet_settled` notification."
     ),
 )
 def auto_settle_bets(
@@ -154,6 +169,20 @@ def auto_settle_bets(
             entity_id=bet.id,
             details={"result": bet.result, "legs": [leg.result for leg in bet.legs]},
         )
+        notifications.notify(
+            db,
+            user.id,
+            templates.bet_settled(
+                bet_id=bet.id,
+                result=bet.result or "",
+                stake=bet.stake,
+                profit=bet.profit if bet.profit is not None else Decimal(0),
+                sportsbook=bet.sportsbook,
+            ),
+        )
+    if settled:
+        db.flush()
+        notifications.trim(db, user.id)
     db.commit()
     return AutoSettleOut(
         checked=checked,

@@ -1,7 +1,7 @@
 # OddVex API
 
 Backend for OddVex, a sports-betting **intelligence** product: odds comparison, player-prop
-research, betting math, bet tracking and a rule-based assistant. It never accepts, places or
+research, betting math, bet tracking, alerts with in-app notifications and a rule-based assistant. It never accepts, places or
 facilitates wagers and never moves money.
 
 **All sports data in this build is synthetic.** Teams, players, sportsbooks, prices and
@@ -16,7 +16,8 @@ Requires Python 3.13.
 cd services/api
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # or: uv venv && uv pip install -e ".[dev]"
 .venv/bin/alembic upgrade head                 # optional locally: tables are auto-created outside production
-.venv/bin/python scripts/seed_demo.py          # optional demo account
+.venv/bin/python scripts/seed_demo.py          # optional demo account (bets, alert rules, notifications)
+.venv/bin/python scripts/evaluate_alerts.py    # optional: evaluate every user's alert rules once
 .venv/bin/uvicorn oddvex_api.main:app --reload --port 8000
 ```
 
@@ -45,7 +46,9 @@ ODDVEX_TEST_DATABASE_URL=postgresql+psycopg://oddvex:oddvex@localhost:5432/oddve
 
 Every test that goes through the app then uses that database. Tests that are about SQLite files
 (the Alembic CLI, table auto-creation) keep using a temporary SQLite file, and the
-`0001 -> 0002` upgrade/downgrade test runs once on SQLite and once more on the external database.
+`0001 -> 0002` and `0002 -> 0003` upgrade/downgrade tests run once on SQLite and once more on the
+external database. One test (two concurrent alert evaluations creating a single notification)
+needs real concurrent writers and only runs against PostgreSQL.
 The database must use UTF-8 encoding (the official `postgres` image does; a cluster created with
 `initdb` under the `C` locale needs `-E UTF8`).
 
@@ -81,6 +84,7 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
 | `ODDVEX_SYNC_MAX_ATTEMPTS` | `3` | Fetch attempts per import run |
+| `ODDVEX_ALERT_EVAL_MIN_SECONDS` | `30` | Minimum seconds between two alert evaluations triggered by one user reading their notifications. `0` evaluates on every read (tests) |
 | `ODDVEX_MAX_BODY_BYTES` | `65536` | Largest request body accepted (minimum 1024). Larger requests get `413 payload_too_large` |
 | `ODDVEX_LOG_LEVEL` | `INFO` | Log level |
 
@@ -104,6 +108,9 @@ Errors always use one envelope, including validation errors and 404s:
 | Players | `GET /v1/players`, `GET /v1/players/{id}`, `GET /v1/players/{id}/props`, `GET /v1/props` |
 | Calculators | `POST /v1/quant/convert`, `/no-vig`, `/ev`, `/parlay`, `/clv` (each returns `steps`) |
 | Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/me`, `DELETE /v1/me`, `POST /v1/me/password`, `GET /v1/me/export` |
+| Alerts | `GET/POST /v1/alerts`, `POST /v1/alerts/evaluate`, `PATCH/DELETE /v1/alerts/{id}` |
+| Notifications | `GET /v1/notifications`, `GET /v1/notifications/unread-count`, `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all`, `DELETE /v1/notifications/{id}` |
+| Preferences | `GET/PUT /v1/me/notification-preferences`, `GET/PUT /v1/me/stake-reminder` |
 | Bets | `GET/POST /v1/bets`, `GET /v1/bets/summary`, `POST /v1/bets/auto-settle`, `GET/PATCH/DELETE /v1/bets/{id}`, `POST /v1/bets/{id}/settle` |
 | Watchlist | `GET/POST /v1/watchlist`, `GET /v1/watchlist/events`, `DELETE /v1/watchlist/{id}` |
 | Sync | `GET /v1/sync/providers`, `GET/POST /v1/sync/connections`, `POST .../{id}/sync`, `GET .../{id}/runs`, `DELETE .../{id}?delete_data=` |
@@ -147,14 +154,75 @@ Behaviour worth knowing:
   provider no longer has it (an old event) the embed is null and `available` is false.
   `GET /v1/watchlist/events` lists live and upcoming events for watched teams, watched players'
   teams and directly watched events, live first.
+- **Alert rules.** Owner-scoped, at most 100 active per user (`409 alerts_full`; 500 of any
+  state). `POST /v1/alerts` takes a `kind` and that kind's fields, nothing else:
+
+  | `kind` | Fields | Fires when |
+  | --- | --- | --- |
+  | `price_at_least` | `event_id`, `market` (moneyline, spread, total), `outcome_key`, `line` (spread and total only), `threshold`, `odds_format` (default american) | the best open, non-stale price for that outcome, among books quoting exactly that line, is at or above the threshold |
+  | `line_move` | `event_id`, `market` (spread, total), `outcome_key`, `min_move` (points) | the consensus line is `min_move` or more away from `baseline_line`, the consensus line when the rule was armed, in either direction |
+  | `game_start` | `event_id` or `team_id`, `minutes_before` (5 to 1440) | a matching upcoming event starts within that many minutes |
+  | `game_final` | `event_id` or `team_id` | a matching event is final; the notification carries the score |
+
+  The best price is `Board.best_price`, the same code the odds endpoint uses. The event must
+  exist (`422 unknown_event`) and not be over (`422 event_not_open`; a `game_start` rule also
+  needs it not to have started), the market and outcome must fit it (`422 market_not_available`,
+  `422 invalid_selection`), a team must exist (`422 unknown_team`) and a `line_move` rule needs a
+  current line to start from (`422 line_not_available`). An exact duplicate of an active rule
+  returns that rule with 200. States: `active`; `triggered` (an event-scoped rule fired, once);
+  `expired` (the event ended or disappeared first; a `game_final` rule only expires when the
+  event disappears); `paused`. Team-scoped rules stay `active` and fire once per game.
+  `PATCH` with `state: paused` pauses an active rule; `state: active` resumes a paused rule or
+  re-arms a triggered one (a `line_move` rule then takes the current consensus line as its new
+  baseline). Each rule has a `summary` and embeds the current `event` or `team`.
+- **Alert evaluation. There is no background worker.** Rules are evaluated (a) when the user
+  reads `GET /v1/notifications` or `GET /v1/notifications/unread-count`, at most once per
+  `ODDVEX_ALERT_EVAL_MIN_SECONDS` per user, (b) when the client calls
+  `POST /v1/alerts/evaluate`, which returns `{evaluated, fired, expired}`, and (c) when
+  `scripts/evaluate_alerts.py` runs (every user with active rules; `--dry-run` saves nothing).
+  In practice: **an alert fires when the user opens the app or the script runs, not at the
+  moment the condition becomes true.** A price that touched the threshold and moved away between
+  two evaluations is not noticed; a `game_start` rule nobody evaluated before the game began
+  expires without a notification. Evaluation is idempotent, and a unique constraint on
+  `(user_id, dedupe_key)`, where the key contains the rule id, makes two concurrent runs create
+  one notification.
+- **Notifications.** In-app only: no push, email or SMS. Delivery sits behind a
+  `NotificationChannel` protocol with a single `InAppChannel`, so another channel can be added
+  without touching the alert engine (adding one is a Founder approval gate). Kinds:
+  `price_alert`, `line_move`, `game_start`, `game_final`, `bet_settled` (one per bet settled by
+  `POST /v1/bets/auto-settle`), `sync_finished` (one per import run, succeeded or failed) and
+  `stake_reminder`. Each has `title`, `body`, `href` (a web route such as
+  `/app/games/{event_id}?market=spread` or `/app/tracker`) and a small `data` object. The list is
+  newest first with `unread`, `limit` (1 to 100, default 50) and a `before` cursor
+  (`next_before` of the previous page). At most 500 are kept per user; the oldest read ones are
+  removed first. The wording is neutral and factual: no instruction to bet, no urgency, American
+  prices with an explicit sign, no probabilities. `tests/test_notification_copy.py` enforces
+  that with a banned-phrase scan of every template.
+- **Notification preferences.** `GET/PUT /v1/me/notification-preferences` holds one in-app
+  switch per kind under `in_app`, all on by default. `PUT` changes the kinds it is sent and
+  leaves the others alone. A disabled kind creates no notification; alert rules still fire and
+  change state. There are deliberately no push, email or quiet-hours settings: nothing would
+  honor them yet.
+- **Staking reminder. A reminder, not a limit.** `PUT /v1/me/stake-reminder` takes
+  `{"weekly_stake_threshold": number | null}` (greater than 0, at most 1,000,000; `null` turns it
+  off). `GET` adds `staked_this_week` (stakes of the user's bets whose `placed_at` is in the
+  current ISO week, Monday to Sunday in UTC, void bets excluded), `week_start` and `exceeded`.
+  When `POST /v1/bets` or a sync import takes the weekly total from below the threshold to at or
+  above it, one `stake_reminder` notification is created for that week, stating the amount
+  staked, the user's own threshold and that free, confidential help is available at
+  1-800-GAMBLER. **OddVex never blocks, rejects or delays a bet because of it: the bet is always
+  saved.** At most one reminder per user and week, even if the threshold changes or the
+  notification is deleted.
 - **Password change.** `POST /v1/me/password` takes `current_password` and `new_password`
   (10 to 128 characters, different from the current one) and returns a `TokenResponse` with a
   **new token** (200, not 204), because every token issued before the change is rejected with
   `401 invalid_token` from then on, including the one that made the request. A wrong current
   password is `400 invalid_credentials` with a neutral message. It shares the auth rate limit.
 - **Data export.** `GET /v1/me/export` returns one JSON document (`format_version: 1`) with the
-  profile, bets, watchlist, sync connections, import runs and the caller's own audit entries. It
-  never contains the password hash. Each export is itself audited.
+  profile, bets, watchlist, sync connections, import runs and the caller's own audit entries,
+  plus `alerts`, `notifications`, `notification_preferences` and `stake_reminder` (added later;
+  optional for older clients). It never contains the password hash. Each export is itself
+  audited.
 - **Sync.** Re-running an import never duplicates a bet: bets are keyed on user + provider +
   external bet id. A provider failure that survives the retries is recorded as a failed run and
   returned as `502 sync_failed` with `details.run_id` and `details.retryable`. Two imports of
@@ -162,8 +230,9 @@ Behaviour worth knowing:
   `409 sync_conflict` (`details.retryable: true`), writes nothing, and can simply be retried.
 - **Request size.** Bodies over `ODDVEX_MAX_BODY_BYTES` are refused with `413 payload_too_large`
   in the usual envelope, whether the size is declared or the body is streamed.
-- **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, sync
-  connections and import runs. The audit log keeps an entry with the opaque user id only.
+- **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
+  notifications, notification preferences, the staking reminder, sync connections and import
+  runs. The audit log keeps an entry with the opaque user id only.
 
 ## Architecture
 
@@ -181,14 +250,18 @@ src/oddvex_api/
   account/           data export
   bets/              tracker: schemas, service (settlement, auto-settlement, summary), routes
   watchlist/         watched teams, players and events
+  alerts/            alert rules: schemas, pure evaluator, service (provider facts, state), throttle, routes
+  notifications/     templates (all wording), NotificationChannel + InAppChannel, preferences,
+                     staking reminder, routes
   sync/              SyncProvider protocol, MockSyncProvider, idempotent import
   assistant/         intent router, data tools, Explainer protocol + TemplateExplainer
   db/                SQLAlchemy 2 models, portable UTC datetime type, session factory
   errors.py middleware.py ratelimit.py cache.py logging_config.py deps.py
 alembic/             migrations (0001: users, bets, bet_legs, sync_connections, sync_import_runs, audit_log;
                      0002: watchlist_items, users.token_version/password_changed_at, bets.settled_by,
-                     bet_legs.outcome_key)
-scripts/             export_openapi.py, seed_demo.py
+                     bet_legs.outcome_key;
+                     0003: alert_rules, notifications, notification_preferences, stake_reminders)
+scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py
 docs/QUANT_METHODOLOGY.md
 ```
 
@@ -200,7 +273,8 @@ docs/QUANT_METHODOLOGY.md
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
   security headers, CORS allowlist, request body size limit, in-memory per-IP sliding-window
   rate limit, audit log for auth events, password changes, bet create/settle/auto-settle/delete,
-  watchlist changes, sync, data export and account deletion.
+  watchlist changes, alert rule changes and firings, notification deletion, preference and
+  staking-reminder changes, sync, data export and account deletion.
 
 ## What is synthetic or mocked
 
@@ -212,7 +286,8 @@ docs/QUANT_METHODOLOGY.md
 | Sportsbook sync | `MockSyncProvider` only: a fictional account with a fixed bet history and a simulated failure switch. No credentials, no real sportsbook |
 | Assistant | Keyword/regex intent router and templates. **No language model is connected** |
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
-| Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle |
+| Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle. With a provider it also gets five alert rules (one price alert that is already met and fires, the others stay active) and the notifications the engine produces for them |
+| Notification delivery | In-app only. No push, email or SMS provider is connected |
 
 ## Limitations
 
@@ -226,6 +301,17 @@ docs/QUANT_METHODOLOGY.md
 - Auto-settlement grades full-game moneyline, spread and total from the provider's final score.
   Props, futures, half results, voids and cash-outs stay manual, and the score is synthetic.
   It runs when the client calls it; there is no background job.
+- Alerts have no background worker (see "Alert evaluation" above): they fire when the user reads
+  their notifications, the client calls `POST /v1/alerts/evaluate`, or `scripts/evaluate_alerts.py`
+  runs. The per-user evaluation throttle is in process memory, like the rate limiter. Prices are
+  not stored, so a condition that was only true between two evaluations is missed.
+- Notifications are in-app only. Push, email and SMS need third-party services and Founder
+  approval.
+- The staking reminder is a reminder, never a limit. It looks at bets recorded in OddVex only,
+  is checked when a bet is created or imported (not when a bet is edited, settled or deleted),
+  and the "current week" is the ISO week in UTC, not the user's time zone.
+- Alert rules store provider ids, like the watchlist. A rule whose event the provider no longer
+  serves expires on its next evaluation.
 - The watchlist stores provider ids. A watched event the provider no longer serves stays on the
   list as `available: false` until the user removes it.
 - The data export is built in memory in one response; fine for a personal bet history, not

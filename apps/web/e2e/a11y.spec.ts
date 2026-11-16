@@ -12,7 +12,7 @@ async function audit(page: import("@playwright/test").Page) {
   return results.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.length} node(s), e.g. ${v.nodes[0]?.target.join(" ")}`);
 }
 
-const STATIC = ["/", "/pricing", "/methodology", "/help", "/login", "/signup", "/design", "/app/tools", "/app/parlay", "/app/tracker", "/app/assistant", "/app/settings"];
+const STATIC = ["/", "/pricing", "/methodology", "/help", "/login", "/signup", "/design", "/app/tools", "/app/parlay", "/app/tracker", "/app/assistant", "/app/settings", "/app/alerts"];
 
 for (const theme of ["dark", "light"] as const) {
   test.describe(`accessibility, ${theme} theme`, () => {

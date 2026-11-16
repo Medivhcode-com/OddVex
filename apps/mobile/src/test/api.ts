@@ -21,3 +21,17 @@ export function installFetch() {
     }));
   return { fetchMock, sent };
 }
+
+/**
+ * Answers requests by "METHOD /path" (query string included). A value is sent as a 200 JSON body; a function
+ * returns the response itself, so a test can answer with an error or change the answer between calls.
+ * A request with no entry rejects, which the client reports as the data service being unreachable.
+ */
+export function serveRoutes(fetchMock: jest.Mock, routes: Record<string, unknown>) {
+  fetchMock.mockImplementation(async (url: string, init: { method: string }) => {
+    const key = `${init.method} ${String(url).replace('http://localhost:8000', '')}`;
+    if (!(key in routes)) throw new Error(`Unexpected request: ${key}`);
+    const route = routes[key];
+    return typeof route === 'function' ? route() : jsonResponse(route);
+  });
+}

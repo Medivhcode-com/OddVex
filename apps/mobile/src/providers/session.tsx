@@ -5,7 +5,7 @@ import * as api from '@/api/client';
 import type { AuthResponse, User } from '@/api/types';
 import { clearSession, loadSession, saveSession } from '@/session/store';
 
-type Topic = 'bets' | 'watchlist';
+type Topic = 'bets' | 'watchlist' | 'alerts' | 'notifications' | 'reminder';
 
 export type SessionValue = {
   /** `loading` only while the saved session is being read at launch. */
@@ -16,10 +16,15 @@ export type SessionValue = {
   logOut: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
-  /** Counters that go up when the user's bets or watchlist change, so every screen showing them reloads. */
+  /**
+   * Counters that go up when the user's bets, watchlist, alert rules, notifications or staking reminder change,
+   * so every screen showing them reloads.
+   */
   revision: Record<Topic, number>;
   changed: (topic: Topic) => void;
 };
+
+export const NO_CHANGES: Record<Topic, number> = { bets: 0, watchlist: 0, alerts: 0, notifications: 0, reminder: 0 };
 
 const signedOut: SessionValue = {
   status: 'signedOut',
@@ -29,7 +34,7 @@ const signedOut: SessionValue = {
   logOut: async () => {},
   changePassword: async () => {},
   deleteAccount: async () => {},
-  revision: { bets: 0, watchlist: 0 },
+  revision: NO_CHANGES,
   changed: () => {},
 };
 
@@ -41,7 +46,7 @@ export const SessionContext = createContext<SessionValue>(signedOut);
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ status: SessionValue['status']; user: User | null }>({ status: 'loading', user: null });
-  const [revision, setRevision] = useState<Record<Topic, number>>({ bets: 0, watchlist: 0 });
+  const [revision, setRevision] = useState<Record<Topic, number>>(NO_CHANGES);
   // Bumped whenever the session changes, so a slow launch-time check cannot overwrite a newer log in or log out.
   const epoch = useRef(0);
 

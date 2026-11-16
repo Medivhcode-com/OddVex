@@ -4,6 +4,7 @@ import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { getEvent, getEventOdds } from '@/api/client';
 import { MARKETS, type EventSummary, type Market, type OddsComparison } from '@/api/types';
+import { AlertForm } from '@/components/alert-form';
 import { Segmented } from '@/components/choice';
 import { EventStatus } from '@/components/game-card';
 import { ConsensusRow, OddsRow, type OddsColumn } from '@/components/odds-row';
@@ -120,10 +121,38 @@ function TrackBet({ event, odds }: { event: EventSummary; odds: OddsComparison }
   );
 }
 
-export function GameDetailScreen({ eventId }: { eventId: string }) {
+/** "Set an alert" on a game that is not over: the alert form when logged in, a prompt to log in otherwise. */
+function SetAlert({ event, odds }: { event: EventSummary; odds: OddsComparison }) {
+  const session = useSession();
+  if (event.status === 'final') return null;
+  return (
+    <Panel>
+      <View style={styles.scoreboard}>
+        <PanelHeading title="Set an alert" description="Get a notification in the app when a price, a line or this game changes." />
+        {session.user ? (
+          <AlertForm event={event} odds={odds} />
+        ) : (
+          <>
+            <Txt variant="secondary" tone="muted">
+              Log in to set an alert for this game.
+            </Txt>
+            <Button label="Log in" variant="secondary" accessibilityLabel="Log in to set an alert" onPress={openLogin} />
+          </>
+        )}
+      </View>
+    </Panel>
+  );
+}
+
+function startingMarket(value: string | undefined): Market {
+  return MARKETS.find((item) => item.value === value)?.value ?? 'moneyline';
+}
+
+/** `initialMarket` comes from a link such as a notification's `?market=spread`; anything else opens on moneyline. */
+export function GameDetailScreen({ eventId, initialMarket }: { eventId: string; initialMarket?: string }) {
   const theme = useTheme();
   const now = useNow();
-  const [market, setMarket] = useState<Market>('moneyline');
+  const [market, setMarket] = useState<Market>(() => startingMarket(initialMarket));
   const event = useResource(`event:${eventId}`, (signal) => getEvent(eventId, signal));
   const odds = useResource(`odds:${eventId}:${market}`, (signal) => getEventOdds(eventId, market, signal));
 
@@ -174,6 +203,7 @@ export function GameDetailScreen({ eventId }: { eventId: string }) {
             it.
           </Txt>
           {summary ? <TrackBet event={summary} odds={odds.data} /> : null}
+          {summary ? <SetAlert event={summary} odds={odds.data} /> : null}
         </>
       ) : null}
     </ScrollView>

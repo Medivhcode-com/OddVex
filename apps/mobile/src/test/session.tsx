@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { SessionContext, type SessionValue } from '@/providers/session';
+import { NO_CHANGES, SessionContext, type SessionValue } from '@/providers/session';
 import { user } from '@/test/fixtures';
 
 /** A session for component tests. Signed in as the fixture user unless `user: null` is passed. */
@@ -14,7 +14,7 @@ export function fakeSession(overrides: Partial<SessionValue> = {}): SessionValue
     logOut: jest.fn(async () => {}),
     changePassword: jest.fn(async () => {}),
     deleteAccount: jest.fn(async () => {}),
-    revision: { bets: 0, watchlist: 0 },
+    revision: NO_CHANGES,
     changed: jest.fn(),
     ...overrides,
   };

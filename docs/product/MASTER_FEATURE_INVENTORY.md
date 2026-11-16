@@ -37,7 +37,7 @@ Important caveats:
 | GAME-05 | Favorites | Persisted favorite teams/leagues | Free | M2 | Built (teams and games; not leagues) | Persistence; auth |
 | GAME-06 | Box score / play-by-play | Detailed in-game and team stats | Free | M2 | Planned | Needs licensed provider |
 | GAME-07 | Injuries & lineups | Availability context | Free | M3 | Planned | Needs licensed provider (coverage varies) |
-| GAME-08 | Game notifications | Start / final / score alerts | Free | M3 | Planned | NOTF-01; store notification policies |
+| GAME-08 | Game notifications | Start / final / score alerts | Free | M3 | Built in-app (start and final; no live score alerts, no push) | NOTF-01; store notification policies |
 | GAME-09 | Mobile games | List + detail in Expo app | Free | M1 | Built in M1 | MOB-01 |
 
 ## C. Odds Comparison
@@ -55,7 +55,7 @@ Important caveats:
 | ODDS-09 | Outbound sportsbook links | Link out (affiliate or plain) | Free | M3 | Planned | **Founder gate**; affiliate agreements; state affiliate registration review by counsel; ad disclosures |
 | ODDS-10 | Alt lines & more markets | Alternates, periods, futures | Premium | M3 | Planned | Provider market coverage |
 | ODDS-11 | Mobile odds comparison | Grid adapted for mobile | Free | M1 | Built in M1 | MOB-01 |
-| ODDS-12 | Price / line alerts | Threshold alerts | Free+limits | M3 | Planned | INTL-11, NOTF-01 |
+| ODDS-12 | Price / line alerts | Threshold alerts | Free+limits | M3 | Built in-app (no push) | INTL-11, NOTF-01 |
 
 ## D. Prop Analyzer
 
@@ -86,7 +86,7 @@ Important caveats:
 | INTL-08 | Bankroll / staking calculator | e.g. fractional staking | Free | M3 | Planned | RG review of framing before build |
 | INTL-09 | Market discrepancy / +EV screen | Market-wide scan vs. reference price | Premium | M4 | Planned | Licensed provider; reference-price methodology; claims review |
 | INTL-10 | Backtesting | Test projections/strategies on history | Premium | M4 | Planned | Historical data licence; DATA-05 |
-| INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Planned | Real-time provider; NOTF-01 |
+| INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated on app open or by script; no background worker) | Real-time provider; NOTF-01 |
 | INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Planned | MOB-01 |
 
 ## F. Bet Tracker
@@ -201,7 +201,7 @@ Important caveats:
 | AUTH-06 | Account deletion & data export | Self-serve | Free | M1 / M2 | Built | Required before any real user; store account-deletion rules |
 | AUTH-07 | RBAC | `user`, `admin` roles | n/a | M1 | Built in M1 | — |
 | SET-01 | Settings | Profile, odds format, time zone | Free | M1 | Built in M1 | — |
-| SET-02 | Notification preferences | Per-channel, per-type | Free | M3 | Planned | NOTF-01/02 |
+| SET-02 | Notification preferences | Per-channel, per-type | Free | M3 | Built per type, in-app channel only | NOTF-01/02 |
 | SET-03 | RG resources & tools | Links (M1); reminders/time-outs (M3) | Free (never paywalled) | M1/M3 | Built in M1 (links) / Planned | RG policy |
 | NOTF-01 | Push notifications | APNs/FCM via Expo | Free | M3 | Planned | Store notification policies; consent |
 | NOTF-02 | Email notifications | Digest/alerts | Free | M3 | Planned | **Founder gate** (real email); CAN-SPAM review |

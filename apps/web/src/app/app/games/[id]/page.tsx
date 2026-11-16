@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/app/event-bits";
+import { AlertForm } from "@/components/app/alert-form";
 import { AutoRefresh } from "@/components/app/auto-refresh";
 import { QuickBet, type QuickBetOption } from "@/components/app/quick-bet";
 import { WatchButton } from "@/components/app/watch-button";
@@ -132,6 +133,28 @@ export default async function GamePage({ params, searchParams }: Props) {
               ) : (
                 <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
                   <p className="text-sm text-muted">Log in to add this game to your tracker.</p>
+                  <ButtonLink href={`/login?next=${encodeURIComponent(returnTo)}`} variant="secondary" size="sm">
+                    Log in
+                  </ButtonLink>
+                </div>
+              )}
+            </Panel>
+          ) : null}
+
+          {event.status !== "final" ? (
+            <Panel aria-labelledby="alert-heading">
+              <PanelHeader id="alert-heading" title="Set an alert" description="Hear about a change on this game. Alerts appear inside OddVex." />
+              {user ? (
+                <AlertForm
+                  key={market}
+                  eventId={event.id}
+                  market={market}
+                  canStart={event.status === "upcoming"}
+                  outcomes={quickOptions.map((option) => ({ outcomeKey: option.outcomeKey, label: option.label, line: option.line, american: option.american }))}
+                />
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+                  <p className="text-sm text-muted">Log in to set alerts on this game.</p>
                   <ButtonLink href={`/login?next=${encodeURIComponent(returnTo)}`} variant="secondary" size="sm">
                     Log in
                   </ButtonLink>

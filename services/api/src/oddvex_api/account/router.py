@@ -5,11 +5,22 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from sqlalchemy import select
 
+from ..alerts import service as alerts_service
 from ..auth.schemas import UserOut
 from ..bets import service as bets_service
-from ..db import AuditLog, Bet, SyncConnection, SyncImportRun, WatchlistItem, utcnow
+from ..db import (
+    AlertRule,
+    AuditLog,
+    Bet,
+    Notification,
+    SyncConnection,
+    SyncImportRun,
+    WatchlistItem,
+    utcnow,
+)
 from ..deps import BoardDep, CurrentUserDep, DbDep, write_audit
 from ..errors import AUTH_ERROR_RESPONSES
+from ..notifications import service as notifications_service
 from ..sync import service as sync_service
 from ..watchlist import service as watchlist_service
 from .schemas import AccountExportOut, ExportAuditEntryOut
@@ -23,8 +34,9 @@ router = APIRouter(tags=["auth"])
     operation_id="export_my_data",
     summary="Download everything stored about your account",
     description=(
-        "One JSON document with your profile, bets, watchlist, sync connections, import "
-        "runs and your own audit entries. It never contains the password hash. The export "
+        "One JSON document with your profile, bets, watchlist, alert rules, notifications, "
+        "notification preferences, staking reminder, sync connections, import runs and "
+        "your own audit entries. It never contains the password hash. The export "
         "itself is recorded in the audit log."
     ),
     responses=AUTH_ERROR_RESPONSES,
@@ -61,6 +73,16 @@ def export_my_data(
         .where(AuditLog.user_id == user.id)
         .order_by(AuditLog.created_at, AuditLog.id)
     )
+    alerts = db.scalars(
+        select(AlertRule)
+        .where(AlertRule.user_id == user.id)
+        .order_by(AlertRule.created_at, AlertRule.id)
+    )
+    notifications = db.scalars(
+        select(Notification)
+        .where(Notification.user_id == user.id)
+        .order_by(Notification.created_at, Notification.id)
+    )
     registry = request.app.state.sync_registry
     return AccountExportOut(
         exported_at=utcnow(),
@@ -85,4 +107,8 @@ def export_my_data(
             )
             for row in audit
         ],
+        alerts=[alerts_service.rule_out(board, rule) for rule in alerts],
+        notifications=[notifications_service.notification_out(row) for row in notifications],
+        notification_preferences=notifications_service.preferences_out(db, user.id),
+        stake_reminder=notifications_service.stake_reminder_out(db, user.id, board.now),
     )

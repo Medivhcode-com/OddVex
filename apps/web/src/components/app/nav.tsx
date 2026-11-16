@@ -14,6 +14,7 @@ const ICONS: Record<string, string> = {
   tools: "M5 3h10v14H5zM8 6h4M8 10h.01M12 10h.01M8 13h.01M12 13h.01",
   parlay: "M5 5h4v4H5zM11 11h4v4h-4zM9 7h2a2 2 0 0 1 2 2v2",
   ai: "M10 3l1.8 4.2L16 9l-4.2 1.8L10 15l-1.8-4.2L4 9l4.2-1.8z",
+  alerts: "M10 3a4.5 4.5 0 0 0-4.5 4.5c0 4-1.5 5-1.5 5h12s-1.5-1-1.5-5A4.5 4.5 0 0 0 10 3zM8.5 15.5a1.6 1.6 0 0 0 3 0",
   more: "M4 10h.01M10 10h.01M16 10h.01",
   settings: "M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM10 2v2M10 16v2M2 10h2M16 10h2",
 };
@@ -30,11 +31,11 @@ function isActive(pathname: string, href: string) {
   return href === "/app" ? pathname === "/app" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function SideNav() {
+export function SideNav({ admin = false }: { admin?: boolean }) {
   const pathname = usePathname();
   return (
     <nav aria-label="App" className="flex flex-col gap-0.5">
-      {[...APP_NAV, { href: "/app/settings", label: "Settings", icon: "settings" }].map((item) => {
+      {[...APP_NAV, { href: "/app/settings", label: "Settings", icon: "settings" }, ...(admin ? [{ href: "/app/admin", label: "Admin", icon: "tools" }] : [])].map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link

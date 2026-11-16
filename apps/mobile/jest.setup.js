@@ -22,6 +22,9 @@ jest.mock('expo-router', () => {
   return {
     router,
     useRouter: () => router,
+    useLocalSearchParams: () => ({}),
+    // Runs like an effect: once when the screen mounts, standing in for the first focus.
+    useFocusEffect: (effect) => require('react').useEffect(effect, [effect]),
     Link: ({ children }) => children,
     Stack: Object.assign(() => null, { Screen: () => null }),
   };

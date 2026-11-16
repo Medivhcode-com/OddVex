@@ -73,6 +73,11 @@ def test_export_contains_everything_of_mine_and_nothing_else(client: TestClient,
         "sync_connections",
         "sync_runs",
         "audit_log",
+        # Added with the alerts milestone; older clients ignore them.
+        "alerts",
+        "notifications",
+        "notification_preferences",
+        "stake_reminder",
     }
     assert body["format_version"] == 1
     assert body["user"] == ada["user"]

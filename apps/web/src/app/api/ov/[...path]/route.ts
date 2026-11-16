@@ -5,7 +5,7 @@ import { API_URL, SESSION_COOKIE } from "@/lib/api";
  * Same-origin bridge from client components to the API's /v1 routes.
  * The session token stays in an HttpOnly cookie and is attached here, on the server.
  */
-const ALLOWED = /^v1\/(quant|bets|sync|assistant|events|players|props|me|watchlist)(\/|$)/;
+const ALLOWED = /^v1\/(quant|bets|sync|assistant|events|players|props|me|watchlist|alerts|notifications)(\/|$)/;
 
 function errorResponse(status: number, code: string, message: string) {
   return NextResponse.json({ error: { code, message } }, { status });
@@ -55,4 +55,4 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
   });
 }
 
-export { forward as GET, forward as POST, forward as PATCH, forward as DELETE };
+export { forward as GET, forward as POST, forward as PUT, forward as PATCH, forward as DELETE };

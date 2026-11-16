@@ -44,6 +44,10 @@ class Settings(BaseSettings):
 
     sync_max_attempts: int = 3
 
+    #: Minimum seconds between two lazy alert evaluations for one user (triggered by the
+    #: notification read routes). 0 evaluates on every request.
+    alert_eval_min_seconds: int = Field(default=30, ge=0)
+
     #: Largest request body accepted, in bytes. Larger requests get 413.
     max_body_bytes: int = Field(default=64 * 1024, ge=1024)
 

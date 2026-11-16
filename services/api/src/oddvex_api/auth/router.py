@@ -115,7 +115,8 @@ def me(user: CurrentUserDep) -> UserOut:
     operation_id="delete_me",
     summary="Delete the account and all of its data",
     description=(
-        "Permanently deletes the user, their bets, bet legs, watchlist, sync connections and "
+        "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, "
+        "notifications, notification preferences, staking reminder, sync connections and "
         "import runs. "
         "An audit entry containing only the opaque user id is retained."
     ),

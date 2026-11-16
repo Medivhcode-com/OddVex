@@ -5,7 +5,7 @@ import { setAuthToken } from '@/api/client';
 import type { BetSummary } from '@/api/types';
 import { TrackerScreen } from '@/screens/tracker';
 import { installFetch, jsonResponse } from '@/test/api';
-import { lostSyncedBet, openBet, wonBet } from '@/test/fixtures';
+import { lostSyncedBet, openBet, reminderExceeded, wonBet } from '@/test/fixtures';
 import { fakeSession, WithSession } from '@/test/session';
 
 const summary: BetSummary = {
@@ -98,6 +98,43 @@ describe('TrackerScreen', () => {
       ),
     ).toBeOnTheScreen();
     expect(screen.getByRole('button', { name: 'Connect Mock Sportsbook' })).toBeOnTheScreen();
+  });
+
+  it('shows the staking reminder notice at the top once this week is at or above the amount set', async () => {
+    const { fetchMock } = installFetch();
+    serve(fetchMock, { '/v1/me/stake-reminder': () => jsonResponse(reminderExceeded) });
+    await render(
+      <WithSession value={fakeSession()}>
+        <TrackerScreen />
+      </WithSession>,
+    );
+
+    expect(await screen.findByText('You have reached your weekly staking reminder')).toBeOnTheScreen();
+    expect(screen.getByText(/^You have staked \$250\.00 this week\. Your reminder is set at \$200\.00\. This is a reminder, not a limit: OddVex will not stop you logging bets\..*1-800-GAMBLER\.$/)).toBeOnTheScreen();
+    // The tracker itself is unchanged: logging a bet is still offered.
+    expect(await screen.findByRole('button', { name: 'Log a bet' })).toBeEnabled();
+  });
+
+  it('shows no reminder notice below the amount, or when the reminder cannot be loaded', async () => {
+    const { fetchMock } = installFetch();
+    serve(fetchMock, { '/v1/me/stake-reminder': () => jsonResponse({ ...reminderExceeded, staked_this_week: 150, exceeded: false }) });
+    const view = await render(
+      <WithSession value={fakeSession()}>
+        <TrackerScreen />
+      </WithSession>,
+    );
+    expect(await screen.findByLabelText('Profit, −$2.27')).toBeOnTheScreen();
+    expect(screen.queryByText(/1-800-GAMBLER/)).toBeNull();
+    await view.unmount();
+
+    serve(fetchMock);
+    await render(
+      <WithSession value={fakeSession()}>
+        <TrackerScreen />
+      </WithSession>,
+    );
+    expect(await screen.findByLabelText('Profit, −$2.27')).toBeOnTheScreen();
+    expect(screen.queryByText(/1-800-GAMBLER/)).toBeNull();
   });
 
   it('says what to do next when there are no bets', async () => {
