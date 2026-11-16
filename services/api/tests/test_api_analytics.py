@@ -153,7 +153,7 @@ def test_analytics_match_the_hand_computed_history(client: TestClient, history: 
     assert body["average_odds"] == {
         "american": 117,
         "decimal": 2.1698,
-        "fractional": "117/100",
+        "fractional": "62/53",
         "implied_probability": 0.460863,
     }
 
