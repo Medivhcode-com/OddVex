@@ -69,7 +69,7 @@ Important caveats:
 | PROP-06 | Model projections | Projection + uncertainty + methodology | Premium | M4 | Planned | Real historical data; model validation; backtesting (INTL-10); claims review |
 | PROP-07 | Prop watchlist | Saved players/props | Free+limits | M2 | Built (players; not individual props) | Persistence |
 | PROP-08 | Prop alerts | Line/price change alerts | Premium | M3 | Planned | INTL-11, NOTF-01 |
-| PROP-09 | Mobile prop analyzer | Props in Expo app | Free | M3 | Planned | MOB-01 |
+| PROP-09 | Mobile prop analyzer | Props in Expo app | Free | M3 | Built in code, never run on a device (prop board and analyzer) | MOB-01 |
 | PROP-10 | Matchup context | Opponent/positional context | Premium | M3 | Planned | Provider stats depth |
 
 ## E. Betting Intelligence
@@ -87,7 +87,7 @@ Important caveats:
 | INTL-09 | Market discrepancy / +EV screen | Market-wide scan vs. reference price | Premium | M4 | Planned | Licensed provider; reference-price methodology; claims review |
 | INTL-10 | Backtesting | Test projections/strategies on history | Premium | M4 | Planned | Historical data licence; DATA-05 |
 | INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated on app open or by script; no background worker) | Real-time provider; NOTF-01 |
-| INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Planned | MOB-01 |
+| INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Built in code, never run on a device (converter, no-vig, EV, CLV) | MOB-01 |
 
 ## F. Bet Tracker
 
@@ -103,7 +103,7 @@ Important caveats:
 | TRKR-08 | Results-over-time chart | Cumulative net result | Free | M1 | Built in M1 | TRKR-03 |
 | TRKR-09 | Tags & notes | User annotations | Free | M2 | Planned | — |
 | TRKR-10 | Spending-awareness insights | Neutral summaries; optional reminders | Free (never paywalled) | M3 | Planned | RG policy review |
-| TRKR-11 | Mobile tracker | Tracker in Expo app | Free | M3 | Planned | MOB-02 |
+| TRKR-11 | Mobile tracker | Tracker in Expo app | Free | M3 | Built in code, never run on a device (log, settle, edit, delete, settle from final scores, mock sync; profit chart and breakdowns are web-only) | MOB-02 |
 | TRKR-12 | Multi-leg bets | Parlays with legs in tracker | Free | M1 | Built in M1 | TRKR-01 |
 | TRKR-13 | Advanced analytics | Deeper breakdowns, custom date ranges | Premium | M4 | Planned | PREM-01 |
 
@@ -148,7 +148,7 @@ Important caveats:
 | PRLY-04 | Parlay price comparison | Across sportsbooks | Premium | M3 | Planned | Provider coverage of parlay/SGP pricing (may not be available) |
 | PRLY-05 | Send to tracker / save drafts | Tracker hand-off (M1?), drafts (M2) | Free | M1/M2 | Planned | TRKR-12 |
 | PRLY-06 | Quantified correlation | Model-based estimates | Premium | M4 | Planned | Historical data; model validation |
-| PRLY-07 | Mobile parlay research | In Expo app | Free | M3 | Planned | MOB-01 |
+| PRLY-07 | Mobile parlay research | In Expo app | Free | M3 | Built in code, never run on a device (with the correlation warning) | MOB-01 |
 
 ## J. Community
 
@@ -217,7 +217,7 @@ Important caveats:
 | MKT-05 | Programmatic SEO pages | Game/market/tool landing pages | Free | M2+ | Planned | Licensed provider with display/SEO rights |
 | MKT-06 | Blog | Educational content | Free | M1 shell / M2 content | Built in M1 (shell) | Editorial review per BRAND_VOICE |
 | MOB-01 | Mobile app shell | Expo app, nav, tokens | Free | M1 | Built in M1 | — |
-| MOB-02 | Mobile auth & account | Login, settings, deletion in-app | Free | M2 | Planned (verify) | AUTH-06 |
+| MOB-02 | Mobile auth & account | Login, settings, deletion in-app | Free | M2 | Built in code, never run on a device (log in, create account with 21+ confirmation, change password, in-app deletion; SecureStore on real hardware unverified) | AUTH-06 |
 | MOB-03 | Store submission | App Store / Google Play | n/a | M6 | Planned | **Founder gate**; LAUNCH_READINESS_CHECKLIST |
 | PLAT-01 | CI pipeline | Lint, types, tests, scans | n/a | M1 | Built in M1 | — |
 | PLAT-02 | Design system | Shared tokens/components | n/a | M1 | Built in M1 | — |

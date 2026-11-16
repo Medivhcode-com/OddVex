@@ -1,20 +1,62 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
-import { Button, Field, Notice } from "@/components/ui/primitives";
-import { loginAction, signupAction, type AuthState } from "@/lib/auth-actions";
+import { startTransition, useActionState, useEffect, useRef } from "react";
+import { Button, ButtonLink, Field, Notice } from "@/components/ui/primitives";
+import {
+  confirmEmailAction,
+  loginAction,
+  requestPasswordResetAction,
+  resetPasswordAction,
+  signupAction,
+  type AuthState,
+  type ResetRequestState,
+} from "@/lib/auth-actions";
 
 const initial: AuthState = {};
 
-export function LoginForm({ next }: { next: string }) {
+export function LoginForm({ next, notice }: { next: string; notice?: string }) {
   const [state, action, pending] = useActionState(loginAction, initial);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const submittedPassword = useRef<string | null>(null);
+
+  // Submitting through `action` alone makes React reset the whole form when a failed attempt
+  // returns, which also wiped anything typed in the meantime. Dispatching the action ourselves
+  // leaves the fields alone, so the email stays and a second attempt works on the same page.
+  // Without JavaScript the form still posts through `action`.
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    submittedPassword.current = String(data.get("password") ?? "");
+    startTransition(() => action(data));
+  }
+
+  useEffect(() => {
+    if (!state.error) return;
+    // Move focus to the message so keyboard and screen reader users land on what went wrong.
+    errorRef.current?.focus();
+    // Clear the rejected password, unless a new one was typed while the request was running.
+    const field = passwordRef.current;
+    if (field && field.value === submittedPassword.current) field.value = "";
+  }, [state]);
+
   return (
-    <form action={action} className="space-y-4" noValidate>
+    <form action={action} onSubmit={submit} className="space-y-4" noValidate>
       <input type="hidden" name="next" value={next} />
-      {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+      {notice && !state.error ? <Notice tone="accent" role="status">{notice}</Notice> : null}
+      {state.error ? (
+        <div ref={errorRef} tabIndex={-1} className="rounded-cell">
+          <Notice tone="error">{state.error}</Notice>
+        </div>
+      ) : null}
       <Field id="email" name="email" type="email" label="Email" autoComplete="email" defaultValue={state.values?.email} required />
-      <Field id="password" name="password" type="password" label="Password" autoComplete="current-password" required />
+      <Field ref={passwordRef} id="password" name="password" type="password" label="Password" autoComplete="current-password" required />
+      <p className="-mt-1 text-sm">
+        <Link href="/forgot-password" className="inline-flex min-h-11 items-center text-muted underline underline-offset-4 hover:text-ink">
+          Forgot password?
+        </Link>
+      </p>
       <Button type="submit" size="lg" className="w-full" disabled={pending}>
         {pending ? "Logging in" : "Log in"}
       </Button>
@@ -25,6 +67,121 @@ export function LoginForm({ next }: { next: string }) {
         </Link>
       </p>
     </form>
+  );
+}
+
+const PREVIEW_EMAIL_NOTE = "In this preview no email is actually sent, so the link will not arrive in your inbox.";
+
+export function ForgotPasswordForm() {
+  const [state, action, pending] = useActionState(requestPasswordResetAction, {} as ResetRequestState);
+  if (state.done) {
+    return (
+      <div className="space-y-4">
+        <Notice tone="accent" role="status" title="Check your email">
+          If an account exists for that address, we&rsquo;ve sent a link to set a new password. The link works once and
+          then expires.
+        </Notice>
+        <Notice tone="warn">{PREVIEW_EMAIL_NOTE}</Notice>
+        <p className="text-center text-sm text-muted">
+          <Link href="/login" className="text-ink underline underline-offset-4">
+            Back to log in
+          </Link>
+        </p>
+      </div>
+    );
+  }
+  return (
+    <form action={action} className="space-y-4" noValidate>
+      {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+      <Field id="email" name="email" type="email" label="Email" autoComplete="email" defaultValue={state.values?.email} error={state.fields?.email} required />
+      <Button type="submit" size="lg" className="w-full" disabled={pending}>
+        {pending ? "Sending link" : "Send reset link"}
+      </Button>
+      <Notice tone="warn">{PREVIEW_EMAIL_NOTE}</Notice>
+      <p className="text-center text-sm text-muted">
+        Remembered it?{" "}
+        <Link href="/login" className="text-ink underline underline-offset-4">
+          Log in
+        </Link>
+      </p>
+    </form>
+  );
+}
+
+function RequestNewLink() {
+  return (
+    <p className="text-sm text-muted">
+      <Link href="/forgot-password" className="text-ink underline underline-offset-4">
+        Request a new reset link
+      </Link>
+    </p>
+  );
+}
+
+export function ResetPasswordForm({ token }: { token: string }) {
+  const [state, action, pending] = useActionState(resetPasswordAction, {} as AuthState & { expired?: boolean });
+  if (state.expired) {
+    return (
+      <div className="space-y-4">
+        <Notice tone="error">{state.error}</Notice>
+        <RequestNewLink />
+      </div>
+    );
+  }
+  return (
+    <form action={action} className="space-y-4" noValidate>
+      <input type="hidden" name="token" value={token} />
+      {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+      <Field
+        id="new_password"
+        name="new_password"
+        type="password"
+        label="New password"
+        autoComplete="new-password"
+        hint="At least 10 characters."
+        error={state.fields?.new_password}
+        required
+      />
+      <Button type="submit" size="lg" className="w-full" disabled={pending}>
+        {pending ? "Saving password" : "Set new password"}
+      </Button>
+      <p className="text-sm text-muted">Setting a new password signs you out everywhere. You then log in with the new one.</p>
+    </form>
+  );
+}
+
+export function ConfirmEmailForm({ token }: { token: string }) {
+  const [state, action, pending] = useActionState(confirmEmailAction, {} as AuthState & { done?: boolean });
+  if (state.done) {
+    return (
+      <div className="space-y-4">
+        <Notice tone="accent" role="status">
+          Email address confirmed.
+        </Notice>
+        <ButtonLink href="/app" variant="secondary">
+          Open the app
+        </ButtonLink>
+      </div>
+    );
+  }
+  return (
+    <form action={action} className="space-y-4">
+      <input type="hidden" name="token" value={token} />
+      {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+      <Button type="submit" size="lg" className="w-full" disabled={pending}>
+        {pending ? "Confirming" : "Confirm email address"}
+      </Button>
+    </form>
+  );
+}
+
+/** Shown when a reset or confirmation page is opened without the token from the link. */
+export function MissingLinkToken({ reset }: { reset?: boolean }) {
+  return (
+    <div className="space-y-4">
+      <Notice tone="error">This link is incomplete. Open the full link from the message, or start again.</Notice>
+      {reset ? <RequestNewLink /> : null}
+    </div>
   );
 }
 

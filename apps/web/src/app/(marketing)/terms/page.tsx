@@ -22,10 +22,12 @@ export default function Page() {
         <p>Nothing on OddVex is betting, financial or legal advice. Figures can be wrong, late or incomplete. Historical statistics do not predict future results. You make your own decisions and bear your own losses.</p>
         <h2>Preview data</h2>
         <p>The preview runs on synthetic, fictional data. Do not rely on it for any real-world decision.</p>
+        <h2>Alerts and reminders</h2>
+        <p>Alerts are checked when you open OddVex and appear only inside it. They can be late or missed, so don&rsquo;t depend on one. The weekly staking reminder is a reminder, not a limit: it does not stop you logging bets and it has no effect at any sportsbook.</p>
         <h2>Your account</h2>
         <p>Keep your password private. Don&rsquo;t misuse the service, attempt to break its security or scrape it. We may suspend accounts that do.</p>
         <h2>Your content</h2>
-        <p>The bets and notes you enter remain yours. You can delete them and your account at any time.</p>
+        <p>The bets, notes, watchlist and alerts you enter remain yours. You can delete them and your account at any time. The privacy policy explains what is removed and what is kept.</p>
         <h2>Changes</h2>
         <p>These terms will be replaced by a counsel-reviewed version before launch. Paid plans, when offered, will come with their own clearly stated price, renewal and cancellation terms.</p>
       </Prose>

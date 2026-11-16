@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+// Fixed headers for every response. The Content-Security-Policy and Strict-Transport-Security
+// depend on the request and on runtime configuration, so `src/proxy.ts` sets those.
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },

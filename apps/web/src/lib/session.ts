@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { api, ApiError, SESSION_COOKIE, sessionToken } from "@/lib/api";
+import { servedOverHttps } from "@/lib/config";
 import type { OddsFormat } from "@/lib/format";
 import type { User } from "@/lib/types";
 
@@ -26,7 +27,7 @@ export async function setSession(token: string, maxAgeSeconds: number) {
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production" && process.env.ODDVEX_INSECURE_COOKIES !== "true",
+    secure: servedOverHttps(),
     path: "/",
     maxAge: maxAgeSeconds,
   });

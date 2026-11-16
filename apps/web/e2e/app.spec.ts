@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 const API = "http://localhost:8210";
 
@@ -154,6 +154,97 @@ test.describe("accounts and tracking", () => {
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("a failed login keeps the email, focuses the error, and a second try works on the same page", async ({ page }) => {
+    const email = await signUp(page, "retry");
+    await page.getByRole("button", { name: "Log out" }).click();
+    await page.goto("/login?next=/app/tracker");
+    await page.evaluate(() => ((window as unknown as { __samePage: boolean }).__samePage = true));
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill("definitely-wrong-password");
+    await page.getByRole("button", { name: "Log in" }).click();
+    const alert = page.getByRole("alert");
+    await expect(alert).toBeVisible();
+    await expect(page.locator(":focus").getByRole("alert")).toBeVisible(); // focus is on the error message
+    await expect(page.getByLabel("Email")).toHaveValue(email);
+    await expect(page.getByLabel("Password")).toHaveValue("");
+    // No reload and no navigation happened in between.
+    expect(await page.evaluate(() => (window as unknown as { __samePage?: boolean }).__samePage)).toBe(true);
+    await page.getByLabel("Password").fill("correct-horse-battery");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page).toHaveURL(/\/app\/tracker$/);
+    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+  });
+
+  test("forgot password: neutral answer, then the link sets a new password that works once", async ({ page, request }) => {
+    const email = await signUp(page, "reset");
+    await page.getByRole("button", { name: "Log out" }).click();
+    await page.goto("/login");
+    await page.getByRole("link", { name: "Forgot password?" }).click();
+    await expect(page).toHaveURL(/\/forgot-password$/);
+    await expect(page.getByText("no email is actually sent", { exact: false })).toBeVisible();
+
+    // An address with no account gets exactly the same answer.
+    await page.getByLabel("Email").fill(`nobody-${Date.now()}@oddvex.test`);
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    await expect(page.getByText("If an account exists for that address, we\u2019ve sent a link", { exact: false })).toBeVisible();
+
+    await page.goto("/forgot-password");
+    await page.getByLabel("Email").fill(email);
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    await expect(page.getByText("If an account exists for that address, we\u2019ve sent a link", { exact: false })).toBeVisible();
+    await expect(page.getByText("no email is actually sent", { exact: false })).toBeVisible();
+
+    // Nothing is emailed in this build; the test API exposes the outbox so the link can be followed.
+    let token = "";
+    await expect
+      .poll(async () => {
+        const response = await request.get(`${API}/v1/dev/email-outbox/latest?to=${encodeURIComponent(email)}&template=password_reset`);
+        token = response.ok() ? ((await response.json()).token ?? "") : "";
+        return token;
+      })
+      .not.toBe("");
+
+    await page.goto(`/reset-password?token=${encodeURIComponent(token)}`);
+    await page.getByLabel("New password").fill("short");
+    await page.getByRole("button", { name: "Set new password" }).click();
+    await expect(page.getByText("Use at least 10 characters.")).toBeVisible();
+    await page.getByLabel("New password").fill("a-brand-new-passphrase");
+    await page.getByRole("button", { name: "Set new password" }).click();
+    await expect(page).toHaveURL(/\/login\?reset=done$/);
+    await expect(page.getByText("Password changed. Log in with the new password.")).toBeVisible();
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill("a-brand-new-passphrase");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+
+    // The link is single use.
+    await page.goto(`/reset-password?token=${encodeURIComponent(token)}`);
+    await page.getByLabel("New password").fill("yet-another-passphrase");
+    await page.getByRole("button", { name: "Set new password" }).click();
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("expired or was already used");
+    await expect(page.getByRole("link", { name: "Request a new reset link" })).toBeVisible();
+  });
+
+  test("email confirmation link confirms once and needs a deliberate click", async ({ page, request }) => {
+    const email = await signUp(page, "verify");
+    let token = "";
+    await expect
+      .poll(async () => {
+        const response = await request.get(`${API}/v1/dev/email-outbox/latest?to=${encodeURIComponent(email)}&template=verify_email`);
+        token = response.ok() ? ((await response.json()).token ?? "") : "";
+        return token;
+      })
+      .not.toBe("");
+    await page.goto(`/verify-email?token=${encodeURIComponent(token)}`);
+    await page.getByRole("button", { name: "Confirm email address" }).click();
+    await expect(page.getByText("Email address confirmed.")).toBeVisible();
+    await page.goto(`/verify-email?token=${encodeURIComponent(token)}`);
+    await page.getByRole("button", { name: "Confirm email address" }).click();
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("expired or was already used");
+    await page.goto("/verify-email");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("This link is incomplete");
   });
 
   test("log a bet, settle it as won, then delete it", async ({ page }) => {
@@ -320,9 +411,9 @@ test.describe("accounts and tracking", () => {
     await page.getByLabel("Password").fill("correct-horse-battery");
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
-    // Start from a fresh form: React resets the fields when the failed attempt finishes.
-    await page.goto("/login");
-    await page.getByLabel("Email").fill(email);
+    // Same page, no reload: the email is still there and the rejected password was cleared.
+    await expect(page.getByLabel("Email")).toHaveValue(email);
+    await expect(page.getByLabel("Password")).toHaveValue("");
     await page.getByLabel("Password").fill("an-even-better-passphrase");
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
@@ -530,12 +621,12 @@ test.describe("alerts and notifications", () => {
 
 test.describe("admin", () => {
   test("ordinary accounts and signed-out visitors see the not-found page", async ({ page }) => {
-    // The page streams, so the status is 200; what matters is that no admin data is rendered.
-    await page.goto("/app/admin");
+    // The proxy checks the role before the page starts streaming, so this is a real 404.
+    expect((await page.goto("/app/admin"))?.status()).toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toContainText("off the board");
     await expect(page.getByText("Recent audit log")).toHaveCount(0);
     await signUp(page, "notadmin");
-    await page.goto("/app/admin");
+    expect((await page.goto("/app/admin"))?.status()).toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toContainText("off the board");
     await expect(page.getByText("Recent audit log")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
@@ -557,6 +648,7 @@ test.describe("admin", () => {
       await page.getByRole("button", { name: "Log in" }).click();
     }
     await expect(page.getByRole("heading", { level: 1, name: "Admin" })).toBeVisible();
+    expect((await page.goto("/app/admin"))?.status()).toBe(200);
     await expect(page.getByRole("region", { name: "Service" }).getByText("Accounts")).toBeVisible();
     await expect(page.getByRole("table", { name: /audit log/i })).toBeVisible();
   });
