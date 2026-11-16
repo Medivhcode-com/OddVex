@@ -117,9 +117,7 @@ def analyze(bets: Sequence[Bet]) -> BetAnalyticsOut:
 
     return BetAnalyticsOut(
         settled_count=len(settled),
-        by_odds_band=_grouped(
-            settled, lambda b: stats.odds_band(b.odds_decimal), stats.ODDS_BANDS
-        ),
+        by_odds_band=_grouped(settled, lambda b: stats.odds_band(b.odds_decimal), stats.ODDS_BANDS),
         by_weekday=_grouped(
             settled,
             lambda b: _WEEKDAYS[b.placed_at.astimezone(UTC).weekday()],

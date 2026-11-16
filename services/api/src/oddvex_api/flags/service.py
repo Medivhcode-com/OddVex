@@ -44,9 +44,7 @@ def set_flag(db: Session, key: str, enabled: bool) -> tuple[bool, FeatureFlag]:
 
 
 def feature_disabled(key: str) -> ApiError:
-    return ApiError(
-        404, "feature_disabled", "This feature is not available", details={"flag": key}
-    )
+    return ApiError(404, "feature_disabled", "This feature is not available", details={"flag": key})
 
 
 def require_flag(key: str) -> Callable[[Session], None]:

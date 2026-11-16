@@ -412,9 +412,7 @@ class Board:
             for event_market in markets:
                 if event_market in event.markets:
                     rows.extend(self._event_value_rows(event, event_market))
-        rows.sort(
-            key=lambda r: (-r.edge, r.event.start_time, r.event.id, r.market, r.outcome_key)
-        )
+        rows.sort(key=lambda r: (-r.edge, r.event.start_time, r.event.id, r.market, r.outcome_key))
         return rows
 
     def _event_value_rows(self, event: Event, market: str) -> list[ValueRowOut]:

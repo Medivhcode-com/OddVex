@@ -26,9 +26,7 @@ def entitlement(plan: str, feature: str, gating: bool) -> Entitlement:
 def entitlements_for(db: Session, user: User) -> tuple[bool, dict[str, Entitlement]]:
     """``(gating enforced, feature -> entitlement)`` for one user."""
     gating = flags.is_enabled(db, "premium_gating")
-    return gating, {
-        feature: entitlement(user.plan, feature, gating) for feature in catalog.CATALOG
-    }
+    return gating, {feature: entitlement(user.plan, feature, gating) for feature in catalog.CATALOG}
 
 
 def required_plan(feature: str) -> str | None:
