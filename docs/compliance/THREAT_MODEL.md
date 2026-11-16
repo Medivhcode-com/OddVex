@@ -83,7 +83,7 @@ assigned: Founder.
 | T-4 | User changes another user's records | B2, B4 | Every bet, watchlist, alert, notification and sync query is filtered by the authenticated user; another user's id returns 404. Cross-user tests in `services/api/tests/test_api_bets.py`, `test_api_alerts.py`, `test_api_notifications.py`, `test_api_watchlist.py`, `test_api_account.py` | New modules in progress have not been checked. Authorization is by convention in each route, not enforced centrally | M | Backend: cross-user tests for every new module are a merge condition |
 | T-5 | Tampering with numbers shown to users | B2 | All math is in `quant/` with tests; the web and mobile apps compute nothing (ADR-0003). Stale, suspended and unavailable quotes are excluded from best price (ADR-0002) | Data is synthetic. Integrity of a real feed (provider compromise, wrong mapping) is unmodelled | M at real data | Backend with data provider selection (G-01): sanity checks and freshness monitors |
 | T-6 | Oversized or malformed input | B2, B4 | Pydantic validation; body limit `ODDVEX_MAX_BODY_BYTES` with 413 for declared and streamed bodies (`middleware.py`); list caps (bets `limit` up to 1000, 200 watchlist items, 100 active alerts, 500 notifications kept) | Limits exist per feature, not globally | L | None |
-| T-7 | Malicious dependency or CI change | B6 | Lockfile for JavaScript with `--frozen-lockfile`; Dependabot weekly for npm, pip and Actions; gitleaks on full history; workflow token is `contents: read` (`ci.yml`) | **No Python lockfile**: `pip install -e ".[dev]"` resolves version ranges at build time, in CI and in the Docker image. **No vulnerability audit job** (SECURITY_BASELINE DS-02 requires one). Actions are pinned to tags, not commit ids (DS-07). No image scan or SBOM (DS-08). `CODEOWNERS` names a placeholder team. Whether `main` branch protection is on cannot be seen from the repository | H | Founder: decide the audit job, CODEOWNERS team and branch protection (open decisions in DECISION_LOG). Backend: pin Python dependencies |
+| T-7 | Malicious dependency or CI change | B6 | Lockfile for JavaScript with `--frozen-lockfile`; Dependabot weekly for npm, pip and Actions; gitleaks on full history; workflow token is `contents: read` (`ci.yml`) | **No Python lockfile**: `pip install -e ".[dev]"` resolves version ranges at build time, in CI and in the Docker image. A dependency audit job (`pnpm audit` at high and above, `pip-audit`) was added on the working branch on 2026-11-16 (commit `0e5145e`) and is not on `main` yet. Actions are pinned to tags, not commit ids (DS-07). No image scan or SBOM (DS-08). `CODEOWNERS` names a placeholder team. Whether `main` branch protection is on cannot be seen from the repository | H | Founder: confirm the audit job and its thresholds, the CODEOWNERS team and branch protection (open decisions in DECISION_LOG). Backend: pin Python dependencies |
 | T-8 | Tampering with the audit log | B3 | Rows are only ever added by application code | Any database credential can alter or delete rows. No separate store, no integrity check. AL-04 (append-only, restricted) is not met | M | Operations: restrict database roles at provisioning. Backend: consider export to a write-once store |
 | T-9 | Migration damages data | B5 | Migrations 0001 to 0003 are additive and tested up and down in CI on SQLite and PostgreSQL | The Docker image runs `alembic upgrade head` at every start, so a migration ships the moment an image starts. Every downgrade drops data | M | Operations: migrations as an explicit release step (DEPLOYMENT_PLAN section 6). G-08 for anything destructive |
 
@@ -121,7 +121,7 @@ assigned: Founder.
 | D-2 | Locking real users out through the shared web bucket | None | All web sign-ins reach the API from the web server's address, so they share one 10-per-minute bucket. One script hitting the login form can block every web user from signing in. Also a self-inflicted outage at modest traffic | H | Web and backend: decide how the client address is passed and trusted, or move the limit. Must be resolved before real traffic |
 | D-3 | Argon2 cost as an amplifier | Auth rate limit | Each login attempt costs memory and CPU by design. Bounded only by D-2's bucket | M | Covered by D-1 and D-2 |
 | D-4 | Alert evaluation load | Per-user throttle `ODDVEX_ALERT_EVAL_MIN_SECONDS` (`alerts/throttle.py`); caps on rules | Throttle is in memory and per process. Evaluation runs inside a read request | L | Backend: move to a worker when one exists |
-| D-5 | Large export | Built in memory in one response (`services/api/README.md`) | Bounded by per-user caps except bets, which are uncapped in count | L | Backend: stream or cap if accounts grow |
+| D-5 | Large export | Built in memory in one response (`services/api/README.md`) | Bounded by per-user caps on watchlist, alerts and notifications. No cap on the number of bets is documented | L | Backend: stream or cap if accounts grow |
 | D-6 | Memory growth in the limiter | Empty keys pruned past 10,000 entries (`ratelimit.py`) | Non-empty keys are never pruned beyond their window; a wide address spread grows memory until windows pass | L | Covered by a shared store |
 | D-7 | Database exhaustion | `pool_pre_ping` (`db/session.py`) | Default pool settings, untested against any real host or instance model | M | Operations: test in staging |
 | D-8 | Loss of the single database | None | No backups exist because nothing exists | H at launch | Operations: DEPLOYMENT_PLAN section 11; restore test before launch |
@@ -137,6 +137,23 @@ assigned: Founder.
 | E-5 | Container escape or root in container | Both images run as a non-root user (`services/api/Dockerfile`, `apps/web/Dockerfile`) | Base images are not pinned by digest and not scanned | M | Engineering: image scanning (DS-08) |
 | E-6 | Entitlement bypass | Not applicable: no plans enforced on `main` | Entitlements without billing are in progress. Checks must be server-side (AZ-07) | — | Backend: tests that a free account cannot reach a gated route |
 | E-7 | Assistant used to reach other users' data or run instructions | Keyword and template router with fixed tools; no language model (`assistant/`); the assistant route writes nothing to the database or logs | Not applicable until a model is connected (M4). Prompt injection must be modelled then | L today | Backend at M4 |
+
+### 3.7 In-progress work seen on the working branch (not merged, not in the README)
+
+Read from the working tree on 2026-11-16 while this document was being written. It is unfinished, may change, and
+none of it has been reviewed here in depth. It is listed so the next pass knows where to look. Do not treat any row
+as a control that exists.
+
+| Area | What appears to be changing | Effect on this model if it lands as seen | To check at review |
+|---|---|---|---|
+| Per-account login limit | Failed logins counted per email address across IPs, with a window and a maximum | Narrows S-1 and D-2 | An attacker who knows an address can lock its owner out of signing in for the window. Counters are still in process memory |
+| Email verification and password reset | Request and confirm routes; tokens table; emails written to an outbox table, nothing sent; a `resend` provider stub that refuses to start | Opens the path to closing S-4 and X-5; adds a recovery path that is itself an attack surface | Token entropy, hashing at rest, single use, expiry; uniform responses on the request routes (I-2); what the outbox stores (full message bodies and addresses are personal data); retention of outbox rows; behaviour on account deletion |
+| Development outbox route | A `/v1/dev/...` route returning the latest outbox email and its link for an address, answering 404 in production mode | **Any reachable environment not in production mode would hand out reset links to anyone.** | Enforce production mode on every reachable host (DEPLOYMENT_PLAN section 3). Consider removing the route from production builds entirely |
+| Admin user management | List users, suspend and unsuspend, set plan, set flags, read audit, read outbox; write actions carry a reason and write audit rows | Narrows R-1 for writes; raises the impact of S-3, S-4 and E-1 sharply, because an admin can now act on accounts and read email addresses and outbox content | MFA before use; audit of admin reads; least privilege; whether suspension revokes existing tokens |
+| Account status | A suspended account is refused at token check | New control | Tests for every route |
+| Feature flags | Database-backed switches with defaults in code: community (off), value screen, tracker analytics, email flows, premium gating (off) | Provides kill switches (ROLLBACK_PLAN section 7) | Who may flip a flag; audit; turning on `premium_gating` is G-07; turning on `community` needs G-10 |
+| Entitlements | Plan on the user; catalog gives both plans the same access; no purchase route | E-6 becomes live | Server-side enforcement tests; no client-only checks |
+| Value screen and tracker analytics | New read routes | Wording and claims risk, not a security one (G-14) | Copy review; see COUNSEL_REVIEW_PACKET section 5 |
 
 ## 4. Mobile-specific
 
@@ -165,7 +182,7 @@ Ordered by judgement, not by score.
 1. **D-2 / S-1**: web sign-ins share one rate-limit bucket; limits are per process and per IP only.
 2. **S-4 / E-2**: admin by allowlist without verified email, and no demotion path.
 3. **S-3**: no MFA for admins.
-4. **T-7**: no dependency audit in CI, no Python lockfile, placeholder CODEOWNERS, branch protection unconfirmed.
+4. **T-7**: no Python lockfile, placeholder CODEOWNERS, branch protection unconfirmed, dependency audit job not yet on `main`.
 5. **I-5**: IP and user id retained after deletion; no deletion ledger; backups will resurrect deleted accounts.
 6. **D-1**: no general rate limiting or edge protection.
 7. **S-2**: logout does not revoke the token; no refresh tokens.

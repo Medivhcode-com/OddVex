@@ -98,7 +98,7 @@ How boxes are ticked:
 | [ ] | Admin accounts use MFA; admin actions audit-logged [B] | No MFA exists. Admin reads and role changes are not audited (`THREAT_MODEL.md` S-3, R-1) | Engineering |
 | [ ] | Secrets in a managed store [B] | None | G-02, G-09 |
 | [x] | Secret scan runs in CI over full git history [B] | `secrets` job (gitleaks, `fetch-depth: 0`) in `.github/workflows/ci.yml`. Job result on GitHub not re-checked in this pass | — |
-| [ ] | Dependency, secret and static scans clean or exceptions risk-accepted [B] | Secret scan and lint run in CI. **No dependency vulnerability audit job.** Dependabot opens update PRs only | Founder decision (dependency-audit CI job) |
+| [ ] | Dependency, secret and static scans clean or exceptions risk-accepted [B] | Secret scan and lint run in CI. A dependency audit job (`audit` in `.github/workflows/ci.yml`: `pnpm audit` at high and above, `pip-audit`) was added on the working branch on 2026-11-16 (commit `0e5145e`), not yet on `main`. Its commit message reports four moderate and one low JavaScript advisory below the failing threshold. No static security analysis | Merge and confirm green; Founder to confirm thresholds and exceptions |
 | [ ] | Rate limiting and abuse controls load-tested [B] | Unit and API tests only (`test_platform.py`, `test_api_auth.py`). Not load-tested. Web sign-ins share one bucket (`THREAT_MODEL.md` D-2) | G-02 |
 | [ ] | Backups automated; restore test passed with recorded RTO/RPO [B] | None | G-02 |
 | [ ] | Independent penetration test completed; findings resolved or risk-accepted by Founder [F] | None | G-02 |

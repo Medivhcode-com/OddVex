@@ -86,9 +86,11 @@ Repo facts behind the diagram:
 
 Rules for all three:
 
-- `ODDVEX_ENV=production` for staging and production, so the production safety checks in
-  `services/api/src/oddvex_api/config.py` run in both (strong JWT secret, no `*` in CORS, no table auto-create, API
-  docs off). Preview may use `development`.
+- **Every environment reachable from the internet runs with `ODDVEX_ENV=production`**, previews included, so the
+  production safety checks in `services/api/src/oddvex_api/config.py` apply (strong JWT secret, no `*` in CORS, no
+  table auto-create, API docs off, demo auto-seed ignored). `development` mode is for a developer machine only. This
+  matters more once the in-progress email flows merge: they add a development-only route that returns the link from
+  the latest outbox email, which answers 404 only in production mode.
 - A different `ODDVEX_JWT_SECRET` per environment, so a token from one is rejected by the others.
 - No production data in preview or staging (SECURITY_BASELINE BK-09, BK-10).
 - While any environment is public and still on synthetic data, the "Synthetic data" label stays visible. The API
@@ -238,9 +240,18 @@ must not be exposed to the browser or to preview builds from forks.
 | `ODDVEX_MAX_BODY_BYTES` | No | Default 65536 |
 | `ODDVEX_LOG_LEVEL` | No | Default `INFO` |
 
-Not in the code yet: an email API key and sender address (email flows are in progress and write to an outbox table
-instead of sending), feature-flag settings, entitlement settings. Add their names here when
-`services/api/.env.example` gains them.
+In progress, not yet in `services/api/.env.example` or `services/api/README.md` (seen in `config.py` on the
+working branch on 2026-11-16; names may change before merge):
+
+| Variable | Secret | Notes |
+|---|---|---|
+| `ODDVEX_EMAIL_PROVIDER` | No | `outbox` writes emails to a table and sends nothing. The other value, `resend`, is a stub that refuses to start. Connecting a real sender is G-06 |
+| `ODDVEX_WEB_BASE_URL` | No | Base URL used in email links. Must be the public web origin |
+| `ODDVEX_EMAIL_VERIFICATION_TTL_HOURS`, `ODDVEX_PASSWORD_RESET_TTL_MINUTES` | No | Link lifetimes |
+| `ODDVEX_ACCOUNT_LIMIT_WINDOW_SECONDS`, `ODDVEX_LOGIN_MAX_FAILURES`, `ODDVEX_EMAIL_REQUESTS_PER_WINDOW` | No | Per-account limits, also in process memory |
+
+Not in the code at all: an email API key or sender address. Feature flags are stored in the database, with defaults
+in code, not in environment variables. Update this section from `.env.example` when the work merges.
 
 ### Web (`apps/web/.env.example`, `apps/web/src/lib/*.ts`)
 

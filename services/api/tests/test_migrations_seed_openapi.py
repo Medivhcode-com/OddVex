@@ -46,6 +46,9 @@ TABLES = {
     "notifications",
     "notification_preferences",
     "stake_reminders",
+    "feature_flags",
+    "email_tokens",
+    "email_outbox",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -363,6 +366,191 @@ def test_upgrade_from_0002_with_existing_data_then_downgrade(
         _reset_external_database(url)
 
 
+TABLES_0004 = {"feature_flags", "email_tokens", "email_outbox"}
+COLUMNS_0004 = {"plan", "status", "last_login_at", "email_verified_at"}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0003_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0004.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0003")
+    engine = make_engine(url)
+    assert not TABLES_0004 & set(inspect(engine).get_table_names())
+    assert not COLUMNS_0004 & {c["name"] for c in inspect(engine).get_columns("users")}
+
+    # Rows written by the 0003 release: a user with a bet, an alert rule and a notification.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+                "age_confirmed_at, created_at, token_version) VALUES (:id, :email, :hash, "
+                "'Old', 'user', :active, :at, :at, 0)"
+            ).bindparams(at),
+            {
+                "id": "u" * 32,
+                "email": "old@example.test",
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bets (id, user_id, bet_type, status, result, sport, sportsbook, "
+                "stake, odds_decimal, odds_source, payout, profit, placed_at, settled_at, "
+                "settled_by, source, created_at, updated_at) VALUES (:id, :user, 'straight', "
+                "'settled', 'won', 'nba', 'Northline', 40, 2.0, 'legs', 80, 40, :at, :at, "
+                "'user', 'manual', :at, :at)"
+            ).bindparams(at),
+            {"id": "b" * 32, "user": "u" * 32, "at": stamp},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bet_legs (id, bet_id, position, selection, market, odds_decimal) "
+                "VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', 2.0)"
+            ),
+            {"id": "B" * 32, "bet": "b" * 32},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO notifications (id, user_id, kind, title, body, data, dedupe_key, "
+                "created_at) VALUES (:id, :user, 'bet_settled', 'Bet settled', 'Won.', '{}', "
+                "'k1', :at)"
+            ).bindparams(at),
+            {"id": "n" * 32, "user": "u" * 32, "at": stamp},
+        )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) >= TABLES_0004
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Existing users get the safe defaults; nothing else is invented.
+        row = connection.execute(
+            text("SELECT plan, status, last_login_at, email_verified_at FROM users")
+        ).one()
+        assert tuple(row) == ("free", "active", None, None)
+        for table in sorted(TABLES_0004):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: the old login, then the new features.
+    app = make_app(
+        database_url=url,
+        env="production",
+        jwt_secret="k" * 48,
+        admin_emails="boss@example.test",
+    )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        user = login.json()["user"]
+        assert (user["plan"], user["email_verified"]) == ("free", False)
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        assert client.get("/v1/flags").json()["flags"]["community"] is False
+        entitlements = client.get("/v1/me/entitlements", headers=headers).json()
+        assert entitlements["plan"] == "free" and entitlements["preview"] is True
+        analytics = client.get("/v1/bets/analytics", headers=headers).json()
+        assert analytics["settled_count"] == 1 and analytics["sample_note"]
+        assert client.get("/v1/value").status_code == 200
+        requested = client.post("/v1/auth/verify-email/request", headers=headers)
+        assert requested.status_code == 202, requested.text
+        reset = client.post("/v1/auth/password-reset/request", json={"email": user["email"]})
+        assert reset.status_code == 202
+
+        admin = client.post(
+            "/v1/auth/register",
+            json={
+                "email": "boss@example.test",
+                "password": "correct-horse-battery",
+                "display_name": "Boss",
+                "age_confirmed": True,
+            },
+        ).json()
+        admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        listed = client.get("/v1/admin/users", headers=admin_headers).json()
+        assert listed["total"] == 2
+        old = next(u for u in listed["items"] if u["email"] == "old@example.test")
+        assert (old["bet_count"], old["status"], old["last_login_at"] is not None) == (
+            1,
+            "active",
+            True,
+        )
+        assert (
+            client.put(
+                "/v1/admin/flags/community", json={"enabled": True}, headers=admin_headers
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"/v1/admin/users/{old['id']}/plan", json={"plan": "premium"}, headers=admin_headers
+            ).json()["plan"]
+            == "premium"
+        )
+    app.state.engine.dispose()
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM feature_flags")).scalar() == 1
+        # Three emails queued (two for the old user, one for the new admin), none sent.
+        assert connection.execute(text("SELECT count(*) FROM email_outbox")).scalar() == 3
+        # Production: the outbox never holds a usable link.
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM email_outbox WHERE dev_link IS NOT NULL")
+            ).scalar()
+            == 0
+        )
+    engine.dispose()
+
+    # Downgrade removes only what 0004 added; the 0003 data is untouched.
+    command.downgrade(config, "0003")
+    engine = make_engine(url)
+    tables = set(inspect(engine).get_table_names())
+    assert not TABLES_0004 & tables and NEW_TABLES <= tables
+    assert not COLUMNS_0004 & {c["name"] for c in inspect(engine).get_columns("users")}
+    with engine.connect() as connection:
+        emails = connection.execute(text("SELECT email FROM users ORDER BY created_at")).scalars()
+        assert list(emails) == ["old@example.test", "boss@example.test"]
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 1
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 1
+        assert connection.execute(text("SELECT count(*) FROM notifications")).scalar() == 1
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003"
+        )
+    engine.dispose()
+
+    # Up again (defaults again, new tables empty), then all the way down.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        plans = connection.execute(text("SELECT DISTINCT plan, status FROM users")).all()
+        assert [tuple(r) for r in plans] == [("free", "active")]
+        for table in sorted(TABLES_0004):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
 def test_app_works_on_a_migrated_database_without_auto_create(
     tmp_path: Path, make_app: AppFactory
 ) -> None:
@@ -649,6 +837,23 @@ EXPECTED_OPERATIONS = {
     ("DELETE", "/v1/sync/connections/{connection_id}"): "delete_sync_connection",
     ("POST", "/v1/assistant/query"): "assistant_query",
     ("GET", "/v1/admin/overview"): "get_admin_overview",
+    ("GET", "/v1/flags"): "list_flags",
+    ("GET", "/v1/me/entitlements"): "get_entitlements",
+    ("GET", "/v1/value"): "list_value",
+    ("GET", "/v1/bets/analytics"): "get_bet_analytics",
+    ("GET", "/v1/admin/users"): "admin_list_users",
+    ("POST", "/v1/admin/users/{user_id}/suspend"): "admin_suspend_user",
+    ("POST", "/v1/admin/users/{user_id}/unsuspend"): "admin_unsuspend_user",
+    ("PUT", "/v1/admin/users/{user_id}/plan"): "admin_set_user_plan",
+    ("GET", "/v1/admin/flags"): "admin_list_flags",
+    ("PUT", "/v1/admin/flags/{key}"): "admin_set_flag",
+    ("GET", "/v1/admin/audit"): "admin_list_audit",
+    ("GET", "/v1/admin/email-outbox"): "admin_list_email_outbox",
+    ("POST", "/v1/auth/verify-email/request"): "request_email_verification",
+    ("POST", "/v1/auth/verify-email/confirm"): "confirm_email_verification",
+    ("POST", "/v1/auth/password-reset/request"): "request_password_reset",
+    ("POST", "/v1/auth/password-reset/confirm"): "confirm_password_reset",
+    ("GET", "/v1/dev/email-outbox/latest"): "dev_latest_email",
 }
 
 
