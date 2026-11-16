@@ -5,7 +5,7 @@ import { api, ApiError, ApiUnavailableError } from "@/lib/api";
 import { clearSession, safeNext, setSession } from "@/lib/session";
 import type { AuthResponse } from "@/lib/types";
 
-export type AuthState = { error?: string; fields?: Record<string, string>; values?: Record<string, string> };
+export type AuthState = { error?: string; fields?: Record<string, string>; values?: Record<string, string>; suspended?: boolean };
 
 function describe(error: unknown, fallback: string): string {
   if (error instanceof ApiUnavailableError) return "OddVex can't reach its data service right now. Try again in a moment.";
@@ -25,6 +25,8 @@ export async function loginAction(_: AuthState, form: FormData): Promise<AuthSta
   try {
     auth = await api<AuthResponse>("/v1/auth/login", { method: "POST", body: { email, password } });
   } catch (error) {
+    // The API answers this only after the correct password, so it reveals nothing to a guesser.
+    if (error instanceof ApiError && error.code === "account_suspended") return { suspended: true, values };
     return { error: describe(error, "That email and password don't match an account."), values };
   }
   await setSession(auth.access_token, auth.expires_in);
@@ -100,14 +102,31 @@ export async function resetPasswordAction(_: AuthState & { expired?: boolean }, 
   redirect("/login?reset=done");
 }
 
-export async function confirmEmailAction(_: AuthState & { done?: boolean }, form: FormData): Promise<AuthState & { done?: boolean }> {
+export type ConfirmEmailState = AuthState & { done?: boolean; expired?: boolean };
+
+export async function confirmEmailAction(_: ConfirmEmailState, form: FormData): Promise<ConfirmEmailState> {
   const token = String(form.get("token") ?? "");
   try {
     await api("/v1/auth/verify-email/confirm", { method: "POST", body: { token } });
   } catch (error) {
-    if (error instanceof ApiError && (error.status === 400 || error.status === 422)) return { error: LINK_EXPIRED };
+    if (error instanceof ApiError && (error.status === 400 || error.status === 422)) return { error: LINK_EXPIRED, expired: true };
     if (error instanceof ApiError && error.status === 404) return { error: "Email confirmation is switched off right now." };
     return { error: describe(error, "The address could not be confirmed. Try again.") };
+  }
+  return { done: true };
+}
+
+export type VerificationRequestState = { error?: string; done?: boolean };
+
+/** Queues a new confirmation link for the signed-in account. In this preview nothing is emailed. */
+export async function requestEmailVerificationAction(): Promise<VerificationRequestState> {
+  try {
+    await api("/v1/auth/verify-email/request", { method: "POST", auth: true });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return { error: "Log in again to request a new link." };
+    if (error instanceof ApiError && error.status === 404) return { error: "Email confirmation is switched off right now." };
+    if (error instanceof ApiError && error.status === 429) return { error: "You have asked for several links in a short time. Wait a few minutes, then try again." };
+    return { error: describe(error, "The request could not be sent. Try again.") };
   }
   return { done: true };
 }

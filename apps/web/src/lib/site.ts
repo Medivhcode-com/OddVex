@@ -16,14 +16,24 @@ export const MARKETING_NAV = [
   { href: "/pricing", label: "Pricing" },
 ] as const;
 
-export const APP_NAV = [
+/** `flag` names a feature flag (`GET /v1/flags`); the entry is hidden while that flag is off. */
+export type AppNavItem = { href: string; label: string; icon: string; flag?: string };
+
+export const APP_NAV: readonly AppNavItem[] = [
   { href: "/app", label: "Home", icon: "home" },
   { href: "/app/games", label: "Games", icon: "games" },
   { href: "/app/odds", label: "Odds", icon: "odds" },
+  { href: "/app/value", label: "Value", icon: "value", flag: "value_screen" },
   { href: "/app/props", label: "Props", icon: "props" },
   { href: "/app/tracker", label: "Tracker", icon: "tracker" },
   { href: "/app/alerts", label: "Alerts", icon: "alerts" },
   { href: "/app/tools", label: "Calculators", icon: "tools" },
   { href: "/app/parlay", label: "Parlay", icon: "parlay" },
   { href: "/app/assistant", label: "OddVex AI", icon: "ai" },
-] as const;
+];
+
+/** App pages that exist only while a feature flag is on. The proxy and the pages both check. */
+export const FLAGGED_PATHS: readonly { path: string; flag: string }[] = [
+  { path: "/app/value", flag: "value_screen" },
+  { path: "/app/tracker/analytics", flag: "tracker_analytics" },
+];

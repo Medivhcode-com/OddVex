@@ -125,6 +125,80 @@ describe('SessionProvider', () => {
     expect(router.push).toHaveBeenCalledWith('/login');
   });
 
+  it('signs out locally and flags the account when an authed call gets 401 account_suspended', async () => {
+    const { fetchMock } = installFetch();
+    fetchMock.mockResolvedValueOnce(jsonResponse(auth));
+    await mount();
+    await waitFor(() => expect(screen.getByText('signedOut')).toBeOnTheScreen());
+    await act(() => session.logIn('sam@example.test', 'correct horse battery'));
+    expect(session.suspended).toBe(false);
+    expect((await stored())?.token).toBe('token-1');
+
+    fetchMock.mockResolvedValueOnce(errorResponse(401, 'account_suspended', 'This account is suspended'));
+    await act(async () => {
+      await getBets().catch(() => {});
+    });
+
+    await waitFor(() => expect(screen.getByText('signedOut')).toBeOnTheScreen());
+    await waitFor(() => expect(session.suspended).toBe(true));
+    expect(getAuthToken()).toBeNull();
+    await waitFor(async () => expect(await stored()).toBeNull());
+    expect(router.push).toHaveBeenCalledWith('/login');
+
+    // A later successful log in clears the flag.
+    fetchMock.mockResolvedValueOnce(jsonResponse(auth));
+    await act(() => session.logIn('sam@example.test', 'correct horse battery'));
+    expect(session.suspended).toBe(false);
+  });
+
+  it('clears a saved session when log in answers 403 account_suspended', async () => {
+    await saveSession(auth);
+    const { fetchMock } = installFetch();
+    fetchMock.mockResolvedValueOnce(jsonResponse(user));
+    await mount();
+    await waitFor(() => expect(screen.getByText('in:Sam')).toBeOnTheScreen());
+
+    fetchMock.mockResolvedValueOnce(errorResponse(403, 'account_suspended', "This account can't be used right now. Contact support."));
+    let failure: unknown;
+    await act(async () => {
+      failure = await session.logIn('sam@example.test', 'correct horse battery').catch((caught: unknown) => caught);
+    });
+
+    expect(failure).toMatchObject({ status: 403, code: 'account_suspended' });
+    expect(screen.getByText('signedOut')).toBeOnTheScreen();
+    expect(session.suspended).toBe(true);
+    expect(getAuthToken()).toBeNull();
+    expect(await stored()).toBeNull();
+  });
+
+  it('does not flag the account for an ordinary 401', async () => {
+    const { fetchMock } = installFetch();
+    fetchMock.mockResolvedValueOnce(jsonResponse(auth));
+    await mount();
+    await waitFor(() => expect(screen.getByText('signedOut')).toBeOnTheScreen());
+    await act(() => session.logIn('sam@example.test', 'correct horse battery'));
+
+    fetchMock.mockResolvedValueOnce(errorResponse(401, 'invalid_token', 'The access token is invalid or has expired'));
+    await act(async () => {
+      await getBets().catch(() => {});
+    });
+    await waitFor(() => expect(screen.getByText('signedOut')).toBeOnTheScreen());
+    expect(session.suspended).toBe(false);
+  });
+
+  it('reads the user again on request', async () => {
+    const { fetchMock } = installFetch();
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ...auth, user: { ...user, email_verified: false } }));
+    await mount();
+    await waitFor(() => expect(screen.getByText('signedOut')).toBeOnTheScreen());
+    await act(() => session.logIn('sam@example.test', 'correct horse battery'));
+    expect(session.user?.email_verified).toBe(false);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(user));
+    await act(() => session.refreshUser());
+    expect(session.user?.email_verified).toBe(true);
+  });
+
   it('stores the new token the API returns after a password change', async () => {
     const { fetchMock, sent } = installFetch();
     fetchMock.mockResolvedValueOnce(jsonResponse(auth));

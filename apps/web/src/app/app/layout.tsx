@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
 import { BottomNav, SideNav } from "@/components/app/nav";
 import { OddsFormatProvider, OddsFormatToggle } from "@/components/app/odds-format";
 import { Logo, LogoMark } from "@/components/ui/logo";
@@ -7,6 +8,7 @@ import { Badge, Button, ButtonLink } from "@/components/ui/primitives";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { api } from "@/lib/api";
 import { logoutAction } from "@/lib/auth-actions";
+import { getFlags } from "@/lib/flags";
 import { currentUser, oddsFormat } from "@/lib/session";
 import type { Meta } from "@/lib/types";
 
@@ -15,10 +17,15 @@ export const metadata: Metadata = { robots: { index: false } };
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   // Chrome must render even when the API is down, so the error boundary has somewhere to live.
-  const [user, format, meta] = await Promise.all([
-    currentUser().catch(() => null),
+  // Feature flags that can't be read count as off, so a flagged entry point never shows by accident.
+  const [user, format, meta, flags] = await Promise.all([
+    currentUser().catch((error) => {
+      unstable_rethrow(error); // a suspended account is redirected to be signed out
+      return null;
+    }),
     oddsFormat(),
     api<Meta>("/v1/meta").catch(() => null),
+    getFlags(),
   ]);
   const unread = user
     ? await api<{ unread_count: number }>("/v1/notifications/unread-count", { auth: true })
@@ -33,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/app" aria-label="OddVex home" className="mb-6 px-3">
             <Logo />
           </Link>
-          <SideNav admin={user?.role === "admin"} />
+          <SideNav admin={user?.role === "admin"} flags={flags} />
           <p className="mt-auto px-3 text-xs leading-relaxed text-muted">
             Information only. OddVex never takes wagers. 21+. Call or text 1-800-GAMBLER for help.
           </p>
@@ -97,7 +104,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </main>
         </div>
       </div>
-      <BottomNav />
+      <BottomNav admin={user?.role === "admin"} flags={flags} />
     </OddsFormatProvider>
   );
 }

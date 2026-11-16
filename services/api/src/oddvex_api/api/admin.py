@@ -2,7 +2,9 @@
 
 Every route here depends on :data:`AdminDep`, so anyone else gets 401 or 403. Every
 change is written to the audit log with the acting administrator, the target and the
-values before and after. Responses never carry password hashes, tokens or email bodies.
+values before and after. Reading the overview, the user list or the email outbox is
+audited too, coarsely: one ``admin.read`` row per request naming what was read, with no
+payload. Responses never carry password hashes, tokens or email bodies.
 """
 
 from __future__ import annotations
@@ -12,10 +14,11 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from .. import __version__
+from ..config import Settings
 from ..db import AuditLog, Bet, EmailOutbox, FeatureFlag, SyncConnection, User
 from ..deps import AdminDep, DbDep, ProviderDep, SettingsDep, write_audit
 from ..errors import (
@@ -27,6 +30,7 @@ from ..errors import (
 )
 from ..flags import service as flags
 from ..flags.catalog import KNOWN_FLAGS
+from ..textnorm import fold
 
 _ADMIN_RESPONSES: dict[int | str, dict[str, Any]] = {
     **AUTH_ERROR_RESPONSES,
@@ -34,6 +38,14 @@ _ADMIN_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def audit_admin_read(db: Session, request: Request, admin_id: str, resource: str) -> None:
+    """One coarse ``admin.read`` row per request: who read which admin resource. The
+    filters and the rows returned are deliberately not recorded. Commits."""
+    write_audit(db, request, "admin.read", user_id=admin_id, entity_type=resource)
+    db.commit()
+
 
 Plan = Literal["free", "premium"]
 UserStatus = Literal["active", "suspended"]
@@ -79,12 +91,16 @@ class AdminOverviewOut(BaseModel):
     },
 )
 def get_admin_overview(
-    admin: AdminDep, db: DbDep, provider: ProviderDep, settings: SettingsDep
+    admin: AdminDep, db: DbDep, provider: ProviderDep, settings: SettingsDep, request: Request
 ) -> AdminOverviewOut:
     def count(model: type) -> int:
         return int(db.scalar(select(func.count()).select_from(model)) or 0)
 
-    audit = db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc(), AuditLog.id).limit(25))
+    audit = list(
+        db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc(), AuditLog.id).limit(25))
+    )
+    # Written after the rows above were read, so this request is not in its own answer.
+    audit_admin_read(db, request, admin.id, "admin_overview")
     return AdminOverviewOut(
         version=__version__,
         environment=settings.env,
@@ -187,29 +203,28 @@ def _like(term: str) -> str:
     operation_id="admin_list_users",
     summary="Users, newest first",
     description=(
-        "`q` matches part of the email or display name, case-insensitively. Never returns "
-        "password hashes or tokens."
+        "`q` matches part of the email or display name, case-insensitively for any "
+        "script, not only ASCII. Never returns password hashes or tokens. Each call is "
+        "recorded in the audit log as `admin.read`."
     ),
     responses=_ADMIN_RESPONSES,
 )
 def admin_list_users(
     admin: AdminDep,
     db: DbDep,
+    request: Request,
     q: Annotated[str | None, Query(max_length=120)] = None,
     status: Annotated[UserStatus | None, Query()] = None,
     plan: Annotated[Plan | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AdminUserListOut:
-    filters = []
-    if q and q.strip():
-        pattern = _like(q.strip().lower())
-        filters.append(
-            or_(
-                func.lower(User.email).like(pattern, escape="\\"),
-                func.lower(User.display_name).like(pattern, escape="\\"),
-            )
-        )
+    filters: list[ColumnElement[bool]] = []
+    if q and fold(q):
+        # ``search_key`` is folded in Python (``textnorm``), so matching does not depend on
+        # what the database's ``lower()`` can do. ``fold`` leaves no line break in the
+        # term, so it cannot match across the email and the display name.
+        filters.append(User.search_key.like(_like(fold(q)), escape="\\"))
     if status is not None:
         filters.append(User.status == status)
     if plan is not None:
@@ -226,12 +241,47 @@ def admin_list_users(
         .limit(limit)
         .offset(offset)
     )
-    return AdminUserListOut(
-        items=[_user_out(user, int(count)) for user, count in rows],
-        total=total,
-        limit=limit,
-        offset=offset,
+    items = [_user_out(user, int(count)) for user, count in rows]
+    audit_admin_read(db, request, admin.id, "admin_users")
+    return AdminUserListOut(items=items, total=total, limit=limit, offset=offset)
+
+
+def suspend_user(
+    db: Session,
+    request: Request,
+    admin: User,
+    user: User,
+    reason: str,
+    extra_details: dict[str, Any] | None = None,
+) -> bool:
+    """Suspend ``user`` and audit it. Returns False when they already were suspended.
+
+    The one place an account is suspended: the admin route above and community
+    moderation (``suspend_author``) both go through here. Not committed.
+    """
+    if user.id == admin.id:
+        raise ApiError(409, "cannot_suspend_self", "You cannot suspend your own account")
+    if user.role == "admin":
+        raise ApiError(409, "cannot_suspend_admin", "An administrator cannot be suspended")
+    if user.status == "suspended":
+        return False
+    before = user.status
+    user.status = "suspended"
+    write_audit(
+        db,
+        request,
+        "admin.user_suspended",
+        user_id=admin.id,
+        entity_type="user",
+        entity_id=user.id,
+        details={
+            "before": {"status": before},
+            "after": {"status": user.status},
+            "reason": reason,
+            **(extra_details or {}),
+        },
     )
+    return True
 
 
 _SUSPEND_CONFLICT: dict[int | str, dict[str, Any]] = {
@@ -256,26 +306,7 @@ def admin_suspend_user(
     user_id: str, body: SuspendUserRequest, admin: AdminDep, db: DbDep, request: Request
 ) -> AdminUserOut:
     user = _user_or_404(db, user_id)
-    if user.id == admin.id:
-        raise ApiError(409, "cannot_suspend_self", "You cannot suspend your own account")
-    if user.role == "admin":
-        raise ApiError(409, "cannot_suspend_admin", "An administrator cannot be suspended")
-    if user.status != "suspended":
-        before = user.status
-        user.status = "suspended"
-        write_audit(
-            db,
-            request,
-            "admin.user_suspended",
-            user_id=admin.id,
-            entity_type="user",
-            entity_id=user.id,
-            details={
-                "before": {"status": before},
-                "after": {"status": user.status},
-                "reason": body.reason,
-            },
-        )
+    if suspend_user(db, request, admin, user, body.reason):
         db.commit()
     return _user_out(user, _bet_count(db, user.id))
 
@@ -344,7 +375,12 @@ class AdminFlagOut(BaseModel):
     key: str
     description: str
     enabled: bool
-    default: bool = Field(description="The in-code default, used while there is no override.")
+    default: bool = Field(
+        description=(
+            "The in-code default for this environment, used while there is no override. "
+            "`email_flows` defaults to off in production and on elsewhere."
+        )
+    )
     overridden: bool = Field(description="True when a stored value replaces the default.")
     updated_at: datetime | None = Field(
         default=None, description="When the stored value last changed. Null without one."
@@ -359,13 +395,14 @@ class SetFlagRequest(BaseModel):
     enabled: bool
 
 
-def _flag_out(key: str, row: FeatureFlag | None) -> AdminFlagOut:
+def _flag_out(key: str, row: FeatureFlag | None, settings: Settings) -> AdminFlagOut:
     spec = KNOWN_FLAGS[key]
+    default = flags.default_of(key, settings)
     return AdminFlagOut(
         key=key,
         description=spec.description,
-        enabled=spec.default if row is None else row.enabled,
-        default=spec.default,
+        enabled=default if row is None else row.enabled,
+        default=default,
         overridden=row is not None,
         updated_at=row.updated_at if row is not None else None,
     )
@@ -378,9 +415,11 @@ def _flag_out(key: str, row: FeatureFlag | None) -> AdminFlagOut:
     summary="Feature flags with their descriptions and defaults",
     responses=_ADMIN_RESPONSES,
 )
-def admin_list_flags(admin: AdminDep, db: DbDep) -> AdminFlagListOut:
+def admin_list_flags(admin: AdminDep, db: DbDep, settings: SettingsDep) -> AdminFlagListOut:
     stored = {row.key: row for row in db.scalars(select(FeatureFlag))}
-    return AdminFlagListOut(items=[_flag_out(key, stored.get(key)) for key in KNOWN_FLAGS])
+    return AdminFlagListOut(
+        items=[_flag_out(key, stored.get(key), settings) for key in KNOWN_FLAGS]
+    )
 
 
 @router.put(
@@ -391,16 +430,23 @@ def admin_list_flags(admin: AdminDep, db: DbDep) -> AdminFlagListOut:
     description=(
         "Stores an override of the in-code default; it applies to everyone at once. Only "
         "known keys exist (`404` otherwise). Turning `premium_gating` on is a pricing "
-        "decision and needs Founder approval first."
+        "decision and needs Founder approval first. `community` and "
+        "`community_leaderboard` are off by default: turning them on needs the content "
+        "and responsible-gambling reviews described in the README."
     ),
     responses={**_ADMIN_RESPONSES, **NOT_FOUND_RESPONSE},
 )
 def admin_set_flag(
-    key: str, body: SetFlagRequest, admin: AdminDep, db: DbDep, request: Request
+    key: str,
+    body: SetFlagRequest,
+    admin: AdminDep,
+    db: DbDep,
+    request: Request,
+    settings: SettingsDep,
 ) -> AdminFlagOut:
     if key not in KNOWN_FLAGS:
         raise not_found("Feature flag", key)
-    before, row = flags.set_flag(db, key, body.enabled)
+    before, row = flags.set_flag(db, key, body.enabled, settings)
     write_audit(
         db,
         request,
@@ -411,7 +457,7 @@ def admin_set_flag(
         details={"before": {"enabled": before}, "after": {"enabled": body.enabled}},
     )
     db.commit()
-    return _flag_out(key, row)
+    return _flag_out(key, row, settings)
 
 
 # ---------------------------------------------------------------------- audit
@@ -519,9 +565,12 @@ def admin_list_email_outbox(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> AdminOutboxListOut:
-    rows = db.scalars(
-        select(EmailOutbox).order_by(EmailOutbox.created_at.desc(), EmailOutbox.id).limit(limit)
+    rows = list(
+        db.scalars(
+            select(EmailOutbox).order_by(EmailOutbox.created_at.desc(), EmailOutbox.id).limit(limit)
+        )
     )
+    audit_admin_read(db, request, admin.id, "admin_email_outbox")
     return AdminOutboxListOut(
         items=[
             AdminOutboxEmailOut(

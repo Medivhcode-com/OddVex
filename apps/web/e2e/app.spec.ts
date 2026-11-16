@@ -1,20 +1,7 @@
-import { expect, test, type Page } from "./fixtures";
+import { expect, test } from "./fixtures";
+import { adminSignIn, signUp } from "./helpers";
 
 const API = "http://localhost:8210";
-
-async function signUp(page: Page, tag: string) {
-  const email = `e2e-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@oddvex.test`;
-  await page.goto("/signup?next=/app/tracker");
-  await page.getByLabel("Name").fill("Casey Tester");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("correct-horse-battery");
-  await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Create account" }).click();
-  // The signup URL also ends in /app/tracker (its ?next= value), so wait for a signed-in signal too.
-  await expect(page).toHaveURL(/^[^?]*\/app\/tracker$/);
-  await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
-  return email;
-}
 
 test.describe("research screens (signed out)", () => {
   test("dashboard labels synthetic data and lists games", async ({ page }) => {
@@ -483,7 +470,7 @@ test.describe("layout", () => {
     await signUp(page, "layout");
     const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
     const props = await (await request.get(`${API}/v1/props`)).json();
-    for (const path of ["/app", "/app/games", `/app/games/${events[0].id}`, "/app/odds", "/app/props", `/app/props/${props[0].player.id}`, "/app/tracker", "/app/alerts", "/app/tools", "/app/parlay", "/app/assistant", "/app/settings"]) {
+    for (const path of ["/app", "/app/games", `/app/games/${events[0].id}`, "/app/odds", "/app/props", `/app/props/${props[0].player.id}`, "/app/tracker", "/app/tracker/analytics", "/app/value", "/app/alerts", "/app/tools", "/app/parlay", "/app/assistant", "/app/settings"]) {
       await page.goto(path);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, path).toBeLessThanOrEqual(1);
@@ -633,20 +620,7 @@ test.describe("admin", () => {
   });
 
   test("an admin account sees the service overview and audit log", async ({ page }) => {
-    // The API grants the admin role to this address through configuration, never through the client.
-    await page.goto("/signup?next=/app/admin");
-    await page.getByLabel("Name").fill("Ops Admin");
-    await page.getByLabel("Email").fill("e2e-admin@oddvex.test");
-    await page.getByLabel("Password").fill("correct-horse-battery");
-    await page.getByRole("checkbox").check();
-    await page.getByRole("button", { name: "Create account" }).click();
-    if (await page.getByRole("alert").isVisible().catch(() => false)) {
-      // The account already exists from the other viewport's run: log in instead.
-      await page.goto("/login?next=/app/admin");
-      await page.getByLabel("Email").fill("e2e-admin@oddvex.test");
-      await page.getByLabel("Password").fill("correct-horse-battery");
-      await page.getByRole("button", { name: "Log in" }).click();
-    }
+    await adminSignIn(page);
     await expect(page.getByRole("heading", { level: 1, name: "Admin" })).toBeVisible();
     expect((await page.goto("/app/admin"))?.status()).toBe(200);
     await expect(page.getByRole("region", { name: "Service" }).getByText("Accounts")).toBeVisible();

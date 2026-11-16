@@ -74,7 +74,7 @@ test.describe("security headers", () => {
     const props = await (await request.get(`${API}/v1/props`)).json();
     const paths = [
       "/", "/help", "/blog/removing-the-vig", "/design", "/no-such-page", "/app/no-such-page", "/login", "/signup", "/forgot-password",
-      "/app", `/app/games/${events[0].id}`, `/app/props/${props[0].player.id}`, "/app/tools", "/app/tracker",
+      "/app", `/app/games/${events[0].id}`, `/app/props/${props[0].player.id}`, "/app/tools", "/app/tracker", "/app/value", "/app/tracker/analytics",
     ];
     for (const path of paths) {
       await page.goto(path);

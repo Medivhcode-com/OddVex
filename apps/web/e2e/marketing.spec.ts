@@ -28,6 +28,21 @@ test.describe("marketing site", () => {
     await expect(page.getByText("OddVex never takes a wager", { exact: false })).toBeVisible();
   });
 
+  test("features and methodology describe the value screen and tracker analytics without overclaiming", async ({ page }) => {
+    await page.goto("/features");
+    for (const name of ["Value screen", "Tracker analytics"]) {
+      const item = page.getByRole("listitem").filter({ has: page.getByRole("heading", { name, exact: true }) });
+      await expect(item.getByText("In the preview")).toBeVisible();
+    }
+    await page.goto("/methodology");
+    await expect(page.getByRole("heading", { name: "Edge vs consensus" })).toBeVisible();
+    const text = (await page.locator("main").innerText()).toLowerCase();
+    expect(text).toContain("edge       = consensus × decimal_best − 1");
+    expect(text).toContain("not proof of an edge");
+    expect(text).toContain("can be wrong");
+    for (const banned of ["risk-free", "guaranteed", "free money", "sure thing", "best bet"]) expect(text).not.toContain(banned);
+  });
+
   test("sample board marks the best price and switches odds format", async ({ page }) => {
     await page.goto("/");
     const board = page.getByRole("table", { name: /sample moneyline/i });

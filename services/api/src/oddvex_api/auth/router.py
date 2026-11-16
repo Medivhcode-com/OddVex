@@ -6,7 +6,14 @@ from sqlalchemy.exc import IntegrityError
 
 from ..config import Settings
 from ..db import AuditLog, User, utcnow
-from ..deps import CurrentUserDep, DbDep, SettingsDep, write_audit
+from ..deps import (
+    CurrentUserDep,
+    DataRightsUserDep,
+    DbDep,
+    SettingsDep,
+    sync_admin_role,
+    write_audit,
+)
 from ..errors import (
     AUTH_ERROR_RESPONSES,
     ERROR_RESPONSES,
@@ -86,7 +93,7 @@ def register(
         email=body.email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
-        role="admin" if body.email in settings.admin_email_set else "user",
+        role="user",
         age_confirmed_at=utcnow(),
         last_login_at=utcnow(),
     )
@@ -99,7 +106,10 @@ def register(
     write_audit(
         db, request, "auth.register", user_id=user.id, entity_type="user", entity_id=user.id
     )
-    if flags.is_enabled(db, "email_flows"):
+    # With ``email_flows`` on, a listed address only becomes an administrator once it is
+    # confirmed, so nothing is granted here; with it off, it is granted at once.
+    sync_admin_role(db, request, user, settings)
+    if flags.is_enabled(db, "email_flows", settings):
         mailer.queue_verification_email(db, request.app.state.email_sender, settings, user)
     db.commit()
     return _token_response(user, settings)
@@ -147,11 +157,31 @@ def login(body: LoginRequest, request: Request, db: DbDep, settings: SettingsDep
         )
     clear_login_failures(request, body.email)
     user.last_login_at = utcnow()
-    if user.role != "admin" and user.email in settings.admin_email_set:
-        user.role = "admin"
+    sync_admin_role(db, request, user, settings)
     write_audit(db, request, "auth.login", user_id=user.id, entity_type="user", entity_id=user.id)
     db.commit()
     return _token_response(user, settings)
+
+
+@router.post(
+    "/auth/logout",
+    status_code=204,
+    operation_id="logout",
+    summary="Log out everywhere",
+    description=(
+        "Revokes every access token of the account, not only the one that made this "
+        "request: the account's token version is bumped, so each token issued before it "
+        "is rejected with `401 invalid_token` from then on, on every device. There are "
+        "no per-session tokens in this build. Sign in again to get a new token. The "
+        "logout is recorded in the audit log."
+    ),
+    responses=AUTH_ERROR_RESPONSES,
+)
+def logout(user: CurrentUserDep, request: Request, db: DbDep) -> Response:
+    user.token_version += 1
+    write_audit(db, request, "auth.logout", user_id=user.id, entity_type="user", entity_id=user.id)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get(
@@ -173,16 +203,26 @@ def me(user: CurrentUserDep) -> UserOut:
     description=(
         "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, "
         "notifications, notification preferences, staking reminder, sync connections, "
-        "import runs, email tokens and outbox emails. "
-        "An audit entry containing only the opaque user id is retained."
+        "import runs, email tokens and outbox emails, and everything in the community: "
+        "the profile, follows in both directions, likes, blocks, reports made, comments "
+        "and every pick, graded ones included, so no public record is left without an "
+        "account. An audit entry containing only the opaque user id is retained. A "
+        "suspended account can still call this route."
     ),
     responses=AUTH_ERROR_RESPONSES,
 )
-def delete_me(user: CurrentUserDep, request: Request, db: DbDep) -> Response:
+def delete_me(user: DataRightsUserDep, request: Request, db: DbDep) -> Response:
     user_id = user.id
+    suspended = user.status == "suspended"
     db.delete(user)
     write_audit(
-        db, request, "account.deleted", user_id=user_id, entity_type="user", entity_id=user_id
+        db,
+        request,
+        "account.deleted",
+        user_id=user_id,
+        entity_type="user",
+        entity_id=user_id,
+        details={"account_status": "suspended"} if suspended else None,
     )
     db.commit()
     return Response(status_code=204)
@@ -287,6 +327,8 @@ def confirm_email_verification(
     user = mailer.consume_token(db, body.token, mailer.VERIFY_EMAIL)
     if user.email_verified_at is None:
         user.email_verified_at = utcnow()
+    # A listed address becomes an administrator once it is confirmed.
+    sync_admin_role(db, request, user, request.app.state.settings)
     write_audit(
         db, request, "auth.email_verified", user_id=user.id, entity_type="user", entity_id=user.id
     )

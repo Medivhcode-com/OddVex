@@ -1,9 +1,11 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 
 import { setAuthToken } from '@/api/client';
 import { SettingsScreen } from '@/screens/settings';
-import { installFetch, serveRoutes } from '@/test/api';
-import { reminderExceeded } from '@/test/fixtures';
+import { errorResponse, installFetch, jsonResponse, serveRoutes } from '@/test/api';
+import { PREVIEW_EMAIL_NOTE } from '@/components/account-forms';
+import { flagsAllOn, reminderExceeded, unverifiedUser, user } from '@/test/fixtures';
+import { WithFlags } from '@/test/flags';
 import { fakeSession, WithSession } from '@/test/session';
 
 const preferences = {
@@ -45,5 +47,96 @@ describe('SettingsScreen notifications', () => {
     expect(screen.queryByText('Weekly staking reminder')).toBeNull();
     expect(screen.queryByRole('switch')).toBeNull();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/v1/me/'))).toHaveLength(0);
+  });
+});
+
+describe('SettingsScreen account', () => {
+  const base = { 'GET /v1/me/notification-preferences': preferences, 'GET /v1/me/stake-reminder': reminderExceeded };
+  const entitlements = (preview: boolean) => ({
+    plan: 'free',
+    preview,
+    features: { value_screen: { enabled: true, limit: null }, 'alerts.max_active': { enabled: true, limit: 100 } },
+  });
+
+  async function mount(session = fakeSession(), flags = flagsAllOn) {
+    await render(
+      <WithFlags flags={flags}>
+        <WithSession value={session}>
+          <SettingsScreen />
+        </WithSession>
+      </WithFlags>,
+    );
+  }
+
+  it('shows the plan, a verified email and the preview line', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    serveRoutes(fetchMock, { ...base, 'GET /v1/me/entitlements': entitlements(true) });
+    await mount();
+
+    expect(screen.getByLabelText('Plan: Free')).toBeOnTheScreen();
+    expect(screen.getByText('Email verified')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Send verification email' })).toBeNull();
+    expect(await screen.findByText('Preview: every feature is included')).toBeOnTheScreen();
+    expect(screen.queryByText(/upgrade|subscribe|buy|purchase|\$\d+ a month/i)).toBeNull();
+  });
+
+  it('leaves out the plan when the API sends none and the preview line when plans are enforced', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    serveRoutes(fetchMock, { ...base, 'GET /v1/me/entitlements': entitlements(false) });
+    await mount(fakeSession({ user: { ...user, plan: null } }));
+
+    expect(await screen.findByRole('switch', { name: 'Price alerts' })).toBeOnTheScreen();
+    expect(screen.queryByLabelText(/^Plan:/)).toBeNull();
+    expect(screen.queryByText('Preview: every feature is included')).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/v1/me/entitlements'))).toBe(true);
+  });
+
+  it('requests a verification email, shows the confirmation and says no email is actually sent', async () => {
+    setAuthToken('token-1');
+    const { fetchMock, sent } = installFetch();
+    serveRoutes(fetchMock, {
+      ...base,
+      'GET /v1/me/entitlements': entitlements(true),
+      'POST /v1/auth/verify-email/request': () => jsonResponse({ message: 'A confirmation email has been queued for your address.' }, 202),
+    });
+    const session = fakeSession({ user: unverifiedUser });
+    await mount(session);
+
+    expect(screen.getByText('Email not verified')).toBeOnTheScreen();
+    expect(screen.getByText(PREVIEW_EMAIL_NOTE)).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: 'Send verification email' }));
+
+    expect(await screen.findByText('A confirmation email has been queued for your address.')).toBeOnTheScreen();
+    expect(screen.getByText(PREVIEW_EMAIL_NOTE)).toBeOnTheScreen();
+    const request = sent().find((item) => item.path === '/v1/auth/verify-email/request');
+    expect(request).toMatchObject({ method: 'POST' });
+    expect(request?.headers.authorization).toBe('Bearer token-1');
+    expect(session.refreshUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the "Too many attempts" copy when the request is rate limited', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    serveRoutes(fetchMock, {
+      ...base,
+      'POST /v1/auth/verify-email/request': () => errorResponse(429, 'rate_limited', 'Rate limit exceeded'),
+    });
+    await mount(fakeSession({ user: unverifiedUser }));
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Send verification email' }));
+    expect(await screen.findByText('Too many attempts. Wait a minute, then try again.')).toBeOnTheScreen();
+  });
+
+  it('shows "not verified" without the action while email flows are off', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    serveRoutes(fetchMock, base);
+    await mount(fakeSession({ user: unverifiedUser }), { ...flagsAllOn, email_flows: false });
+
+    expect(screen.getByText('Email not verified')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Send verification email' })).toBeNull();
+    expect(screen.queryByText(PREVIEW_EMAIL_NOTE)).toBeNull();
   });
 });

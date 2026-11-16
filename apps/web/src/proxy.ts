@@ -5,6 +5,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { API_URL, servedOverHttps, SESSION_COOKIE } from "@/lib/config";
 import { buildCsp, HSTS_VALUE } from "@/lib/csp";
 import { requestIdFrom, upstreamMetaHeaders } from "@/lib/request-meta";
+import { FLAGGED_PATHS } from "@/lib/site";
 import { THEME_SCRIPT } from "@/lib/theme-script";
 
 /**
@@ -15,7 +16,8 @@ import { THEME_SCRIPT } from "@/lib/theme-script";
  *    headers stay in `next.config.ts`. Policy details and trade-offs are in `lib/csp.ts`.
  * 2. One request id per request: a well-formed incoming `X-Request-ID` is kept, otherwise one
  *    is created. `api()` forwards it to the API and the response carries it back.
- * 3. A real 404 for `/app/admin` when the visitor is not an admin. The page checks again; the
+ * 3. A real 404 for `/app/admin` and everything under it when the visitor is not an admin,
+ *    and for a page behind a feature flag while that flag is off. The pages check again; the
  *    check here exists because the `/app` tree streams behind `loading.tsx`, and a response
  *    that has started streaming is already a 200 (bundled docs: loading.md, "Status codes").
  *
@@ -81,6 +83,29 @@ async function mayBeAdmin(request: NextRequest, requestHeaders: Headers): Promis
   }
 }
 
+/** True only when the API positively says the flag is not on. If it can't be asked, the page decides. */
+async function flagIsOff(flag: string, requestHeaders: Headers): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}/v1/flags`, {
+      headers: { accept: "application/json", ...upstreamMetaHeaders(requestHeaders).headers },
+      cache: "no-store",
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return false;
+    return ((await response.json()) as { flags?: Record<string, boolean> }).flags?.[flag] !== true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether this request must be answered with the not-found page before any page code runs. */
+async function hidden(pathname: string, request: NextRequest, requestHeaders: Headers): Promise<boolean> {
+  const path = pathname.replace(/\/+$/, "");
+  if (path === "/app/admin" || path.startsWith("/app/admin/")) return !(await mayBeAdmin(request, requestHeaders));
+  const flagged = FLAGGED_PATHS.find((entry) => entry.path === path);
+  return flagged ? flagIsOff(flagged.flag, requestHeaders) : false;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const requestId = requestIdFrom(request.headers);
@@ -94,10 +119,9 @@ export async function proxy(request: NextRequest) {
   }
 
   const init = { request: { headers: requestHeaders } };
-  const response =
-    pathname.replace(/\/+$/, "") === "/app/admin" && !(await mayBeAdmin(request, requestHeaders))
-      ? NextResponse.rewrite(new URL(UNMATCHED_PATH, request.url), init)
-      : NextResponse.next(init);
+  const response = (await hidden(pathname, request, requestHeaders))
+    ? NextResponse.rewrite(new URL(UNMATCHED_PATH, request.url), init)
+    : NextResponse.next(init);
 
   response.headers.set("Content-Security-Policy", csp);
   response.headers.set("X-Request-ID", requestId);

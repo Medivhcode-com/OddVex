@@ -9,6 +9,9 @@ failed logins per email (:func:`check_login_allowed`, :func:`record_login_failur
 verification or reset emails per address (:func:`limit_account_action`). The per-account
 keys are the address as typed, whether or not an account exists for it, so the answer
 never reveals that.
+
+The community has limiters with their own windows (picks per day; comments, reports and
+follows per hour), counted per user: :func:`check_user_quota` and :func:`use_user_quota`.
 """
 
 from __future__ import annotations
@@ -166,3 +169,23 @@ def limit_account_action(request: Request, action: str, subject: str, limit: int
     allowed, retry_after = limiter.check(f"{action}:{subject}", limit)
     if not allowed:
         raise too_many_requests(retry_after)
+
+
+# ------------------------------------------------------- per user, own window
+def check_user_quota(request: Request, limiter_name: str, user_id: str, limit: int) -> None:
+    """429 when ``user_id`` already used ``limit`` slots of ``app.state.<limiter_name>``.
+
+    Records nothing: call :func:`use_user_quota` once the action has succeeded, so a
+    request that fails validation does not use up a slot.
+    """
+    if not request.app.state.settings.rate_limit_enabled:
+        return
+    limiter: SlidingWindowRateLimiter = getattr(request.app.state, limiter_name)
+    retry_after = limiter.blocked_for(user_id, limit)
+    if retry_after > 0:
+        raise too_many_requests(retry_after)
+
+
+def use_user_quota(request: Request, limiter_name: str, user_id: str) -> None:
+    if request.app.state.settings.rate_limit_enabled:
+        getattr(request.app.state, limiter_name).hit(user_id)

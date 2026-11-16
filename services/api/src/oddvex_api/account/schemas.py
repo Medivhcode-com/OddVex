@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from ..alerts.schemas import AlertRuleOut
 from ..auth.schemas import UserOut
 from ..bets.schemas import BetOut
+from ..community.schemas import CommunityExportOut
 from ..notifications.schemas import (
     NotificationOut,
     NotificationPreferencesOut,
@@ -48,4 +49,11 @@ class AccountExportOut(BaseModel):
     notification_preferences: NotificationPreferencesOut | None = None
     stake_reminder: StakeReminderOut | None = Field(
         default=None, description="Your weekly staking reminder and this week's total."
+    )
+    community: CommunityExportOut | None = Field(
+        default=None,
+        description=(
+            "Your community data: profile, picks, comments, who you follow, likes, blocks "
+            "and reports you made. Added later; optional for older clients."
+        ),
     )

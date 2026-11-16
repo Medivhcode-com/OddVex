@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChangePasswordForm, ExportDataButton } from "@/components/app/account-forms";
+import { ResendVerification } from "@/components/app/auth-forms";
 import { DeleteAccountForm } from "@/components/app/delete-account";
 import { NotificationPreferences, StakeReminderForm } from "@/components/app/notification-settings";
 import { api } from "@/lib/api";
 import type { Schemas } from "@oddvex/types";
 import { OddsFormatToggle } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
-import { ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
+import { Badge, ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
+import { titleCase } from "@/lib/format";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { currentUser } from "@/lib/session";
 
@@ -15,12 +17,14 @@ export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await currentUser();
-  const [prefs, reminder] = user
+  const [prefs, reminder, entitlements] = user
     ? await Promise.all([
         api<Schemas["NotificationPreferencesOut"]>("/v1/me/notification-preferences", { auth: true }).catch(() => null),
         api<Schemas["StakeReminderOut"]>("/v1/me/stake-reminder", { auth: true }).catch(() => null),
+        api<Schemas["EntitlementsOut"]>("/v1/me/entitlements", { auth: true }).catch(() => null),
       ])
-    : [null, null];
+    : [null, null, null];
+  const plan = entitlements?.plan ?? user?.plan ?? null;
   return (
     <>
       <PageHeader title="Settings" />
@@ -39,16 +43,34 @@ export default async function SettingsPage() {
           </div>
         </Panel>
 
-        <Panel>
-          <PanelHeader title="Account" />
+        <Panel aria-labelledby="settings-account">
+          <PanelHeader id="settings-account" title="Account" />
           <div className="p-4 sm:p-5">
             {user ? (
-              <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
-                <dt className="text-muted">Name</dt>
-                <dd>{user.display_name}</dd>
-                <dt className="text-muted">Email</dt>
-                <dd className="break-all">{user.email}</dd>
-              </dl>
+              <div className="space-y-4">
+                <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+                  <dt className="text-muted">Name</dt>
+                  <dd>{user.display_name}</dd>
+                  <dt className="text-muted">Email</dt>
+                  <dd className="min-w-0">
+                    <span className="break-all">{user.email}</span>
+                    <span className="mt-1 block">
+                      {user.email_verified ? <Badge tone="accent">Email verified</Badge> : <Badge tone="warn">Email not verified</Badge>}
+                    </span>
+                  </dd>
+                  <dt className="text-muted">Plan</dt>
+                  <dd>
+                    {plan ? titleCase(plan) : "Not available right now"}
+                    {entitlements?.preview ? <span className="mt-1 block text-muted">Preview: every feature is included</span> : null}
+                  </dd>
+                </dl>
+                {user.email_verified ? null : (
+                  <div className="space-y-2 border-t border-line pt-4">
+                    <p className="text-sm text-muted">Confirming shows the address is yours. Nothing in OddVex is locked until you do.</p>
+                    <ResendVerification />
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <p className="text-muted">You are not logged in.</p>

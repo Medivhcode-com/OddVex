@@ -27,6 +27,17 @@
             "title": "Bets",
             "type": "array"
           },
+          "community": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommunityExportOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Your community data: profile, picks, comments, who you follow, likes, blocks and reports you made. Added later; optional for older clients."
+          },
           "exported_at": {
             "format": "date-time",
             "title": "Exported At",
@@ -132,6 +143,49 @@
         "title": "AdminAuditPageOut",
         "type": "object"
       },
+      "AdminCommunityOverviewOut": {
+        "properties": {
+          "comments": {
+            "title": "Comments",
+            "type": "integer"
+          },
+          "graded_picks": {
+            "title": "Graded Picks",
+            "type": "integer"
+          },
+          "hidden_or_removed_items": {
+            "title": "Hidden Or Removed Items",
+            "type": "integer"
+          },
+          "open_reports": {
+            "title": "Open Reports",
+            "type": "integer"
+          },
+          "picks": {
+            "title": "Picks",
+            "type": "integer"
+          },
+          "profiles": {
+            "title": "Profiles",
+            "type": "integer"
+          },
+          "public_profiles": {
+            "title": "Public Profiles",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profiles",
+          "public_profiles",
+          "picks",
+          "graded_picks",
+          "comments",
+          "open_reports",
+          "hidden_or_removed_items"
+        ],
+        "title": "AdminCommunityOverviewOut",
+        "type": "object"
+      },
       "AdminFlagListOut": {
         "properties": {
           "items": {
@@ -151,7 +205,7 @@
       "AdminFlagOut": {
         "properties": {
           "default": {
-            "description": "The in-code default, used while there is no override.",
+            "description": "The in-code default for this environment, used while there is no override. `email_flows` defaults to off in production and on elsewhere.",
             "title": "Default",
             "type": "boolean"
           },
@@ -300,6 +354,240 @@
           "recent_audit"
         ],
         "title": "AdminOverviewOut",
+        "type": "object"
+      },
+      "AdminReportListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminReportOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Reports with that status, before `limit` and `offset`.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AdminReportListOut",
+        "type": "object"
+      },
+      "AdminReportOut": {
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/AdminReportPartyOut"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "spam",
+              "harassment",
+              "inducement_to_bet",
+              "misleading_claims",
+              "personal_information",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "reporter": {
+            "$ref": "#/components/schemas/AdminReportPartyOut"
+          },
+          "resolution_action": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dismiss",
+                  "hide_content",
+                  "remove_content",
+                  "suspend_author"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Action"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_exists": {
+            "description": "False when the content was deleted since.",
+            "title": "Target Exists",
+            "type": "boolean"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_moderation_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "visible",
+                  "hidden",
+                  "removed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Moderation Status"
+          },
+          "target_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a pick: the selection and the event.",
+            "title": "Target Summary"
+          },
+          "target_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The reported analysis, comment or bio, as stored.",
+            "title": "Target Text"
+          },
+          "target_type": {
+            "enum": [
+              "pick",
+              "comment",
+              "profile"
+            ],
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "reason",
+          "target_type",
+          "target_id",
+          "target_exists",
+          "author",
+          "reporter"
+        ],
+        "title": "AdminReportOut",
+        "type": "object"
+      },
+      "AdminReportPartyOut": {
+        "properties": {
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "status": {
+            "description": "Account status: active or suspended.",
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "status"
+        ],
+        "title": "AdminReportPartyOut",
         "type": "object"
       },
       "AdminUserListOut": {
@@ -956,6 +1244,19 @@
         "title": "AuditEntryOut",
         "type": "object"
       },
+      "AuthorOut": {
+        "properties": {
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "title": "AuthorOut",
+        "type": "object"
+      },
       "AutoSettleOut": {
         "properties": {
           "checked": {
@@ -1248,6 +1549,18 @@
             },
             "title": "Stake Distribution",
             "type": "array"
+          },
+          "streak_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How to read the streak numbers: they describe past results only. Optional for older clients.",
+            "title": "Streak Note"
           }
         },
         "required": [
@@ -2226,6 +2539,59 @@
         "title": "BetUpdate",
         "type": "object"
       },
+      "BlockEntryOut": {
+        "properties": {
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "since"
+        ],
+        "title": "BlockEntryOut",
+        "type": "object"
+      },
+      "BlockListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BlockEntryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BlockListOut",
+        "type": "object"
+      },
+      "BlockStateOut": {
+        "properties": {
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "is_blocked": {
+            "title": "Is Blocked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "handle",
+          "is_blocked"
+        ],
+        "title": "BlockStateOut",
+        "type": "object"
+      },
       "BookHoldOut": {
         "properties": {
           "hold": {
@@ -2532,6 +2898,330 @@
           "count"
         ],
         "title": "ClvBucketOut",
+        "type": "object"
+      },
+      "CommentCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "Plain text. No links.",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "CommentCreate",
+        "type": "object"
+      },
+      "CommentOut": {
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/AuthorOut"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plain text exactly as posted; escape it when rendering. Null on your own comment after moderators removed it.",
+            "title": "Body"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_mine": {
+            "title": "Is Mine",
+            "type": "boolean"
+          },
+          "moderation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moderation Note"
+          },
+          "moderation_status": {
+            "enum": [
+              "visible",
+              "hidden",
+              "removed"
+            ],
+            "title": "Moderation Status",
+            "type": "string"
+          },
+          "pick_id": {
+            "title": "Pick Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "pick_id",
+          "author",
+          "created_at",
+          "is_mine",
+          "moderation_status"
+        ],
+        "title": "CommentOut",
+        "type": "object"
+      },
+      "CommentPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CommentOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `before` to get the next (older) page.",
+            "title": "Next Before"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CommentPageOut",
+        "type": "object"
+      },
+      "CommunityExportOut": {
+        "description": "The community part of the account export.",
+        "properties": {
+          "blocks": {
+            "description": "Handles you blocked.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/CommentOut"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "following": {
+            "description": "Handles you follow.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Following",
+            "type": "array"
+          },
+          "likes": {
+            "description": "Ids of picks you liked.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Likes",
+            "type": "array"
+          },
+          "picks": {
+            "items": {
+              "$ref": "#/components/schemas/PickOut"
+            },
+            "title": "Picks",
+            "type": "array"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MyProfileOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reports": {
+            "description": "Reports you made.",
+            "items": {
+              "$ref": "#/components/schemas/ReportOut"
+            },
+            "title": "Reports",
+            "type": "array"
+          }
+        },
+        "title": "CommunityExportOut",
+        "type": "object"
+      },
+      "CommunityGuidelinesOut": {
+        "properties": {
+          "enforcement": {
+            "title": "Enforcement",
+            "type": "string"
+          },
+          "help": {
+            "description": "The responsible-gambling line, with the helpline.",
+            "title": "Help",
+            "type": "string"
+          },
+          "intro": {
+            "title": "Intro",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/GuidelineRuleOut"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "version": {
+            "description": "Date of the current wording.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "intro",
+          "rules",
+          "enforcement",
+          "help"
+        ],
+        "title": "CommunityGuidelinesOut",
+        "type": "object"
+      },
+      "CommunityRecordOut": {
+        "description": "Computed only from graded picks. Every pick is structured, timestamped before\nthe event and graded by the server, so the whole record is verified.",
+        "properties": {
+          "average_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean decimal price of the graded picks, in every format."
+          },
+          "caveat": {
+            "description": "Past results do not predict future results.",
+            "title": "Caveat",
+            "type": "string"
+          },
+          "flat_stake_roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Units won or lost divided by units staked, at 1 unit per graded pick and the price recorded when each pick was posted. A fraction.",
+            "title": "Flat Stake Roi"
+          },
+          "losses": {
+            "title": "Losses",
+            "type": "integer"
+          },
+          "method": {
+            "description": "How the numbers above are computed.",
+            "title": "Method",
+            "type": "string"
+          },
+          "picks": {
+            "description": "Graded picks: wins + losses + pushes.",
+            "title": "Picks",
+            "type": "integer"
+          },
+          "pushes": {
+            "title": "Pushes",
+            "type": "integer"
+          },
+          "sample_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set below 30 graded picks: too few to tell skill from luck.",
+            "title": "Sample Note"
+          },
+          "units_profit": {
+            "description": "Units won or lost at 1 unit per graded pick.",
+            "title": "Units Profit",
+            "type": "number"
+          },
+          "verified": {
+            "const": true,
+            "default": true,
+            "title": "Verified",
+            "type": "boolean"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "wins / (wins + losses), as a fraction. Pushes are left out.",
+            "title": "Win Rate"
+          },
+          "win_rate_interval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WinRateIntervalOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wilson 95% interval of `win_rate`."
+          },
+          "wins": {
+            "title": "Wins",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "picks",
+          "wins",
+          "losses",
+          "pushes",
+          "units_profit",
+          "method",
+          "caveat"
+        ],
+        "title": "CommunityRecordOut",
         "type": "object"
       },
       "ConsensusOut": {
@@ -3323,6 +4013,24 @@
         "title": "ExportAuditEntryOut",
         "type": "object"
       },
+      "FinalScoreOut": {
+        "properties": {
+          "away": {
+            "title": "Away",
+            "type": "integer"
+          },
+          "home": {
+            "title": "Home",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "home",
+          "away"
+        ],
+        "title": "FinalScoreOut",
+        "type": "object"
+      },
       "FlagsOut": {
         "properties": {
           "flags": {
@@ -3344,6 +4052,76 @@
           "flags"
         ],
         "title": "FlagsOut",
+        "type": "object"
+      },
+      "FollowEntryOut": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "is_following": {
+            "description": "Whether you follow this profile.",
+            "title": "Is Following",
+            "type": "boolean"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "since",
+          "is_following"
+        ],
+        "title": "FollowEntryOut",
+        "type": "object"
+      },
+      "FollowListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FollowEntryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FollowListOut",
+        "type": "object"
+      },
+      "FollowStateOut": {
+        "properties": {
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "is_following": {
+            "title": "Is Following",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "handle",
+          "is_following"
+        ],
+        "title": "FollowStateOut",
         "type": "object"
       },
       "GameFinalAlertCreate": {
@@ -3481,12 +4259,52 @@
         "title": "GameStartAlertCreate",
         "type": "object"
       },
+      "GuidelineRuleOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "text"
+        ],
+        "title": "GuidelineRuleOut",
+        "type": "object"
+      },
       "HealthOut": {
         "properties": {
           "data_mode": {
             "const": "synthetic",
+            "description": "Reported by the active data provider.",
             "title": "Data Mode",
             "type": "string"
+          },
+          "database": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Result of a `SELECT 1` against the database. Optional for older clients.",
+            "title": "Database"
           },
           "server_time": {
             "format": "date-time",
@@ -3494,7 +4312,11 @@
             "type": "string"
           },
           "status": {
-            "const": "ok",
+            "description": "`degraded` when the database check failed; the process itself is up.",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -3642,6 +4464,39 @@
             ],
             "title": "Line Move"
           },
+          "new_follower": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Follower"
+          },
+          "pick_comment": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pick Comment"
+          },
+          "pick_graded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pick Graded"
+          },
           "price_alert": {
             "anyOf": [
               {
@@ -3702,6 +4557,42 @@
             "title": "Line Move",
             "type": "boolean"
           },
+          "new_follower": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": true,
+            "title": "New Follower"
+          },
+          "pick_comment": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": true,
+            "title": "Pick Comment"
+          },
+          "pick_graded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": true,
+            "title": "Pick Graded"
+          },
           "price_alert": {
             "default": true,
             "title": "Price Alert",
@@ -3719,6 +4610,99 @@
           }
         },
         "title": "InAppPreferencesOut",
+        "type": "object"
+      },
+      "LeaderboardOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "caveat": {
+            "description": "Past results do not predict future results.",
+            "title": "Caveat",
+            "type": "string"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardRowOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "minimum_graded_picks": {
+            "title": "Minimum Graded Picks",
+            "type": "integer"
+          },
+          "ranked_by": {
+            "const": "wilson_lower_bound",
+            "default": "wilson_lower_bound",
+            "title": "Ranked By",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "30d",
+              "90d",
+              "all"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "minimum_graded_picks",
+          "items",
+          "method",
+          "caveat",
+          "as_of",
+          "data_mode"
+        ],
+        "title": "LeaderboardOut",
+        "type": "object"
+      },
+      "LeaderboardRowOut": {
+        "properties": {
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "record": {
+            "$ref": "#/components/schemas/CommunityRecordOut"
+          }
+        },
+        "required": [
+          "rank",
+          "handle",
+          "record"
+        ],
+        "title": "LeaderboardRowOut",
         "type": "object"
       },
       "LeagueOut": {
@@ -3851,6 +4835,29 @@
           "result"
         ],
         "title": "LegResultIn",
+        "type": "object"
+      },
+      "LikeStateOut": {
+        "properties": {
+          "like_count": {
+            "title": "Like Count",
+            "type": "integer"
+          },
+          "liked_by_me": {
+            "title": "Liked By Me",
+            "type": "boolean"
+          },
+          "pick_id": {
+            "title": "Pick Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pick_id",
+          "liked_by_me",
+          "like_count"
+        ],
+        "title": "LikeStateOut",
         "type": "object"
       },
       "LineHistoryOut": {
@@ -4065,7 +5072,7 @@
         "properties": {
           "data_mode": {
             "const": "synthetic",
-            "description": "All sports data is synthetic in this build.",
+            "description": "Reported by the active data provider. All sports data is synthetic in this build.",
             "title": "Data Mode",
             "type": "string"
           },
@@ -4096,6 +5103,100 @@
           "notice"
         ],
         "title": "MetaOut",
+        "type": "object"
+      },
+      "MyProfileOut": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "can_post": {
+            "description": "True when the profile is public and was not hidden by moderators.",
+            "title": "Can Post",
+            "type": "boolean"
+          },
+          "follower_count": {
+            "title": "Follower Count",
+            "type": "integer"
+          },
+          "following_count": {
+            "title": "Following Count",
+            "type": "integer"
+          },
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "is_blocked": {
+            "description": "Whether you have blocked this profile.",
+            "title": "Is Blocked",
+            "type": "boolean"
+          },
+          "is_following": {
+            "description": "Whether you follow this profile.",
+            "title": "Is Following",
+            "type": "boolean"
+          },
+          "is_me": {
+            "title": "Is Me",
+            "type": "boolean"
+          },
+          "is_public": {
+            "title": "Is Public",
+            "type": "boolean"
+          },
+          "joined": {
+            "description": "Month the profile was created, `YYYY-MM`.",
+            "title": "Joined",
+            "type": "string"
+          },
+          "moderation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when moderators hid or removed the profile.",
+            "title": "Moderation Note"
+          },
+          "moderation_status": {
+            "enum": [
+              "visible",
+              "hidden",
+              "removed"
+            ],
+            "title": "Moderation Status",
+            "type": "string"
+          },
+          "record": {
+            "$ref": "#/components/schemas/CommunityRecordOut"
+          }
+        },
+        "required": [
+          "handle",
+          "joined",
+          "follower_count",
+          "following_count",
+          "record",
+          "is_following",
+          "is_blocked",
+          "is_me",
+          "is_public",
+          "can_post",
+          "moderation_status"
+        ],
+        "title": "MyProfileOut",
         "type": "object"
       },
       "NoVigOutcomeOut": {
@@ -4276,7 +5377,7 @@
           },
           "data": {
             "additionalProperties": true,
-            "description": "Small object for deep links; the keys depend on `kind` (`event_id`, `alert_id`, `market`, `price_american`, `line`, `bet_id`, `run_id`, ...).",
+            "description": "Small object for deep links; the keys depend on `kind` (`event_id`, `alert_id`, `market`, `price_american`, `line`, `bet_id`, `run_id`, `pick_id`, `handle`, ...).",
             "title": "Data",
             "type": "object"
           },
@@ -4304,7 +5405,10 @@
               "game_final",
               "bet_settled",
               "sync_finished",
-              "stake_reminder"
+              "stake_reminder",
+              "new_follower",
+              "pick_comment",
+              "pick_graded"
             ],
             "title": "Kind",
             "type": "string"
@@ -4721,6 +5825,310 @@
         "title": "PasswordResetRequest",
         "type": "object"
       },
+      "PickCreate": {
+        "additionalProperties": false,
+        "description": "A structured, gradeable selection. There is deliberately no stake, no unit size\nand no confidence rating.",
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional plain text. No links.",
+            "title": "Analysis"
+          },
+          "event_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": -1000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spread and total only. A spread line is the handicap of the selected side (`-3.5` for a favourite). It has to be a line a sportsbook is quoting.",
+            "title": "Line"
+          },
+          "market": {
+            "enum": [
+              "moneyline",
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "outcome_key": {
+            "enum": [
+              "home",
+              "away",
+              "draw",
+              "over",
+              "under"
+            ],
+            "title": "Outcome Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "market",
+          "outcome_key"
+        ],
+        "title": "PickCreate",
+        "type": "object"
+      },
+      "PickOut": {
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plain text exactly as posted. Escape it when rendering.",
+            "title": "Analysis"
+          },
+          "author": {
+            "$ref": "#/components/schemas/AuthorOut"
+          },
+          "comment_count": {
+            "title": "Comment Count",
+            "type": "integer"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "description": "The events and prices are synthetic in this build.",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_label": {
+            "title": "Event Label",
+            "type": "string"
+          },
+          "event_start_time": {
+            "format": "date-time",
+            "title": "Event Start Time",
+            "type": "string"
+          },
+          "final_score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FinalScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "graded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graded At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_mine": {
+            "title": "Is Mine",
+            "type": "boolean"
+          },
+          "league": {
+            "title": "League",
+            "type": "string"
+          },
+          "like_count": {
+            "title": "Like Count",
+            "type": "integer"
+          },
+          "liked_by_me": {
+            "title": "Liked By Me",
+            "type": "boolean"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "market": {
+            "enum": [
+              "moneyline",
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "moderation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moderation Note"
+          },
+          "moderation_status": {
+            "description": "Other than `visible` only on your own pick, after moderators hid it.",
+            "enum": [
+              "visible",
+              "hidden",
+              "removed"
+            ],
+            "title": "Moderation Status",
+            "type": "string"
+          },
+          "outcome_key": {
+            "enum": [
+              "home",
+              "away",
+              "draw",
+              "over",
+              "under"
+            ],
+            "title": "Outcome Key",
+            "type": "string"
+          },
+          "posted_at": {
+            "format": "date-time",
+            "title": "Posted At",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut",
+            "description": "The best open, non-stale price when the pick was posted, set by the server."
+          },
+          "result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "won",
+                  "lost",
+                  "push"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "selection": {
+            "description": "The selection in words, e.g. `Over 224.5 in A at B`.",
+            "title": "Selection",
+            "type": "string"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef",
+            "description": "The sportsbook that offered that price."
+          },
+          "status": {
+            "description": "`pending` until the event is final; `graded` once graded from the final score; `void` when the data provider dropped the event before a final score.",
+            "enum": [
+              "pending",
+              "graded",
+              "void"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "verified": {
+            "const": true,
+            "default": true,
+            "description": "Always true: every pick is structured, timestamped before the event and graded by the server. Self-reported picks do not exist.",
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "event_id",
+          "event_label",
+          "event_start_time",
+          "league",
+          "market",
+          "outcome_key",
+          "selection",
+          "price",
+          "sportsbook",
+          "posted_at",
+          "status",
+          "like_count",
+          "comment_count",
+          "liked_by_me",
+          "is_mine",
+          "moderation_status",
+          "data_mode"
+        ],
+        "title": "PickOut",
+        "type": "object"
+      },
+      "PickPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PickOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `before` to get the next (older) page.",
+            "title": "Next Before"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PickPageOut",
+        "type": "object"
+      },
       "PlayerDetailOut": {
         "properties": {
           "as_of": {
@@ -5108,6 +6516,106 @@
         "title": "PriceOut",
         "type": "object"
       },
+      "ProfileOut": {
+        "description": "A public profile. Never contains an email, a name, a plan or tracker data.",
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "follower_count": {
+            "title": "Follower Count",
+            "type": "integer"
+          },
+          "following_count": {
+            "title": "Following Count",
+            "type": "integer"
+          },
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          },
+          "is_blocked": {
+            "description": "Whether you have blocked this profile.",
+            "title": "Is Blocked",
+            "type": "boolean"
+          },
+          "is_following": {
+            "description": "Whether you follow this profile.",
+            "title": "Is Following",
+            "type": "boolean"
+          },
+          "is_me": {
+            "title": "Is Me",
+            "type": "boolean"
+          },
+          "joined": {
+            "description": "Month the profile was created, `YYYY-MM`.",
+            "title": "Joined",
+            "type": "string"
+          },
+          "record": {
+            "$ref": "#/components/schemas/CommunityRecordOut"
+          }
+        },
+        "required": [
+          "handle",
+          "joined",
+          "follower_count",
+          "following_count",
+          "record",
+          "is_following",
+          "is_blocked",
+          "is_me"
+        ],
+        "title": "ProfileOut",
+        "type": "object"
+      },
+      "ProfileUpsert": {
+        "additionalProperties": false,
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "maxLength": 280,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plain text. No links.",
+            "title": "Bio"
+          },
+          "handle": {
+            "description": "3 to 20 characters: letters a-z, digits and underscores. Upper-case letters are lowered, so a handle is unique whatever the case.",
+            "examples": [
+              "demo_bettor"
+            ],
+            "maxLength": 64,
+            "title": "Handle",
+            "type": "string"
+          },
+          "is_public": {
+            "description": "Only a public profile can post picks and comments and be found.",
+            "title": "Is Public",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "handle",
+          "is_public"
+        ],
+        "title": "ProfileUpsert",
+        "type": "object"
+      },
       "PropBoardRowOut": {
         "properties": {
           "best_over": {
@@ -5335,6 +6843,154 @@
           "age_confirmed"
         ],
         "title": "RegisterRequest",
+        "type": "object"
+      },
+      "ReportCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "reason": {
+            "enum": [
+              "spam",
+              "harassment",
+              "inducement_to_bet",
+              "misleading_claims",
+              "personal_information",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "target_id": {
+            "description": "The pick id, the comment id or, for a profile, its handle.",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_type": {
+            "enum": [
+              "pick",
+              "comment",
+              "profile"
+            ],
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_id",
+          "reason"
+        ],
+        "title": "ReportCreate",
+        "type": "object"
+      },
+      "ReportOut": {
+        "description": "Your own report. What moderators decided is not shown here.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "spam",
+              "harassment",
+              "inducement_to_bet",
+              "misleading_claims",
+              "personal_information",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_type": {
+            "enum": [
+              "pick",
+              "comment",
+              "profile"
+            ],
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "target_type",
+          "target_id",
+          "reason",
+          "status",
+          "created_at"
+        ],
+        "title": "ReportOut",
+        "type": "object"
+      },
+      "ResolveReportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "dismiss",
+              "hide_content",
+              "remove_content",
+              "suspend_author"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "note": {
+            "description": "Why. Stored on the report and in the audit log.",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "note"
+        ],
+        "title": "ResolveReportRequest",
         "type": "object"
       },
       "ScoreOut": {
@@ -6197,6 +7853,30 @@
         ],
         "title": "WatchlistOut",
         "type": "object"
+      },
+      "WinRateIntervalOut": {
+        "properties": {
+          "confidence_level": {
+            "description": "0.95: a Wilson 95% interval.",
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "high": {
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "title": "Low",
+            "type": "number"
+          }
+        },
+        "required": [
+          "low",
+          "high",
+          "confidence_level"
+        ],
+        "title": "WinRateIntervalOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6216,6 +7896,7 @@
   "paths": {
     "/health": {
       "get": {
+        "description": "Always answers 200 while the process is up. `database` is the result of a cheap `SELECT 1`; when it fails, `status` is `degraded`.",
         "operationId": "get_health",
         "responses": {
           "200": {
@@ -6359,6 +8040,276 @@
         ]
       }
     },
+    "/v1/admin/community/overview": {
+      "get": {
+        "operationId": "admin_community_overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCommunityOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Counts of profiles, picks, comments and open reports",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/community/reports": {
+      "get": {
+        "description": "`status=open` (the default) lists what is waiting, oldest first; `status=resolved` lists what was decided, most recent first. Each row carries the reported text as stored, its author and the reporter, by user id and handle. Each call is recorded in the audit log as `admin.read`.",
+        "operationId": "admin_list_reports",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "resolved"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The report queue, oldest open report first",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/community/reports/{report_id}/resolve": {
+      "post": {
+        "description": "`dismiss`: nothing happens to the content. `hide_content` and `remove_content`: the pick, comment or profile disappears from every public read (its author sees a 'removed by moderators' placeholder on their own item); a hidden pick still counts in its author's record. `suspend_author`: the author's account is suspended through the same code as `POST /v1/admin/users/{id}/suspend`, so an administrator cannot be suspended (`409`). Every other open report on the same content is resolved with the same decision, except after `dismiss`. A report that was already resolved is `409 report_already_resolved`. `note` is required and is stored on the report and in the audit log.",
+        "operationId": "admin_resolve_report",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, or the `community` flag is off"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Already resolved, or an admin"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide a report",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/email-outbox": {
       "get": {
         "description": "What would have been sent: recipient, template and subject. Bodies, links and tokens are never returned here. No email is delivered in this build.",
@@ -6488,7 +8439,7 @@
     },
     "/v1/admin/flags/{key}": {
       "put": {
-        "description": "Stores an override of the in-code default; it applies to everyone at once. Only known keys exist (`404` otherwise). Turning `premium_gating` on is a pricing decision and needs Founder approval first.",
+        "description": "Stores an override of the in-code default; it applies to everyone at once. Only known keys exist (`404` otherwise). Turning `premium_gating` on is a pricing decision and needs Founder approval first. `community` and `community_leaderboard` are off by default: turning them on needs the content and responsible-gambling reviews described in the README.",
         "operationId": "admin_set_flag",
         "parameters": [
           {
@@ -6632,7 +8583,7 @@
     },
     "/v1/admin/users": {
       "get": {
-        "description": "`q` matches part of the email or display name, case-insensitively. Never returns password hashes or tokens.",
+        "description": "`q` matches part of the email or display name, case-insensitively for any script, not only ASCII. Never returns password hashes or tokens. Each call is recorded in the audit log as `admin.read`.",
         "operationId": "admin_list_users",
         "parameters": [
           {
@@ -7530,6 +9481,46 @@
           }
         },
         "summary": "Exchange email + password for an access token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "description": "Revokes every access token of the account, not only the one that made this request: the account's token version is bumped, so each token issued before it is rejected with `401 invalid_token` from then on, on every device. There are no per-session tokens in this build. Sign in again to get a new token. The logout is recorded in the audit log.",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Log out everywhere",
         "tags": [
           "auth"
         ]
@@ -8555,6 +10546,1806 @@
         ]
       }
     },
+    "/v1/community/blocks": {
+      "get": {
+        "operationId": "list_blocks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Profiles you blocked",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/blocks/{handle}": {
+      "delete": {
+        "description": "Idempotent: `204` whether or not it was blocked. Follows removed by the block are not restored.",
+        "operationId": "unblock_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "title": "Handle",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unblock a profile",
+        "tags": [
+          "community"
+        ]
+      },
+      "put": {
+        "description": "Idempotent. Removes the follow in both directions and hides each of you from the other everywhere: profiles, picks, feed, comments, follower lists and the leaderboard. The blocked person is not told. You do not need a profile to block someone.",
+        "operationId": "block_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "title": "Handle",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Block a profile",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/comments/{comment_id}": {
+      "delete": {
+        "description": "The author can delete their own comment. An administrator can delete any comment; that is recorded in the audit log as a moderator action. Anyone else gets `403 forbidden`.",
+        "operationId": "delete_comment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not your comment"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a comment (its author or a moderator)",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/feed": {
+      "get": {
+        "description": "`scope=following` (the default): picks of the profiles you follow. `scope=everyone`: every public pick. Either way without people you blocked or who blocked you, hidden or removed content and suspended authors. Ordered by time only: there is no ranking by results or popularity.",
+        "operationId": "get_feed",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "following",
+              "enum": [
+                "following",
+                "everyone"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_before` from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_before` from the previous page.",
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The pick feed, newest first",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/followers": {
+      "get": {
+        "operationId": "list_followers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Profiles that follow you, most recent first",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/following": {
+      "get": {
+        "operationId": "list_following",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Profiles you follow, most recent first",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/follows/{handle}": {
+      "delete": {
+        "description": "Idempotent: `204` whether or not you were following it.",
+        "operationId": "unfollow_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "title": "Handle",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stop following a profile",
+        "tags": [
+          "community"
+        ]
+      },
+      "post": {
+        "description": "Idempotent. You cannot follow yourself (`422 cannot_follow_self`) or a profile you blocked (`409 profile_blocked`); a profile that blocked you is `404`, like one that does not exist. Needs a public profile (`403 profile_required`). The followed profile gets one `new_follower` notification.",
+        "operationId": "follow_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "title": "Handle",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A public community profile is required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflicts with the current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Follow a profile",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/guidelines": {
+      "get": {
+        "description": "The one source of truth for clients. No sign-in needed, but like every community route it answers `404 feature_disabled` while the `community` flag is off.",
+        "operationId": "get_community_guidelines",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunityGuidelinesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "The community rules, as one structured list",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/leaderboard": {
+      "get": {
+        "description": "Behind a second flag, `community_leaderboard`, which is off by default: leaderboards need a responsible-gambling review before they go live. Only profiles with at least 30 graded picks in the window are ranked, by the lower bound of the Wilson 95% interval of their win rate, not by the raw win rate and not by ROI. Each row shows the sample size and the interval. `caveat` says that past results do not predict future results.",
+        "operationId": "get_leaderboard",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "90d",
+              "enum": [
+                "30d",
+                "90d",
+                "all"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Profiles ranked by the Wilson lower bound of their win rate",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/picks": {
+      "get": {
+        "description": "Filter by author `handle`, `event_id`, `league` and `status` (`pending`, `graded`, `void`). Picks of people you blocked or who blocked you, hidden or removed picks and picks of suspended or non-public accounts are left out. Your own picks are always included.",
+        "operationId": "list_picks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "handle",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Handle"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "graded",
+                    "void"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "`next_before` from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_before` from the previous page.",
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Picks, newest first",
+        "tags": [
+          "community"
+        ]
+      },
+      "post": {
+        "description": "A structured, gradeable selection only: `event_id`, `market`, `outcome_key` and, for spread and total, `line`, plus optional `analysis` text. There is no stake, no unit size and no confidence rating. The server records the best open, non-stale price at that moment as the pick's price (`422 price_not_available` when no sportsbook has one, for spread and total at exactly that line) and the time as `posted_at`. The event has to be upcoming (`422 event_not_open`). One pick per event and market (`409 pick_exists`), 20 picks per day. Needs a public profile (`403 profile_required`). The pick is graded automatically from the final score.",
+        "operationId": "create_pick",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A public community profile is required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflicts with the current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post a structured pick on an upcoming event",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/picks/{pick_id}": {
+      "delete": {
+        "description": "Only the author, and only before the event starts. Once it has started the pick stays, so that a record cannot be tidied up afterwards: `409 pick_locked`.",
+        "operationId": "delete_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pick_id",
+            "required": true,
+            "schema": {
+              "title": "Pick Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not your pick"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflicts with the current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete your pick while the event is still upcoming",
+        "tags": [
+          "community"
+        ]
+      },
+      "get": {
+        "description": "`404` when it does not exist or you may not see it. The author still gets a pick that moderators hid, without its analysis and with `moderation_note`.",
+        "operationId": "get_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pick_id",
+            "required": true,
+            "schema": {
+              "title": "Pick Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One pick",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/picks/{pick_id}/comments": {
+      "get": {
+        "description": "Without comments of people you blocked or who blocked you, hidden or removed comments and comments of suspended accounts. Your own comment that moderators removed is listed for you with a null `body` and `moderation_note`.",
+        "operationId": "list_comments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pick_id",
+            "required": true,
+            "schema": {
+              "title": "Pick Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_before` from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_before` from the previous page.",
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Comments on a pick, newest first",
+        "tags": [
+          "community"
+        ]
+      },
+      "post": {
+        "description": "Plain text, at most 500 characters, stored and returned exactly as sent: clients escape it when they render it. A body with a link is `422 links_not_allowed`; one that breaks a content rule is `422 content_not_allowed` with `details.rule`. 30 comments per hour. Needs a public profile (`403 profile_required`).",
+        "operationId": "create_comment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pick_id",
+            "required": true,
+            "schema": {
+              "title": "Pick Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A public community profile is required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Comment on a pick",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/picks/{pick_id}/like": {
+      "delete": {
+        "description": "Idempotent: removing a like that is not there changes nothing.",
+        "operationId": "unlike_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pick_id",
+            "required": true,
+            "schema": {
+              "title": "Pick Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LikeStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove your like",
+        "tags": [
+          "community"
+        ]
+      },
+      "put": {
+        "description": "Idempotent: liking a pick you already like changes nothing.",
+        "operationId": "like_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pick_id",
+            "required": true,
+            "schema": {
+              "title": "Pick Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LikeStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Like a pick",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/profile": {
+      "get": {
+        "description": "`404 not_found` until you create one with `PUT /v1/community/profile`.",
+        "operationId": "get_my_profile",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyProfileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your community profile",
+        "tags": [
+          "community"
+        ]
+      },
+      "put": {
+        "description": "Opt-in: nobody has a profile until they create one. `handle` is 3 to 20 characters of `a-z`, `0-9` and `_` (`422 invalid_handle`), unique whatever the case (`409 handle_taken`) and not a reserved word (`422 handle_reserved`). `bio` is plain text, at most 280 characters, without links (`422 links_not_allowed`) and within the content rules (`422 content_not_allowed`). Only a public profile can post picks and comments, follow others and be found. Answers 201 when the profile was created.",
+        "operationId": "upsert_my_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyProfileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyProfileOut"
+                }
+              }
+            },
+            "description": "The profile was created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflicts with the current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create or update your community profile",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/profiles/{handle}": {
+      "get": {
+        "description": "Handle, bio, the month it was created, follower and following counts and the record of its graded picks. Never an email address, a name, a plan or tracker data. `404` for a handle that does not exist, is not public, was hidden by moderators, belongs to a suspended account or has blocked you: the answer is the same in every case.",
+        "operationId": "get_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "title": "Handle",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "A public profile and its verified record",
+        "tags": [
+          "community"
+        ]
+      }
+    },
+    "/v1/community/reports": {
+      "post": {
+        "description": "`target_id` is the pick id, the comment id or, for a profile, its handle. The target has to be something you can see (`404` otherwise) and not your own (`422 cannot_report_own_content`). One open report per person and target: reporting the same thing again returns the open report with `200`. 10 reports per hour. The reported person is not told who reported them.",
+        "operationId": "create_report",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportOut"
+                }
+              }
+            },
+            "description": "You already have an open report on it"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found, not visible to you, or the `community` flag is off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report a pick, a comment or a profile to the moderators",
+        "tags": [
+          "community"
+        ]
+      }
+    },
     "/v1/dev/email-outbox/latest": {
       "get": {
         "description": "Only when `ODDVEX_ENV` is not `production`; in production this is `404`. It needs no sign-in, so never expose a non-production API to the internet with real accounts in it. `template` narrows the search to `verify_email` or `password_reset`.",
@@ -8964,7 +12755,7 @@
     },
     "/v1/me": {
       "delete": {
-        "description": "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs, email tokens and outbox emails. An audit entry containing only the opaque user id is retained.",
+        "description": "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs, email tokens and outbox emails, and everything in the community: the profile, follows in both directions, likes, blocks, reports made, comments and every pick, graded ones included, so no public record is left without an account. An audit entry containing only the opaque user id is retained. A suspended account can still call this route.",
         "operationId": "delete_me",
         "responses": {
           "204": {
@@ -9095,7 +12886,7 @@
     },
     "/v1/me/export": {
       "get": {
-        "description": "One JSON document with your profile, bets, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs and your own audit entries. It never contains the password hash. The export itself is recorded in the audit log.",
+        "description": "One JSON document with your profile, bets, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs and your own audit entries, plus your community data (profile, picks, comments, who you follow, likes, blocks and reports you made). It never contains the password hash. The export itself is recorded in the audit log. A suspended account can still call this route.",
         "operationId": "export_my_data",
         "responses": {
           "200": {
@@ -11133,7 +14924,11 @@
       "name": "value"
     },
     {
-      "description": "Administrator routes: overview, users, feature flags, audit log, email outbox. Every change is audited.",
+      "description": "Research discussion behind the `community` flag (off by default): opt-in profiles, structured picks graded from final scores, comments, follows, likes, blocks and reports. No money, no stakes, no paid picks, no links and no direct messages.",
+      "name": "community"
+    },
+    {
+      "description": "Administrator routes: overview, users, feature flags, audit log, email outbox and community moderation. Every change is audited.",
       "name": "admin"
     },
     {

@@ -322,6 +322,13 @@ class BetAnalyticsOut(BaseModel):
     longest_win_streak: int
     longest_loss_streak: int
     current_streak: CurrentStreakOut
+    streak_note: str | None = Field(
+        default=None,
+        description=(
+            "How to read the streak numbers: they describe past results only. Optional for "
+            "older clients."
+        ),
+    )
     average_stake: float | None = None
     average_odds: PriceOut | None = Field(
         default=None, description="Mean of the bets' decimal odds, in every format."

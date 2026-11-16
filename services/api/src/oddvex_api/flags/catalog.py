@@ -1,6 +1,7 @@
 """The known feature flags and their safe defaults.
 
-A flag is a global on/off switch. The default lives here, in code; an administrator can
+A flag is a global on/off switch. The default lives here, in code (one flag,
+``email_flows``, has a different default in production); an administrator can
 override it with a row in ``feature_flags`` (``PUT /v1/admin/flags/{key}``). A key that
 is not listed here does not exist, whatever the table holds.
 """
@@ -15,13 +16,27 @@ class FlagSpec:
     key: str
     default: bool
     description: str
+    #: The default when ``ODDVEX_ENV=production``, where it differs from ``default``.
+    default_in_production: bool | None = None
+
+    def default_for(self, production: bool) -> bool:
+        if production and self.default_in_production is not None:
+            return self.default_in_production
+        return self.default
 
 
 _SPECS = (
     FlagSpec(
         "community",
         False,
-        "Community features. Not built yet; off until they are reviewed and approved.",
+        "Community: profiles, structured picks, comments, follows, likes, reports and "
+        "moderation. Off until user content and moderation are reviewed and approved.",
+    ),
+    FlagSpec(
+        "community_leaderboard",
+        False,
+        "Community leaderboard (needs `community` too). Off until a responsible-gambling "
+        "review approves leaderboards.",
     ),
     FlagSpec(
         "value_screen",
@@ -36,7 +51,10 @@ _SPECS = (
     FlagSpec(
         "email_flows",
         True,
-        "Email verification and password reset. Emails go to the outbox table; none is sent.",
+        "Email verification and password reset. Emails go to the outbox table; none is "
+        "sent. On by default outside production and off in production, where no email "
+        "provider is connected and a reset request would go nowhere.",
+        default_in_production=False,
     ),
     FlagSpec(
         "premium_gating",

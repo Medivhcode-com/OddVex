@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { APP_NAV } from "@/lib/site";
+import { APP_NAV, type AppNavItem } from "@/lib/site";
 
 const ICONS: Record<string, string> = {
   home: "M3 9.5 10 3l7 6.5V17h-4.5v-5h-5v5H3z",
   games: "M3 5h14v10H3zM10 5v10M3 10h3M14 10h3",
   odds: "M3 5h14M3 10h14M3 15h14M7 3v14M13 3v14",
   props: "M4 16V9M8 16V4M12 16v-5M16 16V7",
+  value: "M3 6h8M3 14h8M14 4v12M11.5 6.5 14 4l2.5 2.5M11.5 13.5 14 16l2.5-2.5",
   tracker: "M3 14l4-4 3 3 7-8M13 5h4v4",
   tools: "M5 3h10v14H5zM8 6h4M8 10h.01M12 10h.01M8 13h.01M12 13h.01",
   parlay: "M5 5h4v4H5zM11 11h4v4h-4zM9 7h2a2 2 0 0 1 2 2v2",
@@ -31,11 +32,18 @@ function isActive(pathname: string, href: string) {
   return href === "/app" ? pathname === "/app" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function SideNav({ admin = false }: { admin?: boolean }) {
+type Flags = Record<string, boolean>;
+
+/** Entries behind a feature flag are left out unless that flag is explicitly on. */
+function visible(items: readonly AppNavItem[], flags: Flags): AppNavItem[] {
+  return items.filter((item) => !item.flag || flags[item.flag] === true);
+}
+
+export function SideNav({ admin = false, flags = {} }: { admin?: boolean; flags?: Flags }) {
   const pathname = usePathname();
   return (
     <nav aria-label="App" className="flex flex-col gap-0.5">
-      {[...APP_NAV, { href: "/app/settings", label: "Settings", icon: "settings" }, ...(admin ? [{ href: "/app/admin", label: "Admin", icon: "tools" }] : [])].map((item) => {
+      {[...visible(APP_NAV, flags), { href: "/app/settings", label: "Settings", icon: "settings" }, ...(admin ? [{ href: "/app/admin", label: "Admin", icon: "tools" }] : [])].map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link
@@ -59,10 +67,11 @@ export function SideNav({ admin = false }: { admin?: boolean }) {
 const PRIMARY = ["/app", "/app/odds", "/app/props", "/app/tracker"];
 
 /** Bottom bar for one-handed use. Four destinations plus a sheet with the rest. */
-export function BottomNav() {
+export function BottomNav({ admin = false, flags = {} }: { admin?: boolean; flags?: Flags }) {
   const pathname = usePathname();
-  const primary = APP_NAV.filter((item) => PRIMARY.includes(item.href));
-  const rest = [...APP_NAV.filter((item) => !PRIMARY.includes(item.href)), { href: "/app/settings", label: "Settings", icon: "settings" }];
+  const items = visible(APP_NAV, flags);
+  const primary = items.filter((item) => PRIMARY.includes(item.href));
+  const rest = [...items.filter((item) => !PRIMARY.includes(item.href)), { href: "/app/settings", label: "Settings", icon: "settings" }, ...(admin ? [{ href: "/app/admin", label: "Admin", icon: "tools" }] : [])];
   const restActive = rest.some((item) => isActive(pathname, item.href));
   const tab = "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium";
   return (

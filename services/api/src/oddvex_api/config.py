@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     #: notification read routes). 0 evaluates on every request.
     alert_eval_min_seconds: int = Field(default=30, ge=0)
 
+    #: Community limits per user (in process memory, off with ``rate_limit_enabled``).
+    community_picks_per_day: int = Field(default=20, ge=1)
+    community_comments_per_hour: int = Field(default=30, ge=1)
+    community_reports_per_hour: int = Field(default=10, ge=1)
+    community_follows_per_hour: int = Field(default=60, ge=1)
+    #: Minimum seconds between two lazy grading passes over pending community picks
+    #: (triggered by the community read routes). 0 grades on every read.
+    community_grade_min_seconds: int = Field(default=15, ge=0)
+
     #: Largest request body accepted, in bytes. Larger requests get 413.
     max_body_bytes: int = Field(default=64 * 1024, ge=1024)
 

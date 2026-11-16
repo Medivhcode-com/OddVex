@@ -19,14 +19,24 @@ DataMode = Literal["synthetic"]
 
 
 class HealthOut(BaseModel):
-    status: Literal["ok"]
+    status: Literal["ok", "degraded"] = Field(
+        description="`degraded` when the database check failed; the process itself is up."
+    )
     version: str
-    data_mode: DataMode
+    data_mode: DataMode = Field(description="Reported by the active data provider.")
     server_time: datetime
+    database: Literal["ok", "error"] | None = Field(
+        default=None,
+        description="Result of a `SELECT 1` against the database. Optional for older clients.",
+    )
 
 
 class MetaOut(BaseModel):
-    data_mode: DataMode = Field(description="All sports data is synthetic in this build.")
+    data_mode: DataMode = Field(
+        description=(
+            "Reported by the active data provider. All sports data is synthetic in this build."
+        )
+    )
     provider: str
     version: str
     server_time: datetime

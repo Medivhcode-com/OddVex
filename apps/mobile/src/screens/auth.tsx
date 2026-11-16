@@ -2,11 +2,13 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { describeError } from '@/api/client';
+import { describeError, isAccountSuspended } from '@/api/client';
+import { SuspendedNotice } from '@/components/account-forms';
 import { Field, SwitchRow } from '@/components/form';
 import { Screen } from '@/components/screen';
 import { Button, Notice, Panel } from '@/components/states';
 import { Txt } from '@/components/text';
+import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
 import { space } from '@/theme';
 
@@ -18,10 +20,15 @@ function useDone() {
   return () => (router.canGoBack() ? router.back() : router.replace('/'));
 }
 
-export function LoginScreen() {
+export const PASSWORD_RESET_DONE = 'Password changed. Log in with your new password.';
+
+/** `passwordReset` is set when the reset screen sends the user here after a new password was saved. */
+export function LoginScreen({ passwordReset = false }: { passwordReset?: boolean }) {
   const router = useRouter();
   const session = useSession();
+  const emailFlows = useFlag('email_flows');
   const done = useDone();
+  const [suspended, setSuspended] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +38,14 @@ export function LoginScreen() {
     if (!email.trim() || !password) return setError('Enter your email and password.');
     setPending(true);
     setError(null);
+    setSuspended(false);
     try {
       await session.logIn(email.trim(), password);
       done();
     } catch (caught) {
-      setError(describeError(caught, "That email and password don't match an account."));
+      // The session provider has already cleared anything saved on this device.
+      if (isAccountSuspended(caught)) setSuspended(true);
+      else setError(describeError(caught, "That email and password don't match an account."));
     } finally {
       setPending(false);
     }
@@ -46,6 +56,8 @@ export function LoginScreen() {
       <Txt variant="secondary" tone="muted">
         Log in to track bets and follow teams, players and games. Odds, props and calculators work without an account.
       </Txt>
+      {suspended || session.suspended ? <SuspendedNotice /> : null}
+      {passwordReset && !error && !suspended ? <Notice tone="accent" text={PASSWORD_RESET_DONE} /> : null}
       <Panel>
         <View style={styles.form}>
           {error ? <Notice tone="error" text={error} /> : null}
@@ -69,6 +81,7 @@ export function LoginScreen() {
             onSubmitEditing={submit}
           />
           <Button label={pending ? 'Logging in' : 'Log in'} onPress={submit} disabled={pending} />
+          {emailFlows ? <Button label="Forgot password?" variant="ghost" compact onPress={() => router.push('/forgot-password')} /> : null}
         </View>
       </Panel>
       <View style={styles.switch}>

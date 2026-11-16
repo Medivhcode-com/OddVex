@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from ..deps import DbDep
+from ..deps import DbDep, SettingsDep
 from . import service
 
 router = APIRouter(tags=["meta"])
@@ -28,5 +28,5 @@ class FlagsOut(BaseModel):
         "`404 feature_disabled`. Clients use this to hide what is switched off."
     ),
 )
-def list_flags(db: DbDep) -> FlagsOut:
-    return FlagsOut(flags=service.flag_states(db))
+def list_flags(db: DbDep, settings: SettingsDep) -> FlagsOut:
+    return FlagsOut(flags=service.flag_states(db, settings))

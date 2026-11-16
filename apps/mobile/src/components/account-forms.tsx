@@ -1,11 +1,92 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { describeError } from '@/api/client';
+import { describeError, getEntitlements, requestEmailVerification } from '@/api/client';
 import { Field } from '@/components/form';
 import { Button, Notice } from '@/components/states';
+import { Txt } from '@/components/text';
+import { useResource } from '@/hooks/use-resource';
+import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
 import { space } from '@/theme';
+
+/** Said wherever the app asks the API for an email. The API writes the message to an outbox table and sends nothing. */
+export const PREVIEW_EMAIL_NOTE = 'In this preview no email is actually sent, so the link will not arrive in your inbox.';
+
+export const SUSPENDED_TITLE = "This account can't be used right now";
+export const SUSPENDED_BODY =
+  'You have been signed out on this device. Your bets and settings are kept. To ask for a copy of your data, or to have it deleted, contact OddVex support and give the email address on the account. The privacy policy on the OddVex website explains your options.';
+
+/** Shown on the log in screen after the API reports `account_suspended`. Text only: there is nothing to tap. */
+export function SuspendedNotice() {
+  return <Notice tone="warn" title={SUSPENDED_TITLE} text={SUSPENDED_BODY} />;
+}
+
+/**
+ * "Email verified" or "Email not verified". While it is not, and the `email_flows` flag is on, a button asks
+ * the API for a new confirmation message and shows the API's answer next to the preview statement.
+ */
+export function EmailVerificationStatus() {
+  const session = useSession();
+  const emailFlows = useFlag('email_flows');
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  if (!session.user) return null;
+
+  if (session.user.email_verified) {
+    return <Txt variant="secondary">Email verified</Txt>;
+  }
+
+  async function send() {
+    setPending(true);
+    setError(null);
+    setMessage(null);
+    try {
+      setMessage((await requestEmailVerification()).message);
+      // Picks up an address that was confirmed somewhere else in the meantime.
+      await session.refreshUser().catch(() => {});
+    } catch (caught) {
+      setError(describeError(caught, 'The verification email could not be requested. Try again.'));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <View style={styles.form}>
+      <View style={styles.status}>
+        <Txt variant="secondary">Email not verified</Txt>
+        <Txt variant="caption" tone="muted">
+          Nothing in OddVex is held back while your address is unconfirmed.
+        </Txt>
+      </View>
+      {emailFlows ? (
+        <>
+          {error ? <Notice tone="error" text={error} /> : null}
+          {message ? <Notice tone="accent" text={message} /> : null}
+          <Button label={pending ? 'Sending verification email' : 'Send verification email'} variant="secondary" disabled={pending} onPress={send} />
+          <Txt variant="caption" tone="muted">
+            {PREVIEW_EMAIL_NOTE}
+          </Txt>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+export const PREVIEW_ENTITLEMENTS_LINE = 'Preview: every feature is included';
+
+/** One line while plans are not enforced. There is nothing to buy in this app. If the read fails, nothing is shown. */
+export function EntitlementsLine({ userId }: { userId: string }) {
+  const entitlements = useResource(`entitlements:${userId}`, getEntitlements);
+  if (!entitlements.data?.preview) return null;
+  return (
+    <Txt variant="caption" tone="muted">
+      {PREVIEW_ENTITLEMENTS_LINE}
+    </Txt>
+  );
+}
 
 /** The same checks, in the same words, as the web form. */
 export function validatePasswordChange(current: string, next: string): string | null {
@@ -96,4 +177,4 @@ export function DeleteAccountForm() {
   );
 }
 
-const styles = StyleSheet.create({ form: { gap: space[3] } });
+const styles = StyleSheet.create({ form: { gap: space[3] }, status: { gap: 2 } });

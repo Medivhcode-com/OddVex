@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import Bet, BetLeg
@@ -15,6 +15,7 @@ from ..errors import AUTH_ERROR_RESPONSES, NOT_FOUND_RESPONSE, ErrorResponse, no
 from ..flags.service import require_flag
 from ..notifications import service as notifications
 from ..notifications import templates
+from ..textnorm import fold
 from . import analytics, service
 from .schemas import (
     AutoSettleOut,
@@ -85,7 +86,9 @@ def list_bets(
     if market and market.strip():
         query = query.where(Bet.legs.any(BetLeg.market == market.strip().lower()))
     if sportsbook and sportsbook.strip():
-        query = query.where(func.lower(Bet.sportsbook) == sportsbook.strip().lower())
+        # Compared against a key folded in Python (``textnorm.fold``), not SQL ``lower()``,
+        # which only folds ASCII on SQLite and on PostgreSQL with the C locale.
+        query = query.where(Bet.sportsbook_key == fold(sportsbook))
     if bet_type is not None:
         query = query.where(Bet.bet_type == bet_type)
     column = {"placed_at": Bet.placed_at, "stake": Bet.stake, "profit": Bet.profit}[

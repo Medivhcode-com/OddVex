@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import text
 
 from .. import __version__
 from ..board import SYNTHETIC_NOTICE
@@ -34,16 +36,36 @@ from .schemas import (
     ValueScreenOut,
 )
 
+logger = logging.getLogger("oddvex.health")
+
 health_router = APIRouter(tags=["meta"])
 router = APIRouter()
 
 
 @health_router.get(
-    "/health", response_model=HealthOut, operation_id="get_health", summary="Liveness check"
+    "/health",
+    response_model=HealthOut,
+    operation_id="get_health",
+    summary="Liveness check",
+    description=(
+        "Always answers 200 while the process is up. `database` is the result of a cheap "
+        "`SELECT 1`; when it fails, `status` is `degraded`."
+    ),
 )
-def get_health(provider: ProviderDep) -> HealthOut:
+def get_health(provider: ProviderDep, request: Request) -> HealthOut:
+    database: Literal["ok", "error"] = "ok"
+    try:
+        with request.app.state.session_factory() as session:
+            session.execute(text("SELECT 1"))
+    except Exception:  # the health check must answer whatever the database does
+        database = "error"
+        logger.warning("health_database_check_failed", exc_info=True)
     return HealthOut(
-        status="ok", version=__version__, data_mode="synthetic", server_time=provider.now()
+        status="ok" if database == "ok" else "degraded",
+        version=__version__,
+        data_mode=provider.data_mode,  # type: ignore[arg-type]
+        server_time=provider.now(),
+        database=database,
     )
 
 
@@ -56,7 +78,7 @@ def get_health(provider: ProviderDep) -> HealthOut:
 )
 def get_meta(provider: ProviderDep) -> MetaOut:
     return MetaOut(
-        data_mode="synthetic",
+        data_mode=provider.data_mode,  # type: ignore[arg-type]
         provider=provider.name,
         version=__version__,
         server_time=provider.now(),

@@ -9,7 +9,7 @@ import { Button, Notice, Panel, PanelHeading, SkeletonCards } from '@/components
 import { Txt } from '@/components/text';
 import { useResource } from '@/hooks/use-resource';
 import { useFlag } from '@/providers/flags';
-import { ValueEntry } from '@/screens/value';
+import { ValueEntry } from '@/components/value-entry';
 import { space } from '@/theme';
 
 export function ToolsScreen() {

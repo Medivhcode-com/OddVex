@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react-native';
 import { router } from 'expo-router';
 
 import { ApiError, ApiUnavailableError } from '@/api/client';
-import { AGE_CONFIRMATION, LoginScreen, SignupScreen, validateSignup } from '@/screens/auth';
+import { SUSPENDED_BODY, SUSPENDED_TITLE } from '@/components/account-forms';
+import { AGE_CONFIRMATION, LoginScreen, PASSWORD_RESET_DONE, SignupScreen, validateSignup } from '@/screens/auth';
+import { flagsAllOn } from '@/test/fixtures';
+import { WithFlags } from '@/test/flags';
 import { fakeSession, WithSession } from '@/test/session';
 
 beforeEach(() => {
@@ -60,6 +63,63 @@ describe('LoginScreen', () => {
     expect(await screen.findByText(message)).toBeOnTheScreen();
     expect(screen.getByRole('alert')).toBeOnTheScreen();
     expect(router.back).not.toHaveBeenCalled();
+  });
+});
+
+describe('LoginScreen account states', () => {
+  it('opens the reset screen from "Forgot password?" while email flows are on', async () => {
+    jest.mocked(router.push).mockClear();
+    await render(
+      <WithFlags flags={flagsAllOn}>
+        <WithSession value={fakeSession({ user: null })}>
+          <LoginScreen />
+        </WithSession>
+      </WithFlags>,
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Forgot password?' }));
+    expect(router.push).toHaveBeenCalledWith('/forgot-password');
+  });
+
+  it('confirms a finished password reset', async () => {
+    await render(
+      <WithSession value={fakeSession({ user: null })}>
+        <LoginScreen passwordReset />
+      </WithSession>,
+    );
+    expect(screen.getByText(PASSWORD_RESET_DONE)).toBeOnTheScreen();
+  });
+
+  it('explains a suspended account neutrally when log in answers 403, with where to ask for the data', async () => {
+    const session = fakeSession({
+      user: null,
+      logIn: jest.fn().mockRejectedValue(new ApiError(403, 'account_suspended', "This account can't be used right now. Contact support.")),
+    });
+    await render(
+      <WithSession value={session}>
+        <LoginScreen />
+      </WithSession>,
+    );
+
+    await fireEvent.changeText(screen.getByLabelText('Email'), 'sam@example.test');
+    await fireEvent.changeText(screen.getByLabelText('Password'), 'correct horse battery');
+    await fireEvent.press(screen.getByRole('button', { name: 'Log in' }));
+
+    expect(await screen.findByText(SUSPENDED_TITLE)).toBeOnTheScreen();
+    expect(screen.getByText(SUSPENDED_BODY)).toBeOnTheScreen();
+    expect(SUSPENDED_BODY).toMatch(/To ask for a copy of your data, or to have it deleted, contact OddVex support/);
+    expect(SUSPENDED_BODY).toMatch(/signed out on this device/);
+    expect(router.back).not.toHaveBeenCalled();
+  });
+
+  it('shows the same message after a 401 elsewhere ended the session', async () => {
+    await render(
+      <WithSession value={fakeSession({ user: null, suspended: true })}>
+        <LoginScreen />
+      </WithSession>,
+    );
+    expect(screen.getByText(SUSPENDED_TITLE)).toBeOnTheScreen();
+    expect(screen.getByText(SUSPENDED_BODY)).toBeOnTheScreen();
   });
 });
 

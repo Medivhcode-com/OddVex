@@ -6,16 +6,29 @@ import { Button, ButtonLink, Field, Notice } from "@/components/ui/primitives";
 import {
   confirmEmailAction,
   loginAction,
+  requestEmailVerificationAction,
   requestPasswordResetAction,
   resetPasswordAction,
   signupAction,
   type AuthState,
+  type ConfirmEmailState,
   type ResetRequestState,
+  type VerificationRequestState,
 } from "@/lib/auth-actions";
 
 const initial: AuthState = {};
 
-export function LoginForm({ next, notice }: { next: string; notice?: string }) {
+/** Shown after a login attempt on a suspended account, and when a suspended session was just ended. */
+function SuspendedNotice({ role }: { role: "alert" | "status" }) {
+  return (
+    <Notice tone="warn" role={role} title="This account is suspended">
+      You can&rsquo;t log in to it right now. You can still ask for a copy of your data, or ask us to delete it.{" "}
+      <Link href="/contact">Contact us</Link>
+    </Notice>
+  );
+}
+
+export function LoginForm({ next, notice, suspended = false }: { next: string; notice?: string; suspended?: boolean }) {
   const [state, action, pending] = useActionState(loginAction, initial);
   const errorRef = useRef<HTMLDivElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -33,7 +46,7 @@ export function LoginForm({ next, notice }: { next: string; notice?: string }) {
   }
 
   useEffect(() => {
-    if (!state.error) return;
+    if (!state.error && !state.suspended) return;
     // Move focus to the message so keyboard and screen reader users land on what went wrong.
     errorRef.current?.focus();
     // Clear the rejected password, unless a new one was typed while the request was running.
@@ -44,10 +57,11 @@ export function LoginForm({ next, notice }: { next: string; notice?: string }) {
   return (
     <form action={action} onSubmit={submit} className="space-y-4" noValidate>
       <input type="hidden" name="next" value={next} />
-      {notice && !state.error ? <Notice tone="accent" role="status">{notice}</Notice> : null}
-      {state.error ? (
+      {notice && !state.error && !state.suspended ? <Notice tone="accent" role="status">{notice}</Notice> : null}
+      {suspended && !state.error && !state.suspended ? <SuspendedNotice role="status" /> : null}
+      {state.error || state.suspended ? (
         <div ref={errorRef} tabIndex={-1} className="rounded-cell">
-          <Notice tone="error">{state.error}</Notice>
+          {state.suspended ? <SuspendedNotice role="alert" /> : <Notice tone="error">{state.error}</Notice>}
         </div>
       ) : null}
       <Field id="email" name="email" type="email" label="Email" autoComplete="email" defaultValue={state.values?.email} required />
@@ -150,8 +164,51 @@ export function ResetPasswordForm({ token }: { token: string }) {
   );
 }
 
-export function ConfirmEmailForm({ token }: { token: string }) {
-  const [state, action, pending] = useActionState(confirmEmailAction, {} as AuthState & { done?: boolean });
+/**
+ * Asks for a new confirmation link for the signed-in account. The answer is neutral, and says
+ * plainly that this preview sends no email.
+ */
+export function ResendVerification({ variant = "secondary" }: { variant?: "primary" | "secondary" }) {
+  const [state, action, pending] = useActionState(requestEmailVerificationAction, {} as VerificationRequestState);
+  return (
+    <form action={action} className="space-y-3">
+      <Button type="submit" variant={variant} disabled={pending}>
+        {pending ? "Sending link" : "Send a new verification link"}
+      </Button>
+      <div aria-live="polite" className="space-y-3">
+        {state.error ? <Notice tone="error" role="status">{state.error}</Notice> : null}
+        {state.done ? (
+          <>
+            <Notice tone="accent" role="status">
+              A new confirmation link has been queued for your address. It works once and expires after 24 hours.
+            </Notice>
+            <Notice tone="warn">{PREVIEW_EMAIL_NOTE}</Notice>
+          </>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+export function ConfirmEmailForm({ token, canResend = false }: { token: string; canResend?: boolean }) {
+  const [state, action, pending] = useActionState(confirmEmailAction, {} as ConfirmEmailState);
+  if (state.expired) {
+    return (
+      <div className="space-y-4">
+        <Notice tone="error">{state.error}</Notice>
+        {canResend ? (
+          <ResendVerification />
+        ) : (
+          <p className="text-sm text-muted">
+            <Link href="/login?next=/app/settings" className="text-ink underline underline-offset-4">
+              Log in
+            </Link>{" "}
+            to request a new link from Settings.
+          </p>
+        )}
+      </div>
+    );
+  }
   if (state.done) {
     return (
       <div className="space-y-4">

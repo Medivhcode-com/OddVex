@@ -3,8 +3,9 @@ import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { API_URL } from '@/api/client';
+import type { Plan } from '@/api/types';
 import { Segmented } from '@/components/choice';
-import { ChangePasswordForm, DeleteAccountForm } from '@/components/account-forms';
+import { ChangePasswordForm, DeleteAccountForm, EmailVerificationStatus, EntitlementsLine } from '@/components/account-forms';
 import {
   NOTIFICATIONS_IN_APP_ONLY,
   NotificationPreferencesForm,
@@ -90,6 +91,8 @@ function Fact({ label, value, plain = false }: { label: string; value: string; p
   );
 }
 
+const PLAN_NAMES: Record<Plan, string> = { free: 'Free', premium: 'Premium' };
+
 function Account() {
   const router = useRouter();
   const session = useSession();
@@ -117,6 +120,9 @@ function Account() {
     <View style={styles.block}>
       <Fact label="Name" value={session.user.display_name} plain />
       <Fact label="Email" value={session.user.email} plain />
+      <EmailVerificationStatus />
+      {session.user.plan ? <Fact label="Plan" value={PLAN_NAMES[session.user.plan]} plain /> : null}
+      <EntitlementsLine userId={session.user.id} />
       <Button label="Log out" variant="secondary" onPress={() => void session.logOut()} />
     </View>
   );

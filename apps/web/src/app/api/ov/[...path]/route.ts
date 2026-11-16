@@ -9,8 +9,11 @@ import { isRequestId, upstreamMetaHeaders } from "@/lib/request-meta";
  * The visitor's address and a request id are forwarded exactly as `api()` does (see
  * `lib/request-meta.ts`: the API honours the address only with `ODDVEX_TRUST_PROXY=true`).
  * The request id comes back as `X-Request-ID` so a failed call can be matched to the API log.
+ *
+ * `/v1/admin` is deliberately not on the list: admin reads happen in server components and
+ * admin changes in server actions (`lib/admin-actions.ts`), never from the browser.
  */
-const ALLOWED = /^v1\/(quant|bets|sync|assistant|events|players|props|me|watchlist|alerts|notifications)(\/|$)/;
+const ALLOWED = /^v1\/(quant|bets|sync|assistant|events|players|props|me|watchlist|alerts|notifications|value|flags)(\/|$)/;
 
 function errorResponse(status: number, code: string, message: string, requestId?: string) {
   return NextResponse.json({ error: { code, message } }, { status, headers: requestId ? { "x-request-id": requestId } : undefined });
@@ -55,7 +58,8 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
   const upstreamId = upstream.headers.get("x-request-id");
   const requestId = isRequestId(upstreamId) ? upstreamId : meta.requestId;
   if (upstream.status === 204) return new NextResponse(null, { status: 204, headers: { "x-request-id": requestId } });
-  return new NextResponse(await upstream.text(), {
+  const text = await upstream.text();
+  const response = new NextResponse(text, {
     status: upstream.status,
     headers: {
       "content-type": upstream.headers.get("content-type") ?? "application/json",
@@ -63,6 +67,9 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
       "x-request-id": requestId,
     },
   });
+  // A suspended account: end the session here, so the next page load is signed out.
+  if (upstream.status === 401 && token && text.includes('"account_suspended"')) response.cookies.delete(SESSION_COOKIE);
+  return response;
 }
 
 export { forward as GET, forward as POST, forward as PUT, forward as PATCH, forward as DELETE };

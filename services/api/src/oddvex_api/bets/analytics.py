@@ -28,6 +28,12 @@ ANALYTICS_NOTE = (
     "the day the bet was placed and months the day it was settled, both in UTC. Past "
     "results do not predict future results."
 )
+#: Shown next to the streak numbers. Neutral on purpose: no praise for a winning run and
+#: no suggestion that a losing run is about to end.
+STREAK_NOTE = (
+    "Streaks describe the order of past results only. A run of wins or losses says "
+    "nothing about what happens next: each result is independent of the run before it."
+)
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _MONTHS = (
     "January",
@@ -127,6 +133,7 @@ def analyze(bets: Sequence[Bet]) -> BetAnalyticsOut:
         longest_win_streak=runs.longest_win,
         longest_loss_streak=runs.longest_loss,
         current_streak=CurrentStreakOut(kind=runs.current_kind, length=runs.current_length),  # type: ignore[arg-type]
+        streak_note=STREAK_NOTE,
         average_stake=float(money(average_stake)) if average_stake is not None else None,
         average_odds=price_out(average_odds) if average_odds is not None else None,
         clv=ClvAnalyticsOut(

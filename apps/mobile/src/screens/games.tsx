@@ -14,7 +14,7 @@ import { useWatchlist } from '@/hooks/use-watchlist';
 import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
 import { useMeta } from '@/providers/meta';
-import { ValueEntry } from '@/screens/value';
+import { ValueEntry } from '@/components/value-entry';
 import { space } from '@/theme';
 
 const GROUPS: readonly { status: EventStatus; title: string }[] = [

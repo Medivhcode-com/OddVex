@@ -25,9 +25,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from ..textnorm import fold, user_search_key
 from .base import Base, UTCDateTime, new_id, utcnow
 
 MONEY = Numeric(14, 2)
@@ -55,6 +57,9 @@ class User(Base):
     status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: Folded email and display name (``textnorm.user_search_key``), kept in step by a
+    #: mapper event below. The admin user search matches against it.
+    search_key: Mapped[str | None] = mapped_column(String(1024))
 
     bets: Mapped[list[Bet]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
@@ -110,6 +115,9 @@ class Bet(Base):
     result: Mapped[str | None] = mapped_column(String(16))
     sport: Mapped[str] = mapped_column(String(32), default="unknown")
     sportsbook: Mapped[str] = mapped_column(String(80))
+    #: ``textnorm.fold(sportsbook)``, kept in step by a mapper event below. The
+    #: case-insensitive sportsbook filter compares against it.
+    sportsbook_key: Mapped[str | None] = mapped_column(String(255))
     stake: Mapped[Decimal] = mapped_column(MONEY)
     odds_decimal: Mapped[Decimal] = mapped_column(ODDS)
     #: "legs" when the price is the product of the legs, "override" when supplied by the user.
@@ -287,7 +295,7 @@ class Notification(Base):
         String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     #: price_alert | line_move | game_start | game_final | bet_settled | sync_finished |
-    #: stake_reminder
+    #: stake_reminder | new_follower | pick_comment | pick_graded
     kind: Mapped[str] = mapped_column(String(24))
     title: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(Text)
@@ -408,3 +416,178 @@ class AuditLog(Base):
     ip: Mapped[str | None] = mapped_column(String(64))
     request_id: Mapped[str | None] = mapped_column(String(64))
     details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+# ------------------------------------------------------------------ community
+class CommunityProfile(Base):
+    """An opt-in public identity. Without a public one a user cannot post and is not listed.
+
+    The handle is the only identifier other users ever see: never the email, the display
+    name or the user id.
+    """
+
+    __tablename__ = "community_profiles"
+
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    #: 3 to 20 characters of ``[a-z0-9_]``, stored lower-case, so unique means unique
+    #: whatever the case typed.
+    handle: Mapped[str] = mapped_column(String(20), unique=True)
+    bio: Mapped[str | None] = mapped_column(Text)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: visible | hidden | removed. Anything but ``visible`` was set by a moderator.
+    moderation_status: Mapped[str] = mapped_column(
+        String(16), default="visible", server_default="visible"
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class CommunityPick(Base):
+    """A structured selection posted before the event and graded from the final score.
+
+    There is no stake, no unit size and no confidence rating. ``price_decimal`` is the
+    best open, non-stale price the server saw when the pick was posted.
+    """
+
+    __tablename__ = "community_picks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_id", "market", name="uq_community_picks_user_event"),
+        Index("ix_community_picks_posted_at", "posted_at"),
+        Index("ix_community_picks_status_start", "status", "event_start_time"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: Provider ids and labels captured at creation. Not foreign keys.
+    event_id: Mapped[str] = mapped_column(String(64), index=True)
+    league: Mapped[str] = mapped_column(String(32))
+    event_label: Mapped[str] = mapped_column(String(200))
+    selection: Mapped[str] = mapped_column(String(200))
+    event_start_time: Mapped[datetime] = mapped_column(UTCDateTime)
+    #: moneyline | spread | total
+    market: Mapped[str] = mapped_column(String(16))
+    #: home | away | draw | over | under
+    outcome_key: Mapped[str] = mapped_column(String(16))
+    line: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    price_decimal: Mapped[Decimal] = mapped_column(ODDS)
+    #: The sportsbook that offered ``price_decimal`` (key and display name).
+    sportsbook_key: Mapped[str] = mapped_column(String(64))
+    sportsbook_name: Mapped[str] = mapped_column(String(80))
+    analysis: Mapped[str | None] = mapped_column(Text)
+    posted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    #: pending | graded | void (the provider dropped the event before a final score).
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    #: won | lost | push once graded.
+    result: Mapped[str | None] = mapped_column(String(16))
+    graded_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    home_score: Mapped[int | None] = mapped_column(Integer)
+    away_score: Mapped[int | None] = mapped_column(Integer)
+    #: visible | hidden | removed. Anything but ``visible`` was set by a moderator.
+    moderation_status: Mapped[str] = mapped_column(
+        String(16), default="visible", server_default="visible"
+    )
+
+
+class CommunityComment(Base):
+    __tablename__ = "community_comments"
+    __table_args__ = (Index("ix_community_comments_pick_created", "pick_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    pick_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("community_picks.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: Plain text, stored exactly as sent. Clients escape it when they render it.
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    moderation_status: Mapped[str] = mapped_column(
+        String(16), default="visible", server_default="visible"
+    )
+
+
+class CommunityFollow(Base):
+    __tablename__ = "community_follows"
+
+    follower_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    followed_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class CommunityLike(Base):
+    __tablename__ = "community_likes"
+
+    pick_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("community_picks.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class CommunityBlock(Base):
+    __tablename__ = "community_blocks"
+
+    blocker_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    blocked_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class CommunityReport(Base):
+    """A user's report of a pick, a comment or a profile, for a moderator to resolve."""
+
+    __tablename__ = "community_reports"
+    __table_args__ = (Index("ix_community_reports_status_created", "status", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    reporter_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: pick | comment | profile
+    target_type: Mapped[str] = mapped_column(String(16))
+    #: The pick id, the comment id, or the handle as it was when the profile was reported.
+    target_id: Mapped[str] = mapped_column(String(32))
+    #: Who posted the reported content. The report goes when that account is deleted,
+    #: because the content goes with it.
+    target_user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: spam | harassment | inducement_to_bet | misleading_claims | personal_information | other
+    reason: Mapped[str] = mapped_column(String(32))
+    details: Mapped[str | None] = mapped_column(Text)
+    #: open | resolved
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: The administrator who resolved it. A plain id, like ``audit_log.user_id``.
+    resolved_by: Mapped[str | None] = mapped_column(String(32))
+    #: dismiss | hide_content | remove_content | suspend_author
+    resolution_action: Mapped[str | None] = mapped_column(String(24))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------------------------------------------------------- folded text keys
+@event.listens_for(User, "before_insert")
+@event.listens_for(User, "before_update")
+def _set_user_search_key(_mapper: Any, _connection: Any, target: User) -> None:
+    target.search_key = user_search_key(target.email, target.display_name)
+
+
+@event.listens_for(Bet, "before_insert")
+@event.listens_for(Bet, "before_update")
+def _set_bet_sportsbook_key(_mapper: Any, _connection: Any, target: Bet) -> None:
+    target.sportsbook_key = fold(target.sportsbook)

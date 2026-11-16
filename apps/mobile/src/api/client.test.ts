@@ -326,3 +326,79 @@ describe('alerts and notifications', () => {
     ]);
   });
 });
+
+describe('flags, value screen, analytics and account flows', () => {
+  const sent = () =>
+    fetchMock.mock.calls.map(([url, init]) => ({
+      method: init.method as string,
+      path: String(url).replace(client.API_URL, ''),
+      headers: init.headers as Record<string, string>,
+      body: init.body === undefined ? undefined : (JSON.parse(init.body) as unknown),
+    }));
+
+  afterEach(() => setAuthToken(null));
+
+  it('unwraps the flags and sends no token', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse({ flags: { value_screen: true, community: false } }));
+
+    await expect(client.getFlags()).resolves.toEqual({ value_screen: true, community: false });
+    expect(sent()[0]).toMatchObject({ method: 'GET', path: '/v1/flags' });
+    expect(sent()[0].headers.authorization).toBeUndefined();
+  });
+
+  it('builds the value screen query and leaves out filters that are not set', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ rows: [] }));
+
+    await client.getValueScreen();
+    await client.getValueScreen({ league: 'nba', market: 'total', minEdge: 0.02 });
+    await client.getValueScreen({ league: null, market: null, minEdge: 0 });
+
+    expect(sent().map((request) => request.path)).toEqual(['/v1/value', '/v1/value?league=nba&market=total&min_edge=0.02', '/v1/value']);
+  });
+
+  it('sends the token for analytics, entitlements and a verification request, and not for the link flows', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse({ message: 'ok' }, 202));
+
+    await client.getBetAnalytics();
+    await client.getEntitlements();
+    await client.requestEmailVerification();
+    await client.confirmEmailVerification('tok_0123456789abcdef');
+    await client.requestPasswordReset('sam@example.test');
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => undefined });
+    await expect(client.confirmPasswordReset('tok_0123456789abcdef', 'a much newer password')).resolves.toBeUndefined();
+
+    expect(sent().map((request) => [request.method, request.path, request.headers.authorization, request.body])).toEqual([
+      ['GET', '/v1/bets/analytics', 'Bearer token-1', undefined],
+      ['GET', '/v1/me/entitlements', 'Bearer token-1', undefined],
+      ['POST', '/v1/auth/verify-email/request', 'Bearer token-1', {}],
+      ['POST', '/v1/auth/verify-email/confirm', undefined, { token: 'tok_0123456789abcdef' }],
+      ['POST', '/v1/auth/password-reset/request', undefined, { email: 'sam@example.test' }],
+      ['POST', '/v1/auth/password-reset/confirm', undefined, { token: 'tok_0123456789abcdef', new_password: 'a much newer password' }],
+    ]);
+  });
+
+  it('tells a switched-off feature and a suspended account apart from other errors', async () => {
+    const disabled = new client.ApiError(404, 'feature_disabled', 'This feature is not available');
+    expect(client.isFeatureDisabled(disabled)).toBe(true);
+    expect(client.isFeatureDisabled(new client.ApiError(404, 'not_found', 'Event not found'))).toBe(false);
+    expect(client.describeError(disabled, 'fallback')).toBe("This feature isn't available right now.");
+
+    expect(client.isAccountSuspended(new client.ApiError(401, 'account_suspended', 'This account is suspended'))).toBe(true);
+    expect(client.isAccountSuspended(new client.ApiError(403, 'account_suspended', 'x'))).toBe(true);
+    expect(client.isAccountSuspended(new client.ApiError(401, 'invalid_token', 'x'))).toBe(false);
+  });
+
+  it('hands the reason to the session when a token is rejected', async () => {
+    setAuthToken('token-1');
+    const onUnauthorized = jest.fn();
+    client.setUnauthorizedHandler(onUnauthorized);
+    fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'account_suspended', message: 'This account is suspended' } }, 401));
+
+    await expect(client.getBetAnalytics()).rejects.toMatchObject({ status: 401, code: 'account_suspended' });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(client.isAccountSuspended(onUnauthorized.mock.calls[0][0])).toBe(true);
+    client.setUnauthorizedHandler(null);
+  });
+});
