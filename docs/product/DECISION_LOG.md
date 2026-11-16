@@ -39,13 +39,14 @@ session. Nothing has been inferred.
 | D-011 | 2026-11-16 | Decision under D-007 | Community and its leaderboard ship switched off. Picks are structured and machine-graded only; no stakes, units, paid picks, links or direct messages | G-10 not opened | Build session | Flags `community`, `community_leaderboard` | Turning either on for real users still needs the reviews named in the roadmap |
 | D-012 | 2026-11-16 | Decision under D-007 | A dependency audit runs in CI and fails on high or critical JavaScript advisories and any known Python vulnerability | — | Build session | `.github/workflows/ci.yml` job `audit` | Four moderate JavaScript advisories in build tooling were below the threshold when added |
 | D-013 | 2026-11-16 | Decision under D-007 | If the web app's page-hash file for the content security policy is missing in production, it falls back to a looser policy and logs an error instead of breaking pages | — | Build session | `apps/web` proxy | Reversible: can be changed to fail closed |
+| D-014 | 2026-11-16 | Instruction | Pull requests #10 (milestones 4 to 6, code only) and #11 (founder action receipts) merged to `main` | — | Founder (#11 by direct instruction; #10 under D-007) | Merge commits `01bd485` and `2bf4d88` | #10 merged by the build session after all eight CI jobs passed, without independent review |
 
 Standing facts as of 2026-11-16, recorded so that nobody assumes otherwise:
 
 | Gate | State |
 |---|---|
 | G-01 Paid APIs and data licences | Not opened. Nothing purchased |
-| G-02 Paid infrastructure | Not opened. Nothing purchased |
+| G-02 Paid infrastructure | Not opened. Nothing purchased. A free Neon preview database exists (see FOUNDER_ACTION_STATUS.md) |
 | G-03 Production deployment | Not opened. Nothing deployed |
 | G-04 Store submission | Not opened. No store account |
 | G-05 External marketing | Not opened. Nothing published |
