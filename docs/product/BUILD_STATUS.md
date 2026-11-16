@@ -1,5 +1,14 @@
 # Build status (milestone 1 and the approval-free part of milestone 2)
 
+## Founder-action verification — 2026-11-16
+
+The launch-action receipt is [FOUNDER_ACTION_STATUS.md](FOUNDER_ACTION_STATUS.md) (MED-71). PR #10 head c044583 remains draft and has one failed mobile CI job: its analytics route imports a missing screen. Seven other jobs pass. The older test counts below are historical build-session results and do not verify mobile at the current PR head.
+
+A free Neon preview database was provisioned and a read-only connectivity query passed. It has no OddVex schema or application connection yet. Vercel is connected but medivh-code team access returns 403; no Vercel deployment was changed. The counsel and provider inquiries are saved drafts, not sent. Organization store enrollment, working mailboxes and physical-phone testing remain incomplete.
+
+See the dated counsel addendum and phone guide for corrections to the original founder checklist. This documentation work does not finish or merge PR #10's application code.
+
+
 What exists on the branch, and the evidence for it. Everything runs on synthetic data with fictional teams, players
 and sportsbooks. Nothing has been deployed, purchased or published.
 
