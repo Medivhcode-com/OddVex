@@ -59,9 +59,9 @@ def dev_latest_email(
     row = db.scalar(query.order_by(EmailOutbox.created_at.desc(), EmailOutbox.id.desc()).limit(1))
     if row is None:
         raise ApiError(404, "not_found", "No email in the outbox for that address")
-    token = None
+    token: str | None = None
     if row.dev_link:
-        token = (parse_qs(urlsplit(row.dev_link).query).get("token") or [None])[0]
+        token = next(iter(parse_qs(urlsplit(row.dev_link).query).get("token", [])), None)
     return DevEmailOut(
         id=row.id,
         to=row.to_email,

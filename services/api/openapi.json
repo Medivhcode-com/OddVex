@@ -104,6 +104,159 @@
         "title": "AccountExportOut",
         "type": "object"
       },
+      "AdminAuditPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `before` to get the next (older) page.",
+            "title": "Next Before"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminAuditPageOut",
+        "type": "object"
+      },
+      "AdminFlagListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFlagOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminFlagListOut",
+        "type": "object"
+      },
+      "AdminFlagOut": {
+        "properties": {
+          "default": {
+            "description": "The in-code default, used while there is no override.",
+            "title": "Default",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "overridden": {
+            "description": "True when a stored value replaces the default.",
+            "title": "Overridden",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the stored value last changed. Null without one.",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "key",
+          "description",
+          "enabled",
+          "default",
+          "overridden"
+        ],
+        "title": "AdminFlagOut",
+        "type": "object"
+      },
+      "AdminOutboxEmailOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "template": {
+            "title": "Template",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "to",
+          "template",
+          "subject",
+          "created_at"
+        ],
+        "title": "AdminOutboxEmailOut",
+        "type": "object"
+      },
+      "AdminOutboxListOut": {
+        "properties": {
+          "delivery": {
+            "description": "How email leaves the system. `outbox`: it does not.",
+            "title": "Delivery",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminOutboxEmailOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "delivery"
+        ],
+        "title": "AdminOutboxListOut",
+        "type": "object"
+      },
       "AdminOverviewOut": {
         "properties": {
           "bet_count": {
@@ -147,6 +300,116 @@
           "recent_audit"
         ],
         "title": "AdminOverviewOut",
+        "type": "object"
+      },
+      "AdminUserListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Users matching the filters, before `limit` and `offset`.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AdminUserListOut",
+        "type": "object"
+      },
+      "AdminUserOut": {
+        "properties": {
+          "bet_count": {
+            "title": "Bet Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "email_verified": {
+            "title": "Email Verified",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "plan": {
+            "enum": [
+              "free",
+              "premium"
+            ],
+            "title": "Plan",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "suspended"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "display_name",
+          "role",
+          "plan",
+          "status",
+          "email_verified",
+          "created_at",
+          "bet_count"
+        ],
+        "title": "AdminUserOut",
         "type": "object"
       },
       "AlertEvaluationOut": {
@@ -431,6 +694,65 @@
           "state"
         ],
         "title": "AlertUpdate",
+        "type": "object"
+      },
+      "AnalyticsRowOut": {
+        "properties": {
+          "bets": {
+            "description": "Settled bets in this group.",
+            "title": "Bets",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "profit": {
+            "title": "Profit",
+            "type": "number"
+          },
+          "roi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "profit / staked, as a fraction.",
+            "title": "Roi"
+          },
+          "staked": {
+            "description": "Staked on them, void bets excluded.",
+            "title": "Staked",
+            "type": "number"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "wins / (wins + losses), as a fraction. Pushes and voids are left out.",
+            "title": "Win Rate"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "bets",
+          "staked",
+          "profit"
+        ],
+        "title": "AnalyticsRowOut",
         "type": "object"
       },
       "AssistantQueryRequest": {
@@ -836,6 +1158,111 @@
           "sportsbook"
         ],
         "title": "BestPriceOut",
+        "type": "object"
+      },
+      "BetAnalyticsOut": {
+        "properties": {
+          "average_odds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean of the bets' decimal odds, in every format."
+          },
+          "average_stake": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Stake"
+          },
+          "by_month": {
+            "description": "By the UTC month the bet was settled (key `YYYY-MM`), oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsRowOut"
+            },
+            "title": "By Month",
+            "type": "array"
+          },
+          "by_odds_band": {
+            "description": "By the bet's American price, shortest prices first. Always five rows.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsRowOut"
+            },
+            "title": "By Odds Band",
+            "type": "array"
+          },
+          "by_weekday": {
+            "description": "By the UTC weekday the bet was placed, Monday first. Always seven rows.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsRowOut"
+            },
+            "title": "By Weekday",
+            "type": "array"
+          },
+          "clv": {
+            "$ref": "#/components/schemas/ClvAnalyticsOut"
+          },
+          "current_streak": {
+            "$ref": "#/components/schemas/CurrentStreakOut"
+          },
+          "longest_loss_streak": {
+            "title": "Longest Loss Streak",
+            "type": "integer"
+          },
+          "longest_win_streak": {
+            "title": "Longest Win Streak",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sample_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when fewer than 30 bets are settled: results this small are mostly noise.",
+            "title": "Sample Note"
+          },
+          "settled_count": {
+            "title": "Settled Count",
+            "type": "integer"
+          },
+          "stake_distribution": {
+            "items": {
+              "$ref": "#/components/schemas/StakeBucketOut"
+            },
+            "title": "Stake Distribution",
+            "type": "array"
+          }
+        },
+        "required": [
+          "settled_count",
+          "by_odds_band",
+          "by_weekday",
+          "by_month",
+          "longest_win_streak",
+          "longest_loss_streak",
+          "current_streak",
+          "clv",
+          "stake_distribution",
+          "note"
+        ],
+        "title": "BetAnalyticsOut",
         "type": "object"
       },
       "BetCreate": {
@@ -2038,6 +2465,75 @@
         "title": "CLVResponse",
         "type": "object"
       },
+      "ClvAnalyticsOut": {
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean CLV, as a fraction.",
+            "title": "Average"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ClvBucketOut"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "sample": {
+            "description": "Settled bets with a closing price on every leg.",
+            "title": "Sample",
+            "type": "integer"
+          },
+          "share_beating_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of the sample with a CLV above 0, as a fraction.",
+            "title": "Share Beating Close"
+          }
+        },
+        "required": [
+          "sample",
+          "buckets"
+        ],
+        "title": "ClvAnalyticsOut",
+        "type": "object"
+      },
+      "ClvBucketOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "count"
+        ],
+        "title": "ClvBucketOut",
+        "type": "object"
+      },
       "ConsensusOut": {
         "properties": {
           "books_used": {
@@ -2151,6 +2647,93 @@
         "title": "ConvertResponse",
         "type": "object"
       },
+      "CurrentStreakOut": {
+        "properties": {
+          "kind": {
+            "description": "none: no settled bet with a profit or loss yet.",
+            "enum": [
+              "win",
+              "loss",
+              "none"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "length": {
+            "title": "Length",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "length"
+        ],
+        "title": "CurrentStreakOut",
+        "type": "object"
+      },
+      "DevEmailOut": {
+        "properties": {
+          "body_text": {
+            "title": "Body Text",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dev_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The link in the email.",
+            "title": "Dev Link"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "template": {
+            "title": "Template",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `token` parameter of that link.",
+            "title": "Token"
+          }
+        },
+        "required": [
+          "id",
+          "to",
+          "template",
+          "subject",
+          "body_text",
+          "created_at"
+        ],
+        "title": "DevEmailOut",
+        "type": "object"
+      },
       "EVRequest": {
         "properties": {
           "odds": {
@@ -2261,6 +2844,90 @@
           "caveat"
         ],
         "title": "EVResponse",
+        "type": "object"
+      },
+      "EmailVerificationConfirmRequest": {
+        "properties": {
+          "token": {
+            "maxLength": 256,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "EmailVerificationConfirmRequest",
+        "type": "object"
+      },
+      "EmailVerificationOut": {
+        "properties": {
+          "email_verified": {
+            "title": "Email Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email_verified"
+        ],
+        "title": "EmailVerificationOut",
+        "type": "object"
+      },
+      "EntitlementOut": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Numeric allowance, for features that have one.",
+            "title": "Limit"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "EntitlementOut",
+        "type": "object"
+      },
+      "EntitlementsOut": {
+        "properties": {
+          "features": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EntitlementOut"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "plan": {
+            "enum": [
+              "free",
+              "premium"
+            ],
+            "title": "Plan",
+            "type": "string"
+          },
+          "preview": {
+            "description": "True while plans are not enforced (flag `premium_gating` is off): every feature is enabled for every plan.",
+            "title": "Preview",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "plan",
+          "preview",
+          "features"
+        ],
+        "title": "EntitlementsOut",
         "type": "object"
       },
       "ErrorBody": {
@@ -2654,6 +3321,29 @@
           "action"
         ],
         "title": "ExportAuditEntryOut",
+        "type": "object"
+      },
+      "FlagsOut": {
+        "properties": {
+          "flags": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Every known feature flag and whether it is on.",
+            "examples": [
+              {
+                "community": false,
+                "value_screen": true
+              }
+            ],
+            "title": "Flags",
+            "type": "object"
+          }
+        },
+        "required": [
+          "flags"
+        ],
+        "title": "FlagsOut",
         "type": "object"
       },
       "GameFinalAlertCreate": {
@@ -3358,6 +4048,19 @@
         "title": "MarkAllReadOut",
         "type": "object"
       },
+      "MessageOut": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "MessageOut",
+        "type": "object"
+      },
       "MetaOut": {
         "properties": {
           "data_mode": {
@@ -3978,6 +4681,44 @@
           "new_password"
         ],
         "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PasswordResetConfirmRequest": {
+        "properties": {
+          "new_password": {
+            "maxLength": 128,
+            "minLength": 10,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 256,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "PasswordResetConfirmRequest",
+        "type": "object"
+      },
+      "PasswordResetRequest": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequest",
         "type": "object"
       },
       "PlayerDetailOut": {
@@ -4614,6 +5355,36 @@
         "title": "ScoreOut",
         "type": "object"
       },
+      "SetFlagRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "SetFlagRequest",
+        "type": "object"
+      },
+      "SetUserPlanRequest": {
+        "properties": {
+          "plan": {
+            "enum": [
+              "free",
+              "premium"
+            ],
+            "title": "Plan",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "SetUserPlanRequest",
+        "type": "object"
+      },
       "SportsbookOut": {
         "properties": {
           "key": {
@@ -4648,6 +5419,34 @@
           "name"
         ],
         "title": "SportsbookRef",
+        "type": "object"
+      },
+      "StakeBucketOut": {
+        "properties": {
+          "bets": {
+            "title": "Bets",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "staked": {
+            "title": "Staked",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "bets",
+          "staked"
+        ],
+        "title": "StakeBucketOut",
         "type": "object"
       },
       "StakeReminderOut": {
@@ -4712,6 +5511,22 @@
           "weekly_stake_threshold"
         ],
         "title": "StakeReminderUpdate",
+        "type": "object"
+      },
+      "SuspendUserRequest": {
+        "properties": {
+          "reason": {
+            "description": "Why the account is suspended. Stored in the audit log only.",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SuspendUserRequest",
         "type": "object"
       },
       "SyncConnectionCreate": {
@@ -5065,9 +5880,31 @@
             "title": "Email",
             "type": "string"
           },
+          "email_verified": {
+            "default": false,
+            "description": "Whether the email address was confirmed. Nothing is blocked while false.",
+            "title": "Email Verified",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "enum": [
+                  "free",
+                  "premium"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set by an administrator only. There is no purchase route and no billing.",
+            "title": "Plan"
           },
           "role": {
             "enum": [
@@ -5087,6 +5924,149 @@
           "created_at"
         ],
         "title": "UserOut",
+        "type": "object"
+      },
+      "ValueRowOut": {
+        "properties": {
+          "best_price": {
+            "$ref": "#/components/schemas/PriceOut",
+            "description": "Best open, non-stale price for the outcome."
+          },
+          "books_in_consensus": {
+            "description": "Books in that mean (at least 2).",
+            "title": "Books In Consensus",
+            "type": "integer"
+          },
+          "breakeven_probability": {
+            "description": "1 / decimal price: the probability at which the best price has zero EV.",
+            "title": "Breakeven Probability",
+            "type": "number"
+          },
+          "consensus_probability": {
+            "description": "Mean no-vig probability of the outcome over the other books at the same line. The sportsbook with the best price is not part of it.",
+            "title": "Consensus Probability",
+            "type": "number"
+          },
+          "edge": {
+            "description": "Expected value per 1 unit staked at the best price if the consensus probability were the true probability, as a fraction. Not a forecast.",
+            "title": "Edge",
+            "type": "number"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventSummaryOut"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the sportsbook last updated the best price.",
+            "title": "Last Updated"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line this outcome is quoted at (spread and total).",
+            "title": "Line"
+          },
+          "market": {
+            "enum": [
+              "moneyline",
+              "spread",
+              "total"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "outcome_key": {
+            "title": "Outcome Key",
+            "type": "string"
+          },
+          "outcome_name": {
+            "title": "Outcome Name",
+            "type": "string"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef",
+            "description": "The sportsbook offering that price."
+          },
+          "stale_after_seconds": {
+            "description": "A quote older than this is stale and is not on this screen.",
+            "title": "Stale After Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event",
+          "market",
+          "outcome_key",
+          "outcome_name",
+          "best_price",
+          "sportsbook",
+          "consensus_probability",
+          "books_in_consensus",
+          "edge",
+          "breakeven_probability",
+          "stale_after_seconds"
+        ],
+        "title": "ValueRowOut",
+        "type": "object"
+      },
+      "ValueScreenOut": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "caveat": {
+            "description": "What this screen does not tell you.",
+            "title": "Caveat",
+            "type": "string"
+          },
+          "data_mode": {
+            "const": "synthetic",
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "method": {
+            "description": "How the numbers are computed.",
+            "title": "Method",
+            "type": "string"
+          },
+          "min_edge": {
+            "title": "Min Edge",
+            "type": "number"
+          },
+          "rows": {
+            "description": "Largest edge first.",
+            "items": {
+              "$ref": "#/components/schemas/ValueRowOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows",
+          "min_edge",
+          "as_of",
+          "data_mode",
+          "method",
+          "caveat"
+        ],
+        "title": "ValueScreenOut",
         "type": "object"
       },
       "WatchlistItemCreate": {
@@ -5255,6 +6235,345 @@
         ]
       }
     },
+    "/v1/admin/audit": {
+      "get": {
+        "description": "`action` is an exact action name such as `admin.user_suspended`. `user_id` matches entries the user caused and entries about that user. Page with `limit` and the `next_before` cursor.",
+        "operationId": "admin_list_audit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "`next_before` from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_before` from the previous page.",
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Audit log, newest first",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/email-outbox": {
+      "get": {
+        "description": "What would have been sent: recipient, template and subject. Bodies, links and tokens are never returned here. No email is delivered in this build.",
+        "operationId": "admin_list_email_outbox",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOutboxListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Emails written to the outbox, newest first",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/flags": {
+      "get": {
+        "operationId": "admin_list_flags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFlagListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Feature flags with their descriptions and defaults",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/flags/{key}": {
+      "put": {
+        "description": "Stores an override of the in-code default; it applies to everyone at once. Only known keys exist (`404` otherwise). Turning `premium_gating` on is a pricing decision and needs Founder approval first.",
+        "operationId": "admin_set_flag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFlagRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFlagOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Turn a feature flag on or off",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/overview": {
       "get": {
         "operationId": "get_admin_overview",
@@ -5306,6 +6625,409 @@
           }
         ],
         "summary": "Counts, provider health and recent audit entries",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users": {
+      "get": {
+        "description": "`q` matches part of the email or display name, case-insensitively. Never returns password hashes or tokens.",
+        "operationId": "admin_list_users",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "suspended"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plan",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "free",
+                    "premium"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plan"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Users, newest first",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users/{user_id}/plan": {
+      "put": {
+        "description": "The only way a plan changes: there is no purchase route and no billing. While the `premium_gating` flag is off the plan gates nothing.",
+        "operationId": "admin_set_user_plan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set a user's plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users/{user_id}/suspend": {
+      "post": {
+        "description": "From then on the user's access tokens are rejected with `401 account_suspended` and login answers `403 account_suspended`. Their data is kept. An administrator cannot suspend themselves or another administrator (`409`). Suspending a suspended user changes nothing.",
+        "operationId": "admin_suspend_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspendUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An administrator cannot be suspended"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Suspend a user",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users/{user_id}/unsuspend": {
+      "post": {
+        "description": "The user can log in again and tokens that have not expired work again.",
+        "operationId": "admin_unsuspend_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lift a suspension",
         "tags": [
           "admin"
         ]
@@ -5743,6 +7465,7 @@
     },
     "/v1/auth/login": {
       "post": {
+        "description": "Besides the per-IP limit, an email address with too many failed logins inside the window (8 in 15 minutes by default) gets `429 rate_limited` until the window moves on, from any IP and whether or not an account exists for it. A suspended account gets `403 account_suspended` once the password is correct.",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -5775,6 +7498,16 @@
             },
             "description": "Missing or invalid credentials"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The account is suspended"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5797,6 +7530,133 @@
           }
         },
         "summary": "Exchange email + password for an access token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password-reset/confirm": {
+      "post": {
+        "description": "Every access token issued before the reset stops working. The token works once; a used, expired or unknown token is `400 invalid_or_expired_token`. Sign in again afterwards: no token is returned. Using the link also confirms the email address.",
+        "operationId": "confirm_password_reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The token is invalid, used or expired"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "summary": "Set a new password with the token from the link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password-reset/request": {
+      "post": {
+        "description": "Always answers 202 with the same body, whether or not an account exists for the email; the lookup and the email are handled after the response is sent. **No email is sent in this build**: the message is written to the outbox table. The link works once and expires after 60 minutes. Limited per IP and per email address. Behind the `email_flows` flag.",
+        "operationId": "request_password_reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "summary": "Queue a password reset link",
         "tags": [
           "auth"
         ]
@@ -5858,6 +7718,145 @@
           }
         },
         "summary": "Create an account (21+ attestation required)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/verify-email/confirm": {
+      "post": {
+        "description": "No sign-in needed: the token identifies the account. A token works once; a used, expired or unknown token is `400 invalid_or_expired_token`.",
+        "operationId": "confirm_email_verification",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailVerificationConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The token is invalid, used or expired"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "summary": "Confirm an email address with the token from the link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/verify-email/request": {
+      "post": {
+        "description": "Queues a confirmation email for the signed-in user. **No email is sent in this build**: the message is written to the outbox table. The link works once and expires after 24 hours; a new request replaces the earlier link. An unconfirmed address blocks nothing. Behind the `email_flows` flag.",
+        "operationId": "request_email_verification",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Queue a new email confirmation link",
         "tags": [
           "auth"
         ]
@@ -6113,6 +8112,63 @@
           }
         ],
         "summary": "Record a bet you placed elsewhere",
+        "tags": [
+          "bets"
+        ]
+      }
+    },
+    "/v1/bets/analytics": {
+      "get": {
+        "description": "Computed only from your settled bets. Ratios are fractions. With fewer than 30 settled bets `sample_note` says the results are mostly noise. Behind the `tracker_analytics` flag.",
+        "operationId": "get_bet_analytics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetAnalyticsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Odds bands, weekdays, months, streaks, CLV and stake sizes for your settled bets",
         "tags": [
           "bets"
         ]
@@ -6499,6 +8555,78 @@
         ]
       }
     },
+    "/v1/dev/email-outbox/latest": {
+      "get": {
+        "description": "Only when `ODDVEX_ENV` is not `production`; in production this is `404`. It needs no sign-in, so never expose a non-production API to the internet with real accounts in it. `template` narrows the search to `verify_email` or `password_reset`.",
+        "operationId": "dev_latest_email",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "maxLength": 320,
+              "minLength": 3,
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "template",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Template"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevEmailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Development only: the latest outbox email for an address, with its link",
+        "tags": [
+          "dev"
+        ]
+      }
+    },
     "/v1/events": {
       "get": {
         "description": "Without `date` the window is 3 days back to 4 days ahead (UTC). `date` selects one UTC calendar day.",
@@ -6787,6 +8915,28 @@
         ]
       }
     },
+    "/v1/flags": {
+      "get": {
+        "description": "Global on/off switches. A route behind a flag that is off answers `404 feature_disabled`. Clients use this to hide what is switched off.",
+        "operationId": "list_flags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlagsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Feature flags",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
     "/v1/leagues": {
       "get": {
         "operationId": "list_leagues",
@@ -6814,7 +8964,7 @@
     },
     "/v1/me": {
       "delete": {
-        "description": "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections and import runs. An audit entry containing only the opaque user id is retained.",
+        "description": "Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs, email tokens and outbox emails. An audit entry containing only the opaque user id is retained.",
         "operationId": "delete_me",
         "responses": {
           "204": {
@@ -6891,6 +9041,53 @@
           }
         ],
         "summary": "Current user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/me/entitlements": {
+      "get": {
+        "description": "Computed from one in-code catalog. There is no billing and no purchase route: a plan can only be set by an administrator. While `preview` is true nothing is gated.",
+        "operationId": "get_entitlements",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntitlementsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Your plan and what it includes",
         "tags": [
           "auth"
         ]
@@ -8505,6 +10702,120 @@
         ]
       }
     },
+    "/v1/value": {
+      "get": {
+        "description": "Outcomes of live and upcoming events whose best open, non-stale price is longer than the no-vig consensus of the other open, non-stale sportsbooks at the same line. The sportsbook with the best price is excluded from its own consensus and at least 2 other sportsbooks are required, otherwise the outcome is skipped. Sorted by `edge`, largest first. A price above the consensus is not proof of an edge and this is not a prediction; read `caveat`. Behind the `value_screen` flag.",
+        "operationId": "list_value",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "nba",
+                    "nfl",
+                    "mlb",
+                    "nhl",
+                    "soccer"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "moneyline",
+                    "spread",
+                    "total"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "description": "Smallest edge to include, as a fraction.",
+            "in": "query",
+            "name": "min_edge",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "description": "Smallest edge to include, as a fraction.",
+              "maximum": 10,
+              "minimum": 0,
+              "title": "Min Edge",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValueScreenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "summary": "Market discrepancies: best price against the consensus of the other books",
+        "tags": [
+          "value"
+        ]
+      }
+    },
     "/v1/watchlist": {
       "get": {
         "description": "Each item embeds the current team, player or event from the data provider. When the provider no longer has it, `available` is false and the embed is null.",
@@ -8818,8 +11129,16 @@
       "name": "assistant"
     },
     {
-      "description": "Administrator overview.",
+      "description": "Market discrepancies: best price against the no-vig consensus of the other sportsbooks (synthetic). A comparison of prices, not a prediction.",
+      "name": "value"
+    },
+    {
+      "description": "Administrator routes: overview, users, feature flags, audit log, email outbox. Every change is audited.",
       "name": "admin"
+    },
+    {
+      "description": "Development helpers. Every route here answers 404 in production.",
+      "name": "dev"
     }
   ]
 }

@@ -7,6 +7,7 @@ result.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from itertools import pairwise
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -70,7 +71,7 @@ def bucket_index(value: Number, upper_bounds: Sequence[Number]) -> int:
     """
     number = to_decimal_number(value)
     bounds = [to_decimal_number(bound, "bound") for bound in upper_bounds]
-    if any(later <= earlier for earlier, later in zip(bounds, bounds[1:], strict=False)):
+    if any(later <= earlier for earlier, later in pairwise(bounds)):
         raise QuantError("bucket bounds must be strictly increasing")
     for index, bound in enumerate(bounds):
         if number < bound:
