@@ -9,6 +9,16 @@ const API = "http://localhost:8210";
  * This catches contrast, naming and structure regressions. It does not replace a manual screen reader pass.
  */
 async function audit(page: import("@playwright/test").Page) {
+  // Let fades and color transitions finish first. Auditing mid-transition reads a half-faded color
+  // and reports a contrast failure that no one would ever see.
+  await page.evaluate(async () => {
+    await Promise.all(
+      document.getAnimations().map((animation) => {
+        const timing = animation.effect?.getComputedTiming();
+        return timing && timing.iterations === Infinity ? null : animation.finished.catch(() => null);
+      }),
+    );
+  });
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
   return results.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.length} node(s), e.g. ${v.nodes[0]?.target.join(" ")}`);
 }

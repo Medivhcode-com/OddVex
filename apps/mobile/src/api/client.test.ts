@@ -364,18 +364,18 @@ describe('flags, value screen, analytics and account flows', () => {
     await client.getBetAnalytics();
     await client.getEntitlements();
     await client.requestEmailVerification();
-    await client.confirmEmailVerification('tok_0123456789abcdef');
+    await client.confirmEmailVerification('example-token');
     await client.requestPasswordReset('sam@example.test');
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => undefined });
-    await expect(client.confirmPasswordReset('tok_0123456789abcdef', 'a much newer password')).resolves.toBeUndefined();
+    await expect(client.confirmPasswordReset('example-token', 'a much newer password')).resolves.toBeUndefined();
 
     expect(sent().map((request) => [request.method, request.path, request.headers.authorization, request.body])).toEqual([
       ['GET', '/v1/bets/analytics', 'Bearer token-1', undefined],
       ['GET', '/v1/me/entitlements', 'Bearer token-1', undefined],
       ['POST', '/v1/auth/verify-email/request', 'Bearer token-1', {}],
-      ['POST', '/v1/auth/verify-email/confirm', undefined, { token: 'tok_0123456789abcdef' }],
+      ['POST', '/v1/auth/verify-email/confirm', undefined, { token: 'example-token' }],
       ['POST', '/v1/auth/password-reset/request', undefined, { email: 'sam@example.test' }],
-      ['POST', '/v1/auth/password-reset/confirm', undefined, { token: 'tok_0123456789abcdef', new_password: 'a much newer password' }],
+      ['POST', '/v1/auth/password-reset/confirm', undefined, { token: 'example-token', new_password: 'a much newer password' }],
     ]);
   });
 
