@@ -11,8 +11,8 @@ import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Tracker analytics" };
 
-/** `streak_note` is rendered when the API sends it; older API versions do not. */
-type Analytics = Schemas["BetAnalyticsOut"] & { streak_note?: string | null };
+/** `streak_note` and `sample_note` are optional: each is rendered only when the API sends one. */
+type Analytics = Schemas["BetAnalyticsOut"];
 type GroupRow = Schemas["AnalyticsRowOut"];
 
 const DESCRIPTION = "Your settled bets by price, weekday and month, with streaks, closing line value and stake sizes. A record of what happened, not a forecast.";

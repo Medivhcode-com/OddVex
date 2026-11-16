@@ -581,7 +581,9 @@ def build_pick(board: Board, user_id: str, body: PickCreate, analysis: str | Non
         market=body.market,
         outcome_key=body.outcome_key,
         line=line,
-        price_decimal=best.price,
+        # Rounded to what the column holds, so the pick reads the same before and after
+        # it is stored, on every database.
+        price_decimal=best.price.quantize(Decimal("0.000001")),
         sportsbook_key=best.sportsbook.key,
         sportsbook_name=best.sportsbook.name,
         analysis=analysis,

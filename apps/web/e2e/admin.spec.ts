@@ -190,6 +190,16 @@ test.describe("admin console", () => {
       await expect(community.getByText("Off", { exact: true })).toBeVisible();
       expect((await (await request.get(`${API}/v1/flags`)).json()).flags.community).toBe(false);
 
+      // The same holds for every community_* flag the API defines, such as the leaderboard.
+      const known = (await (await request.get(`${API}/v1/flags`)).json()).flags as Record<string, boolean>;
+      if ("community_leaderboard" in known) {
+        const leaderboard = flags.getByRole("listitem").filter({ has: page.getByRole("heading", { name: "community_leaderboard", exact: true }) });
+        await leaderboard.getByRole("button", { name: /^Turn on/ }).click();
+        await expect(leaderboard.getByRole("note").getByText("legal review and a responsible-gambling review", { exact: false })).toBeVisible();
+        await leaderboard.getByRole("button", { name: "Cancel" }).click();
+        expect((await (await request.get(`${API}/v1/flags`)).json()).flags.community_leaderboard).toBe(false);
+      }
+
       try {
         await flag.getByRole("button", { name: /^Turn off/ }).click();
         await flag.getByRole("button", { name: "Confirm: turn off tracker_analytics" }).click();

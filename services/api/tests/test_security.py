@@ -22,7 +22,7 @@ from oddvex_api.config import DEV_JWT_SECRET
 from oddvex_api.db import Bet, User
 from oddvex_api.ratelimit import SlidingWindowRateLimiter
 
-from .conftest import PASSWORD, AppFactory, admin_headers, auth_headers, register, set_flag
+from .conftest import PASSWORD, AppFactory, admin_headers, auth_headers, register
 
 Headers = dict[str, str]
 BET = {
