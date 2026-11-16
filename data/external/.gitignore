@@ -1,0 +1,5 @@
+# Raw third-party data is never committed. Only the two documentation files are tracked.
+*
+!.gitignore
+!README.md
+!LICENSES.md
