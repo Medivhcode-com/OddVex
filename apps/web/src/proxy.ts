@@ -5,7 +5,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { API_URL, servedOverHttps, SESSION_COOKIE } from "@/lib/config";
 import { buildCsp, HSTS_VALUE } from "@/lib/csp";
 import { requestIdFrom, upstreamMetaHeaders } from "@/lib/request-meta";
-import { FLAGGED_PATHS } from "@/lib/site";
+import { flagsForPath } from "@/lib/site";
 import { THEME_SCRIPT } from "@/lib/theme-script";
 
 /**
@@ -83,8 +83,8 @@ async function mayBeAdmin(request: NextRequest, requestHeaders: Headers): Promis
   }
 }
 
-/** True only when the API positively says the flag is not on. If it can't be asked, the page decides. */
-async function flagIsOff(flag: string, requestHeaders: Headers): Promise<boolean> {
+/** True only when the API positively says one of the flags is not on. If it can't be asked, the page decides. */
+async function anyFlagOff(needed: readonly string[], requestHeaders: Headers): Promise<boolean> {
   try {
     const response = await fetch(`${API_URL}/v1/flags`, {
       headers: { accept: "application/json", ...upstreamMetaHeaders(requestHeaders).headers },
@@ -92,7 +92,8 @@ async function flagIsOff(flag: string, requestHeaders: Headers): Promise<boolean
       signal: AbortSignal.timeout(4000),
     });
     if (!response.ok) return false;
-    return ((await response.json()) as { flags?: Record<string, boolean> }).flags?.[flag] !== true;
+    const flags = ((await response.json()) as { flags?: Record<string, boolean> }).flags ?? {};
+    return needed.some((flag) => flags[flag] !== true);
   } catch {
     return false;
   }
@@ -101,9 +102,9 @@ async function flagIsOff(flag: string, requestHeaders: Headers): Promise<boolean
 /** Whether this request must be answered with the not-found page before any page code runs. */
 async function hidden(pathname: string, request: NextRequest, requestHeaders: Headers): Promise<boolean> {
   const path = pathname.replace(/\/+$/, "");
-  if (path === "/app/admin" || path.startsWith("/app/admin/")) return !(await mayBeAdmin(request, requestHeaders));
-  const flagged = FLAGGED_PATHS.find((entry) => entry.path === path);
-  return flagged ? flagIsOff(flagged.flag, requestHeaders) : false;
+  if ((path === "/app/admin" || path.startsWith("/app/admin/")) && !(await mayBeAdmin(request, requestHeaders))) return true;
+  const needed = flagsForPath(path);
+  return needed.length ? anyFlagOff(needed, requestHeaders) : false;
 }
 
 export async function proxy(request: NextRequest) {

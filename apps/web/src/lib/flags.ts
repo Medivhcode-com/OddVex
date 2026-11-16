@@ -30,8 +30,9 @@ export function flagOn(flags: Flags, key: string): boolean {
  * could not be read at all the error is rethrown, so the visitor sees the "can't reach the
  * data service" screen instead of a misleading 404.
  */
-export async function requireFlag(key: string): Promise<void> {
+export async function requireFlag(...keys: string[]): Promise<Flags> {
   const { flags, error } = await load();
   if (error) throw error;
-  if (!flagOn(flags, key)) notFound();
+  if (!keys.every((key) => flagOn(flags, key))) notFound();
+  return flags;
 }

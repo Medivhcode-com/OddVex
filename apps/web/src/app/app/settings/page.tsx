@@ -12,6 +12,7 @@ import { Badge, Button, ButtonLink, Panel, PanelHeader } from "@/components/ui/p
 import { titleCase } from "@/lib/format";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { logoutEverywhereAction } from "@/lib/auth-actions";
+import { flagOn, getFlags } from "@/lib/flags";
 import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -25,6 +26,7 @@ export default async function SettingsPage() {
         api<Schemas["EntitlementsOut"]>("/v1/me/entitlements", { auth: true }).catch(() => null),
       ])
     : [null, null, null];
+  const community = flagOn(await getFlags(), "community");
   const plan = entitlements?.plan ?? user?.plan ?? null;
   return (
     <>
@@ -86,7 +88,7 @@ export default async function SettingsPage() {
         {prefs ? (
           <Panel aria-labelledby="settings-notifications">
             <PanelHeader id="settings-notifications" title="Notifications" description="Choose what OddVex tells you about." />
-            <NotificationPreferences initial={prefs.in_app} />
+            <NotificationPreferences initial={prefs.in_app} community={community} />
           </Panel>
         ) : null}
 
@@ -134,7 +136,10 @@ export default async function SettingsPage() {
 
         {user ? (
           <Panel>
-            <PanelHeader title="Delete account" description="Removes your account, every bet you logged and any sync connections. This can't be undone." />
+            <PanelHeader
+              title="Delete account"
+              description={`Removes your account, every bet you logged${community ? ", any sync connections and everything you posted in the community, graded picks included" : " and any sync connections"}. This can't be undone.`}
+            />
             <div className="p-4 sm:p-5">
               <DeleteAccountForm />
             </div>

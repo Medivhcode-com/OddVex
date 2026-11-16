@@ -81,3 +81,53 @@ export async function adminFlagAction(_: AdminActionState, form: FormData): Prom
   revalidatePath("/app", "layout");
   return { ok: `Flag turned ${enabled === "true" ? "on" : "off"}. It applies to everyone from their next page load.` };
 }
+
+const REPORT_ACTIONS: Record<string, string> = {
+  dismiss: "Report dismissed. The content was left as it is.",
+  hide_content: "Content hidden. It no longer appears in any public view, and every open report on it was closed.",
+  remove_content: "Content removed. It no longer appears in any public view, and every open report on it was closed.",
+  suspend_author: "Author suspended. Their sessions stop working on their next request.",
+};
+
+/** Decides one community report. The note is required and is saved in the audit log. */
+export async function adminReportAction(_: AdminActionState, form: FormData): Promise<AdminActionState> {
+  const reportId = String(form.get("report_id") ?? "");
+  const action = String(form.get("action") ?? "");
+  const note = String(form.get("note") ?? "").trim();
+  if (!ID.test(reportId)) return { error: "Unknown report." };
+  if (!(action in REPORT_ACTIONS)) return { error: "Unknown action." };
+  if (note.length < 3) return { error: "Enter a note of at least 3 characters. It is saved in the audit log." };
+  if (note.length > 500) return { error: "Keep the note to 500 characters or fewer." };
+  if (!(await isAdmin())) return NOT_ADMIN;
+  try {
+    await api<Schemas["AdminReportOut"]>(`/v1/admin/community/reports/${encodeURIComponent(reportId)}/resolve`, { method: "POST", auth: true, body: { action, note } });
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "report_already_resolved") return { error: "This report was already resolved. Nothing was changed." };
+    return { error: describe(error, "The report was not resolved.") };
+  }
+  revalidatePath("/app/admin/community");
+  revalidatePath("/app/admin/audit");
+  revalidatePath("/app/admin");
+  revalidatePath("/app/community", "layout");
+  return { ok: REPORT_ACTIONS[action] };
+}
+
+/**
+ * A moderator deleting someone else's comment. The API route is the member one
+ * (`DELETE /v1/community/comments/{id}`, which accepts the author or an administrator), but
+ * the moderator's call is made here, on the server, like every other admin change.
+ */
+export async function adminDeleteCommentAction(_: AdminActionState, form: FormData): Promise<AdminActionState> {
+  const commentId = String(form.get("comment_id") ?? "");
+  const pickId = String(form.get("pick_id") ?? "");
+  if (!ID.test(commentId)) return { error: "Unknown comment." };
+  if (!(await isAdmin())) return NOT_ADMIN;
+  try {
+    await api<void>(`/v1/community/comments/${encodeURIComponent(commentId)}`, { method: "DELETE", auth: true });
+  } catch (error) {
+    return { error: describe(error, "The comment was not deleted.") };
+  }
+  if (ID.test(pickId)) revalidatePath(`/app/community/picks/${pickId}`);
+  revalidatePath("/app/admin/audit");
+  return { ok: "Comment deleted." };
+}

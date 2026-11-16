@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/app/event-bits";
 import { AlertForm } from "@/components/app/alert-form";
 import { AutoRefresh } from "@/components/app/auto-refresh";
+import { SharePick } from "@/components/app/community/share-pick";
 import { QuickBet, type QuickBetOption } from "@/components/app/quick-bet";
 import { WatchButton } from "@/components/app/watch-button";
 import { ButtonLink } from "@/components/ui/primitives";
@@ -14,6 +15,8 @@ import { OddsTable } from "@/components/app/odds-table";
 import { LineHistoryChart, type Series } from "@/components/ui/charts";
 import { Notice, Panel, PanelHeader, Segmented } from "@/components/ui/primitives";
 import { api, apiOrNull } from "@/lib/api";
+import { getMyProfile } from "@/lib/community";
+import { flagOn, getFlags } from "@/lib/flags";
 import { formatAmerican, formatLine } from "@/lib/format";
 import { getLeagues, leagueLabel, MARKETS, pick } from "@/lib/leagues";
 import type { EventDetail, LineHistory, OddsComparison } from "@/lib/types";
@@ -54,6 +57,9 @@ export default async function GamePage({ params, searchParams }: Props) {
   ]);
   const user = await currentUser().catch(() => null);
   const watchlist = await getWatchlist(Boolean(user));
+  // Sharing a pick exists only while the community flag is on, and only on a game that has not started.
+  const community = event.status === "upcoming" && flagOn(await getFlags(), "community");
+  const profile = community && user ? await getMyProfile().catch(() => null) : null;
   const returnTo = `/app/games/${id}`;
   const quickOptions: QuickBetOption[] = (odds?.best ?? []).flatMap((best) => {
     if (!["home", "away", "draw", "over", "under"].includes(best.outcome_key)) return [];
@@ -157,6 +163,35 @@ export default async function GamePage({ params, searchParams }: Props) {
                   <p className="text-sm text-muted">Log in to set alerts on this game.</p>
                   <ButtonLink href={`/login?next=${encodeURIComponent(returnTo)}`} variant="secondary" size="sm">
                     Log in
+                  </ButtonLink>
+                </div>
+              )}
+            </Panel>
+          ) : null}
+
+          {community && quickOptions.length ? (
+            <Panel aria-labelledby="sharepick-heading">
+              <PanelHeader id="sharepick-heading" title="Share a pick" description="Post this game to the community. No stake and no confidence rating: a pick is a selection and your reasoning." />
+              {!user ? (
+                <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+                  <p className="text-sm text-muted">Log in to share a pick on this game.</p>
+                  <ButtonLink href={`/login?next=${encodeURIComponent(returnTo)}`} variant="secondary" size="sm">
+                    Log in
+                  </ButtonLink>
+                </div>
+              ) : profile?.can_post ? (
+                <SharePick key={market} eventId={event.id} market={market} options={quickOptions} />
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+                  <p className="max-w-prose text-sm text-muted">
+                    {!profile
+                      ? "You need a community profile to share a pick."
+                      : profile.is_public
+                        ? "Moderators hid your profile, so you can't share picks right now."
+                        : "Your community profile is private, so you can't share picks. Make it public to post."}
+                  </p>
+                  <ButtonLink href={profile ? "/app/community/settings" : "/app/community"} variant="secondary" size="sm">
+                    {profile ? "Open community settings" : "Create a profile"}
                   </ButtonLink>
                 </div>
               )}

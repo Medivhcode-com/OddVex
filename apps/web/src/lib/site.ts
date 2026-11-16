@@ -27,13 +27,30 @@ export const APP_NAV: readonly AppNavItem[] = [
   { href: "/app/props", label: "Props", icon: "props" },
   { href: "/app/tracker", label: "Tracker", icon: "tracker" },
   { href: "/app/alerts", label: "Alerts", icon: "alerts" },
+  { href: "/app/community", label: "Community", icon: "community", flag: "community" },
   { href: "/app/tools", label: "Calculators", icon: "tools" },
   { href: "/app/parlay", label: "Parlay", icon: "parlay" },
   { href: "/app/assistant", label: "OddVex AI", icon: "ai" },
 ];
 
-/** App pages that exist only while a feature flag is on. The proxy and the pages both check. */
-export const FLAGGED_PATHS: readonly { path: string; flag: string }[] = [
+/**
+ * App pages that exist only while a feature flag is on. The proxy and the pages both check.
+ * `prefix` covers every path underneath as well. A path can match several entries; all of
+ * their flags must be on (the leaderboard needs `community` and `community_leaderboard`).
+ */
+export type FlaggedPath = { path: string; flag: string; prefix?: boolean };
+
+export const FLAGGED_PATHS: readonly FlaggedPath[] = [
   { path: "/app/value", flag: "value_screen" },
   { path: "/app/tracker/analytics", flag: "tracker_analytics" },
+  { path: "/app/community", flag: "community", prefix: true },
+  { path: "/app/community/leaderboard", flag: "community_leaderboard", prefix: true },
+  { path: "/app/admin/community", flag: "community", prefix: true },
 ];
+
+/** The flags a path needs, without duplicates. Empty for a page that is always there. */
+export function flagsForPath(pathname: string): string[] {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  const flags = FLAGGED_PATHS.filter((entry) => entry.path === path || (entry.prefix === true && path.startsWith(`${entry.path}/`))).map((entry) => entry.flag);
+  return [...new Set(flags)];
+}

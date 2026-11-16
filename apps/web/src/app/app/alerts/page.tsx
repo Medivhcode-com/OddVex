@@ -4,6 +4,7 @@ import { AlertRuleList, NotificationList } from "@/components/app/alerts-panels"
 import { PageHeader } from "@/components/app/page-header";
 import { ButtonLink, EmptyState, Panel, PanelHeader } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
+import { flagOn, getFlags } from "@/lib/flags";
 import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Alerts" };
@@ -51,7 +52,7 @@ export default async function AlertsPage() {
             title="Notifications"
             description={notifications.unread_count ? `${notifications.unread_count} unread` : "All read"}
           />
-          <NotificationList items={notifications.items} unread={notifications.unread_count} />
+          <NotificationList items={notifications.items} unread={notifications.unread_count} community={flagOn(await getFlags(), "community")} />
         </Panel>
         <Panel aria-labelledby="rules-heading">
           <PanelHeader id="rules-heading" title="Your alerts" description={`${rules.filter((rule) => rule.state === "active").length} active`} />

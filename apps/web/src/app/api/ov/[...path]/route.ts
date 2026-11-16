@@ -11,9 +11,10 @@ import { isRequestId, upstreamMetaHeaders } from "@/lib/request-meta";
  * The request id comes back as `X-Request-ID` so a failed call can be matched to the API log.
  *
  * `/v1/admin` is deliberately not on the list: admin reads happen in server components and
- * admin changes in server actions (`lib/admin-actions.ts`), never from the browser.
+ * admin changes in server actions (`lib/admin-actions.ts`), never from the browser. That
+ * includes community moderation (`/v1/admin/community`); `/v1/community` is the member API.
  */
-const ALLOWED = /^v1\/(quant|bets|sync|assistant|events|players|props|me|watchlist|alerts|notifications|value|flags)(\/|$)/;
+const ALLOWED = /^v1\/(quant|bets|sync|assistant|events|players|props|me|watchlist|alerts|notifications|value|flags|community)(\/|$)/;
 
 function errorResponse(status: number, code: string, message: string, requestId?: string) {
   return NextResponse.json({ error: { code, message } }, { status, headers: requestId ? { "x-request-id": requestId } : undefined });

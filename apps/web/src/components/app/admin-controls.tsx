@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useActionState, useState } from "react";
+import { createContext, useActionState, useContext, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Button, Field, Notice } from "@/components/ui/primitives";
-import { adminFlagAction, adminUserAction, type AdminActionState } from "@/lib/admin-actions";
+import { adminFlagAction, adminReportAction, adminUserAction, type AdminActionState } from "@/lib/admin-actions";
 
 const TABS = [
   { href: "/app/admin", label: "Overview" },
@@ -15,11 +15,13 @@ const TABS = [
   { href: "/app/admin/outbox", label: "Email outbox" },
 ];
 
-export function AdminTabs() {
+/** The Community tab (moderation) exists only while the `community` feature flag is on. */
+export function AdminTabs({ community = false }: { community?: boolean }) {
   const pathname = usePathname();
+  const tabs = community ? [...TABS, { href: "/app/admin/community", label: "Community" }] : TABS;
   return (
     <nav aria-label="Admin sections" className="-mx-1 mb-6 flex max-w-full gap-1 overflow-x-auto px-1 py-1">
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = pathname === tab.href;
         return (
           <Link
@@ -156,6 +158,91 @@ export function FlagToggle({ flag, warning }: { flag: { key: string; enabled: bo
         <Button type="button" variant="secondary" onClick={() => setConfirming(true)}>
           {verb}<span className="sr-only"> {flag.key}</span>
         </Button>
+      )}
+      <Result state={state} />
+    </div>
+  );
+}
+
+type ReportDecision = "dismiss" | "hide_content" | "remove_content" | "suspend_author";
+
+const DECISIONS: { value: ReportDecision; label: string; confirm: string; danger: boolean }[] = [
+  { value: "dismiss", label: "Dismiss", confirm: "Confirm: dismiss report", danger: false },
+  { value: "hide_content", label: "Hide content", confirm: "Confirm: hide content", danger: true },
+  { value: "remove_content", label: "Remove content", confirm: "Confirm: remove content", danger: true },
+  { value: "suspend_author", label: "Suspend author", confirm: "Confirm: suspend author", danger: true },
+];
+
+function decisionText(decision: ReportDecision, target: string, author: string): string {
+  if (decision === "dismiss") return `Dismiss this report? The ${target} stays as it is. Other open reports on it stay open.`;
+  if (decision === "suspend_author") return `Suspend ${author}? Their sessions stop working and they can\u2019t log in. Their data is kept. An administrator can\u2019t be suspended.`;
+  const verb = decision === "hide_content" ? "Hide" : "Remove";
+  return `${verb} this ${target}? It disappears from every public view, and its author sees \u201cRemoved by moderators.\u201d in its place. Every other open report on it is closed with the same decision. There is no restore action yet, and hiding and removing behave the same today.`;
+}
+
+const ReportResultContext = createContext<(message: string) => void>(() => {});
+
+/**
+ * Wraps the report queue. A resolved report leaves the open queue when the page is refreshed,
+ * so the outcome of the last decision is shown here, above the list, where it stays.
+ */
+export function ReportQueue({ children }: { children: ReactNode }) {
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <ReportResultContext.Provider value={setMessage}>
+      <div aria-live="polite" className={message ? "border-b border-line p-4 sm:px-5" : undefined}>
+        {message ? <Notice tone="accent" role="status">{message}</Notice> : null}
+      </div>
+      {children}
+    </ReportResultContext.Provider>
+  );
+}
+
+/**
+ * Decides one report: pick a decision, write the required note, confirm. The decision is a
+ * server action; the result is shown in the queue (see `ReportQueue`) and the queue is refreshed.
+ */
+export function ReportActions({ report }: { report: { id: string; targetType: string; authorHandle: string | null; targetExists: boolean } }) {
+  const announce = useContext(ReportResultContext);
+  const [mode, setMode] = useState<ReportDecision | null>(null);
+  const [state, action, pending] = useActionState(async (previous: AdminActionState, form: FormData) => {
+    const next = await adminReportAction(previous, form);
+    if (next.ok) {
+      setMode(null);
+      announce(next.ok);
+      return {};
+    }
+    return next;
+  }, {} as AdminActionState);
+  const decision = DECISIONS.find((entry) => entry.value === mode);
+  const author = report.authorHandle ? `@${report.authorHandle}` : "the author";
+
+  return (
+    <div className="space-y-3">
+      {decision ? (
+        <form action={action} className="space-y-3 rounded-cell border border-line-strong p-3" aria-label={`Confirm decision on report ${report.id.slice(0, 8)}`}>
+          <input type="hidden" name="report_id" value={report.id} />
+          <input type="hidden" name="action" value={decision.value} />
+          <p className="max-w-prose text-sm">{decisionText(decision.value, report.targetType, author)}</p>
+          <Field id={`note-${report.id}`} name="note" label="Note" hint="Required. Saved in the audit log, not shown to the reporter or the author." maxLength={500} required />
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" variant={decision.danger ? "danger" : "primary"} disabled={pending}>
+              {pending ? "Saving" : decision.confirm}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setMode(null)} disabled={pending}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {DECISIONS.filter((entry) => report.targetExists || entry.value === "dismiss" || entry.value === "suspend_author").map((entry) => (
+            <Button key={entry.value} type="button" variant={entry.value === "suspend_author" ? "danger" : "secondary"} onClick={() => setMode(entry.value)}>
+              {entry.label}
+              <span className="sr-only">, report {report.id.slice(0, 8)}</span>
+            </Button>
+          ))}
+        </div>
       )}
       <Result state={state} />
     </div>
