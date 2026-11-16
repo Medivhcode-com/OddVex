@@ -269,3 +269,47 @@ class PropBoardRowOut(BaseModel):
     )
     l10_over_count: int
     l10_sample: int = Field(description="Games in the last-10 rate (pushes excluded).")
+
+
+# --------------------------------------------------------------- value screen
+class ValueRowOut(BaseModel):
+    event: EventSummaryOut
+    market: EventMarket
+    outcome_key: str
+    outcome_name: str
+    line: float | None = Field(
+        default=None, description="The line this outcome is quoted at (spread and total)."
+    )
+    best_price: PriceOut = Field(description="Best open, non-stale price for the outcome.")
+    sportsbook: SportsbookRef = Field(description="The sportsbook offering that price.")
+    consensus_probability: float = Field(
+        description=(
+            "Mean no-vig probability of the outcome over the other books at the same line. "
+            "The sportsbook with the best price is not part of it."
+        )
+    )
+    books_in_consensus: int = Field(description="Books in that mean (at least 2).")
+    edge: float = Field(
+        description=(
+            "Expected value per 1 unit staked at the best price if the consensus "
+            "probability were the true probability, as a fraction. Not a forecast."
+        )
+    )
+    breakeven_probability: float = Field(
+        description="1 / decimal price: the probability at which the best price has zero EV."
+    )
+    last_updated: datetime | None = Field(
+        default=None, description="When the sportsbook last updated the best price."
+    )
+    stale_after_seconds: int = Field(
+        description="A quote older than this is stale and is not on this screen."
+    )
+
+
+class ValueScreenOut(BaseModel):
+    rows: list[ValueRowOut] = Field(description="Largest edge first.")
+    min_edge: float
+    as_of: datetime
+    data_mode: DataMode
+    method: str = Field(description="How the numbers are computed.")
+    caveat: str = Field(description="What this screen does not tell you.")

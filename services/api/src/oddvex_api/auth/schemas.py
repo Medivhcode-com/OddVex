@@ -77,6 +77,14 @@ class UserOut(BaseModel):
     role: Literal["user", "admin"]
     age_confirmed_at: datetime
     created_at: datetime
+    plan: Literal["free", "premium"] | None = Field(
+        default=None,
+        description="Set by an administrator only. There is no purchase route and no billing.",
+    )
+    email_verified: bool = Field(
+        default=False,
+        description="Whether the email address was confirmed. Nothing is blocked while false.",
+    )
 
 
 class TokenResponse(BaseModel):
@@ -84,3 +92,25 @@ class TokenResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(description="Token lifetime in seconds")
     user: UserOut
+
+
+class EmailVerificationConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+
+
+class EmailVerificationOut(BaseModel):
+    email_verified: bool
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=320, json_schema_extra={"format": "email"})
+
+    @field_validator("email")
+    @classmethod
+    def _lower(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+    new_password: str = Field(min_length=10, max_length=128)

@@ -49,6 +49,12 @@ class User(Base):
     #: under (claim ``ver``); a token with another value is rejected.
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     password_changed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: free | premium. Only an administrator can change it; there is no purchase route.
+    plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
+    #: active | suspended. A suspended user cannot log in and their tokens are rejected.
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     bets: Mapped[list[Bet]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
@@ -71,6 +77,16 @@ class User(Base):
     stake_reminder: Mapped[StakeReminder | None] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True, uselist=False
     )
+    email_tokens: Mapped[list[EmailToken]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    outbox_emails: Mapped[list[EmailOutbox]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None
 
 
 class Bet(Base):
@@ -317,6 +333,61 @@ class StakeReminder(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
     user: Mapped[User] = relationship(back_populates="stake_reminder")
+
+
+class FeatureFlag(Base):
+    """A stored override of a feature flag. No row means the in-code default applies."""
+
+    __tablename__ = "feature_flags"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class EmailToken(Base):
+    """A single-use, expiring token sent by email. Only its SHA-256 hash is stored."""
+
+    __tablename__ = "email_tokens"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: verify_email | password_reset
+    purpose: Mapped[str] = mapped_column(String(24))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    user: Mapped[User] = relationship(back_populates="email_tokens")
+
+
+class EmailOutbox(Base):
+    """An email the app would have sent. Nothing in this table is ever delivered.
+
+    ``body_text`` and ``dev_link`` contain the link (and so the token) outside production
+    only, so local and automated tests can finish the flow. In production the link is
+    withheld from both columns.
+    """
+
+    __tablename__ = "email_outbox"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    to_email: Mapped[str] = mapped_column(String(320), index=True)
+    #: verify_email | password_reset
+    template: Mapped[str] = mapped_column(String(40))
+    subject: Mapped[str] = mapped_column(String(200))
+    body_text: Mapped[str] = mapped_column(Text)
+    dev_link: Mapped[str | None] = mapped_column(String(600))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+    user: Mapped[User] = relationship(back_populates="outbox_emails")
 
 
 class AuditLog(Base):

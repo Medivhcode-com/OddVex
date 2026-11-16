@@ -79,6 +79,13 @@ def get_optional_user(
             "The access token is invalid or has expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if user.status == "suspended":
+        raise ApiError(
+            401,
+            "account_suspended",
+            "This account is suspended",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 

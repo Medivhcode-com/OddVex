@@ -5,19 +5,21 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import Bet, BetLeg
 from ..deps import CurrentUserDep, DbDep, NowDep, ProviderDep, write_audit
 from ..errors import AUTH_ERROR_RESPONSES, NOT_FOUND_RESPONSE, ErrorResponse, not_found
+from ..flags.service import require_flag
 from ..notifications import service as notifications
 from ..notifications import templates
-from . import service
+from . import analytics, service
 from .schemas import (
     AutoSettleOut,
     AutoSettleSkipOut,
+    BetAnalyticsOut,
     BetCreate,
     BetOut,
     BetSettleRequest,
@@ -139,6 +141,26 @@ def create_bet(
 def get_bet_summary(user: CurrentUserDep, db: DbDep) -> BetSummaryOut:
     bets = list(db.scalars(select(Bet).where(Bet.user_id == user.id)))
     return service.summarize(bets)
+
+
+@router.get(
+    "/analytics",
+    response_model=BetAnalyticsOut,
+    operation_id="get_bet_analytics",
+    summary="Odds bands, weekdays, months, streaks, CLV and stake sizes for your settled bets",
+    description=(
+        "Computed only from your settled bets. Ratios are fractions. With fewer than 30 "
+        "settled bets `sample_note` says the results are mostly noise. Behind the "
+        "`tracker_analytics` flag."
+    ),
+    dependencies=[Depends(require_flag("tracker_analytics"))],
+    responses={
+        404: {"model": ErrorResponse, "description": "The feature is switched off"},
+    },
+)
+def get_bet_analytics(user: CurrentUserDep, db: DbDep) -> BetAnalyticsOut:
+    bets = list(db.scalars(select(Bet).where(Bet.user_id == user.id, Bet.status == "settled")))
+    return analytics.analyze(bets)
 
 
 @router.post(

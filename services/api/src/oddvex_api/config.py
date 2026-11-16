@@ -39,6 +39,22 @@ class Settings(BaseSettings):
     rate_limit_assistant_per_minute: int = 20
     rate_limit_window_seconds: int = 60
 
+    #: Per-account limits. They are keyed on the email address (or user id), not the IP,
+    #: and share one window. Disabled together with ``rate_limit_enabled``.
+    account_limit_window_seconds: int = Field(default=900, ge=1)
+    #: Failed logins for one email inside the window before further attempts get 429.
+    login_max_failures: int = Field(default=8, ge=1)
+    #: Verification or password-reset emails one address can request inside the window.
+    email_requests_per_window: int = Field(default=3, ge=1)
+
+    #: ``outbox`` writes emails to the ``email_outbox`` table and sends nothing.
+    #: ``resend`` is a stub that refuses to start: real email needs Founder approval.
+    email_provider: Literal["outbox", "resend"] = "outbox"
+    #: Base URL of the web app, used for the links in emails.
+    web_base_url: str = "http://localhost:3000"
+    email_verification_ttl_hours: int = Field(default=24, ge=1)
+    password_reset_ttl_minutes: int = Field(default=60, ge=1)
+
     auto_seed_demo: bool = False
     demo_password: str = DEV_DEMO_PASSWORD
 

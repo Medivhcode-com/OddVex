@@ -39,6 +39,8 @@ from .api.schemas import (
     PropOfferOut,
     ScoreOut,
     SportsbookOut,
+    ValueRowOut,
+    ValueScreenOut,
 )
 from .cache import Cache, cached
 from .config import Settings
@@ -52,6 +54,7 @@ from .providers import (
     Team,
 )
 from .quant import american_to_decimal, hit_rate, no_vig
+from .quant.value import MIN_CONSENSUS_BOOKS, BookQuote, best_price_vs_consensus
 from .schemas import BestPriceOut, PriceOut, SportsbookRef, TeamRef, price_out
 
 HIT_RATE_CAVEAT = (
@@ -63,6 +66,20 @@ SYNTHETIC_NOTICE = (
     "All teams, players, sportsbooks, odds and statistics shown are synthetic sample "
     "data generated for demonstration. They do not describe real games or real prices."
 )
+
+VALUE_METHOD = (
+    "For each outcome, the best open, non-stale price is compared with the mean no-vig "
+    "probability of the other open, non-stale sportsbooks quoting the same line. The "
+    "sportsbook with the best price is left out of that consensus, and at least "
+    f"{MIN_CONSENSUS_BOOKS} other sportsbooks are required. Edge is the expected value per "
+    "1 unit staked at the best price if the consensus probability were the true probability."
+)
+VALUE_CAVEAT = (
+    "A price above the consensus is not proof of an edge. The consensus can be wrong, "
+    "limits and availability vary by sportsbook, and prices move. This compares prices; "
+    "it is not a prediction."
+)
+_VALUE_MARKETS = ("moneyline", "spread", "total")
 
 _WINDOW_SIZES = {"5": 5, "10": 10, "20": 20}
 _GAME_LOG_TTL_SECONDS = 30.0
@@ -365,6 +382,77 @@ class Board:
             ],
         )
 
+    # ----------------------------------------------------------- value screen
+    def value_screen(
+        self, league: str | None, market: str | None, min_edge: float, limit: int
+    ) -> ValueScreenOut:
+        rows = cached(
+            self.cache,
+            f"value:{league or '*'}:{market or '*'}",
+            _BOARD_TTL_SECONDS,
+            lambda: self._value_rows(league, market),
+        )
+        return ValueScreenOut(
+            rows=[row for row in rows if row.edge >= min_edge][:limit],
+            min_edge=min_edge,
+            as_of=self.now,
+            data_mode="synthetic",
+            method=VALUE_METHOD,
+            caveat=VALUE_CAVEAT,
+        )
+
+    def _value_rows(self, league: str | None, market: str | None) -> list[ValueRowOut]:
+        """Every outcome whose best price beats the consensus of the other books, largest
+        edge first. The same usable quotes as :meth:`event_odds` and :meth:`best_price`."""
+        rows: list[ValueRowOut] = []
+        markets = [market] if market else list(_VALUE_MARKETS)
+        for event in self.provider.list_events(league=league):
+            if event.status == "final":
+                continue
+            for event_market in markets:
+                if event_market in event.markets:
+                    rows.extend(self._event_value_rows(event, event_market))
+        rows.sort(
+            key=lambda r: (-r.edge, r.event.start_time, r.event.id, r.market, r.outcome_key)
+        )
+        return rows
+
+    def _event_value_rows(self, event: Event, market: str) -> list[ValueRowOut]:
+        # Books are only comparable on the same line with the same outcomes.
+        groups: dict[tuple[float | None, tuple[str, ...]], list[_QuoteRow]] = {}
+        for row in self._usable(self._quote_rows(event, market)):
+            outcomes = row[0].outcomes
+            line = outcomes[0].line if market != "moneyline" else None
+            groups.setdefault((line, tuple(o.key for o in outcomes)), []).append(row)
+        rows: list[ValueRowOut] = []
+        for group in groups.values():
+            quotes = [BookQuote(book=r[0].sportsbook_id, prices=r[3]) for r in group]
+            by_book = {r[0].sportsbook_id: r[0] for r in group}
+            for index in range(len(group[0][0].outcomes)):
+                found = best_price_vs_consensus(quotes, index)
+                if found is None or found.ev.ev_per_unit <= 0:
+                    continue
+                snap = by_book[found.best_book]
+                outcome = snap.outcomes[index]
+                rows.append(
+                    ValueRowOut(
+                        event=self.event_summary(event),
+                        market=market,  # type: ignore[arg-type]
+                        outcome_key=outcome.key,
+                        outcome_name=outcome.name,
+                        line=outcome.line,
+                        best_price=price_out(found.best_price),
+                        sportsbook=self.book_ref(found.best_book),
+                        consensus_probability=round(found.consensus_probability, 6),
+                        books_in_consensus=found.books_in_consensus,
+                        edge=round(found.ev.ev_per_unit, 6),
+                        breakeven_probability=round(found.ev.breakeven_probability, 6),
+                        last_updated=snap.last_updated,
+                        stale_after_seconds=self.stale_after_seconds(event.status),
+                    )
+                )
+        return rows
+
     def line_history(self, event: Event, market: str) -> LineHistoryOut:
         series = [
             LineSeriesOut(
@@ -614,6 +702,8 @@ class Board:
 __all__ = [
     "HIT_RATE_CAVEAT",
     "SYNTHETIC_NOTICE",
+    "VALUE_CAVEAT",
+    "VALUE_METHOD",
     "BestQuote",
     "Board",
     "PriceOut",
