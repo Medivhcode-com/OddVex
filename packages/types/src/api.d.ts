@@ -21,6 +21,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit log, newest first
+         * @description `action` is an exact action name such as `admin.user_suspended`. `user_id` matches entries the user caused and entries about that user. Page with `limit` and the `next_before` cursor.
+         */
+        get: operations["admin_list_audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/email-outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Emails written to the outbox, newest first
+         * @description What would have been sent: recipient, template and subject. Bodies, links and tokens are never returned here. No email is delivered in this build.
+         */
+        get: operations["admin_list_email_outbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Feature flags with their descriptions and defaults */
+        get: operations["admin_list_flags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/flags/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn a feature flag on or off
+         * @description Stores an override of the in-code default; it applies to everyone at once. Only known keys exist (`404` otherwise). Turning `premium_gating` on is a pricing decision and needs Founder approval first.
+         */
+        put: operations["admin_set_flag"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/overview": {
         parameters: {
             query?: never;
@@ -32,6 +109,86 @@ export interface paths {
         get: operations["get_admin_overview"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Users, newest first
+         * @description `q` matches part of the email or display name, case-insensitively. Never returns password hashes or tokens.
+         */
+        get: operations["admin_list_users"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a user's plan
+         * @description The only way a plan changes: there is no purchase route and no billing. While the `premium_gating` flag is off the plan gates nothing.
+         */
+        put: operations["admin_set_user_plan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend a user
+         * @description From then on the user's access tokens are rejected with `401 account_suspended` and login answers `403 account_suspended`. Their data is kept. An administrator cannot suspend themselves or another administrator (`409`). Suspending a suspended user changes nothing.
+         */
+        post: operations["admin_suspend_user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}/unsuspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift a suspension
+         * @description The user can log in again and tokens that have not expired work again.
+         */
+        post: operations["admin_unsuspend_user"];
         delete?: never;
         options?: never;
         head?: never;
@@ -137,8 +294,51 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Exchange email + password for an access token */
+        /**
+         * Exchange email + password for an access token
+         * @description Besides the per-IP limit, an email address with too many failed logins inside the window (8 in 15 minutes by default) gets `429 rate_limited` until the window moves on, from any IP and whether or not an account exists for it. A suspended account gets `403 account_suspended` once the password is correct.
+         */
         post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a new password with the token from the link
+         * @description Every access token issued before the reset stops working. The token works once; a used, expired or unknown token is `400 invalid_or_expired_token`. Sign in again afterwards: no token is returned. Using the link also confirms the email address.
+         */
+        post: operations["confirm_password_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a password reset link
+         * @description Always answers 202 with the same body, whether or not an account exists for the email; the lookup and the email are handled after the response is sent. **No email is sent in this build**: the message is written to the outbox table. The link works once and expires after 60 minutes. Limited per IP and per email address. Behind the `email_flows` flag.
+         */
+        post: operations["request_password_reset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -156,6 +356,46 @@ export interface paths {
         put?: never;
         /** Create an account (21+ attestation required) */
         post: operations["register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/verify-email/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm an email address with the token from the link
+         * @description No sign-in needed: the token identifies the account. A token works once; a used, expired or unknown token is `400 invalid_or_expired_token`.
+         */
+        post: operations["confirm_email_verification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/verify-email/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a new email confirmation link
+         * @description Queues a confirmation email for the signed-in user. **No email is sent in this build**: the message is written to the outbox table. The link works once and expires after 24 hours; a new request replaces the earlier link. An unconfirmed address blocks nothing. Behind the `email_flows` flag.
+         */
+        post: operations["request_email_verification"];
         delete?: never;
         options?: never;
         head?: never;
@@ -180,6 +420,26 @@ export interface paths {
          * @description OddVex never places wagers. This only records a bet for tracking. If you set a weekly staking reminder and this bet takes the week's total to or past it, a `stake_reminder` notification is created; the bet is saved either way.
          */
         post: operations["create_bet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bets/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Odds bands, weekdays, months, streaks, CLV and stake sizes for your settled bets
+         * @description Computed only from your settled bets. Ratios are fractions. With fewer than 30 settled bets `sample_note` says the results are mostly noise. Behind the `tracker_analytics` flag.
+         */
+        get: operations["get_bet_analytics"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -262,6 +522,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dev/email-outbox/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Development only: the latest outbox email for an address, with its link
+         * @description Only when `ODDVEX_ENV` is not `production`; in production this is `404`. It needs no sign-in, so never expose a non-production API to the internet with real accounts in it. `template` narrows the search to `verify_email` or `password_reset`.
+         */
+        get: operations["dev_latest_email"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
@@ -336,6 +616,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Feature flags
+         * @description Global on/off switches. A route behind a flag that is off answers `404 feature_disabled`. Clients use this to hide what is switched off.
+         */
+        get: operations["list_flags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/leagues": {
         parameters: {
             query?: never;
@@ -366,9 +666,29 @@ export interface paths {
         post?: never;
         /**
          * Delete the account and all of its data
-         * @description Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections and import runs. An audit entry containing only the opaque user id is retained.
+         * @description Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs, email tokens and outbox emails. An audit entry containing only the opaque user id is retained.
          */
         delete: operations["delete_me"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/entitlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your plan and what it includes
+         * @description Computed from one in-code catalog. There is no billing and no purchase route: a plan can only be set by an administrator. While `preview` is true nothing is gated.
+         */
+        get: operations["get_entitlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -838,6 +1158,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/value": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Market discrepancies: best price against the consensus of the other books
+         * @description Outcomes of live and upcoming events whose best open, non-stale price is longer than the no-vig consensus of the other open, non-stale sportsbooks at the same line. The sportsbook with the best price is excluded from its own consensus and at least 2 other sportsbooks are required, otherwise the outcome is skipped. Sorted by `edge`, largest first. A price above the consensus is not proof of an edge and this is not a prediction; read `caveat`. Behind the `value_screen` flag.
+         */
+        get: operations["list_value"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/watchlist": {
         parameters: {
             query?: never;
@@ -947,6 +1287,73 @@ export interface components {
             /** Watchlist */
             watchlist: components["schemas"]["WatchlistItemOut"][];
         };
+        /** AdminAuditPageOut */
+        AdminAuditPageOut: {
+            /** Items */
+            items: components["schemas"]["AuditEntryOut"][];
+            /**
+             * Next Before
+             * @description Pass as `before` to get the next (older) page.
+             */
+            next_before?: string | null;
+        };
+        /** AdminFlagListOut */
+        AdminFlagListOut: {
+            /** Items */
+            items: components["schemas"]["AdminFlagOut"][];
+        };
+        /** AdminFlagOut */
+        AdminFlagOut: {
+            /**
+             * Default
+             * @description The in-code default, used while there is no override.
+             */
+            default: boolean;
+            /** Description */
+            description: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Key */
+            key: string;
+            /**
+             * Overridden
+             * @description True when a stored value replaces the default.
+             */
+            overridden: boolean;
+            /**
+             * Updated At
+             * @description When the stored value last changed. Null without one.
+             */
+            updated_at?: string | null;
+        };
+        /** AdminOutboxEmailOut */
+        AdminOutboxEmailOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Subject */
+            subject: string;
+            /** Template */
+            template: string;
+            /** To */
+            to: string;
+            /** User Id */
+            user_id: string;
+        };
+        /** AdminOutboxListOut */
+        AdminOutboxListOut: {
+            /**
+             * Delivery
+             * @description How email leaves the system. `outbox`: it does not.
+             */
+            delivery: string;
+            /** Items */
+            items: components["schemas"]["AdminOutboxEmailOut"][];
+        };
         /** AdminOverviewOut */
         AdminOverviewOut: {
             /** Bet Count */
@@ -962,6 +1369,55 @@ export interface components {
             user_count: number;
             /** Version */
             version: string;
+        };
+        /** AdminUserListOut */
+        AdminUserListOut: {
+            /** Items */
+            items: components["schemas"]["AdminUserOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /**
+             * Total
+             * @description Users matching the filters, before `limit` and `offset`.
+             */
+            total: number;
+        };
+        /** AdminUserOut */
+        AdminUserOut: {
+            /** Bet Count */
+            bet_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /** Email Verified */
+            email_verified: boolean;
+            /** Id */
+            id: string;
+            /** Last Login At */
+            last_login_at?: string | null;
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "free" | "premium";
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "admin";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "suspended";
         };
         /** AlertEvaluationOut */
         AlertEvaluationOut: {
@@ -1069,6 +1525,35 @@ export interface components {
              * @enum {string}
              */
             state: "active" | "paused";
+        };
+        /** AnalyticsRowOut */
+        AnalyticsRowOut: {
+            /**
+             * Bets
+             * @description Settled bets in this group.
+             */
+            bets: number;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Profit */
+            profit: number;
+            /**
+             * Roi
+             * @description profit / staked, as a fraction.
+             */
+            roi?: number | null;
+            /**
+             * Staked
+             * @description Staked on them, void bets excluded.
+             */
+            staked: number;
+            /**
+             * Win Rate
+             * @description wins / (wins + losses), as a fraction. Pushes and voids are left out.
+             */
+            win_rate?: number | null;
         };
         /** AssistantQueryRequest */
         AssistantQueryRequest: {
@@ -1212,6 +1697,45 @@ export interface components {
         BestPriceOut: {
             price: components["schemas"]["PriceOut"];
             sportsbook: components["schemas"]["SportsbookRef"];
+        };
+        /** BetAnalyticsOut */
+        BetAnalyticsOut: {
+            /** @description Mean of the bets' decimal odds, in every format. */
+            average_odds?: components["schemas"]["PriceOut"] | null;
+            /** Average Stake */
+            average_stake?: number | null;
+            /**
+             * By Month
+             * @description By the UTC month the bet was settled (key `YYYY-MM`), oldest first.
+             */
+            by_month: components["schemas"]["AnalyticsRowOut"][];
+            /**
+             * By Odds Band
+             * @description By the bet's American price, shortest prices first. Always five rows.
+             */
+            by_odds_band: components["schemas"]["AnalyticsRowOut"][];
+            /**
+             * By Weekday
+             * @description By the UTC weekday the bet was placed, Monday first. Always seven rows.
+             */
+            by_weekday: components["schemas"]["AnalyticsRowOut"][];
+            clv: components["schemas"]["ClvAnalyticsOut"];
+            current_streak: components["schemas"]["CurrentStreakOut"];
+            /** Longest Loss Streak */
+            longest_loss_streak: number;
+            /** Longest Win Streak */
+            longest_win_streak: number;
+            /** Note */
+            note: string;
+            /**
+             * Sample Note
+             * @description Set when fewer than 30 bets are settled: results this small are mostly noise.
+             */
+            sample_note?: string | null;
+            /** Settled Count */
+            settled_count: number;
+            /** Stake Distribution */
+            stake_distribution: components["schemas"]["StakeBucketOut"][];
         };
         /** BetCreate */
         BetCreate: {
@@ -1639,6 +2163,35 @@ export interface components {
             /** Steps */
             steps: string[];
         };
+        /** ClvAnalyticsOut */
+        ClvAnalyticsOut: {
+            /**
+             * Average
+             * @description Mean CLV, as a fraction.
+             */
+            average?: number | null;
+            /** Buckets */
+            buckets: components["schemas"]["ClvBucketOut"][];
+            /**
+             * Sample
+             * @description Settled bets with a closing price on every leg.
+             */
+            sample: number;
+            /**
+             * Share Beating Close
+             * @description Share of the sample with a CLV above 0, as a fraction.
+             */
+            share_beating_close?: number | null;
+        };
+        /** ClvBucketOut */
+        ClvBucketOut: {
+            /** Count */
+            count: number;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+        };
         /** ConsensusOut */
         ConsensusOut: {
             /** Books Used */
@@ -1685,6 +2238,45 @@ export interface components {
             price: components["schemas"]["PriceOut"];
             /** Steps */
             steps: string[];
+        };
+        /** CurrentStreakOut */
+        CurrentStreakOut: {
+            /**
+             * Kind
+             * @description none: no settled bet with a profit or loss yet.
+             * @enum {string}
+             */
+            kind: "win" | "loss" | "none";
+            /** Length */
+            length: number;
+        };
+        /** DevEmailOut */
+        DevEmailOut: {
+            /** Body Text */
+            body_text: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Dev Link
+             * @description The link in the email.
+             */
+            dev_link?: string | null;
+            /** Id */
+            id: string;
+            /** Subject */
+            subject: string;
+            /** Template */
+            template: string;
+            /** To */
+            to: string;
+            /**
+             * Token
+             * @description The `token` parameter of that link.
+             */
+            token?: string | null;
         };
         /** EVRequest */
         EVRequest: {
@@ -1741,6 +2333,43 @@ export interface components {
             steps: string[];
             /** Win Probability */
             win_probability: number;
+        };
+        /** EmailVerificationConfirmRequest */
+        EmailVerificationConfirmRequest: {
+            /** Token */
+            token: string;
+        };
+        /** EmailVerificationOut */
+        EmailVerificationOut: {
+            /** Email Verified */
+            email_verified: boolean;
+        };
+        /** EntitlementOut */
+        EntitlementOut: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Limit
+             * @description Numeric allowance, for features that have one.
+             */
+            limit?: number | null;
+        };
+        /** EntitlementsOut */
+        EntitlementsOut: {
+            /** Features */
+            features: {
+                [key: string]: components["schemas"]["EntitlementOut"];
+            };
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "free" | "premium";
+            /**
+             * Preview
+             * @description True while plans are not enforced (flag `premium_gating` is off): every feature is enabled for every plan.
+             */
+            preview: boolean;
         };
         /** ErrorBody */
         ErrorBody: {
@@ -1888,6 +2517,20 @@ export interface components {
             ip?: string | null;
             /** Request Id */
             request_id?: string | null;
+        };
+        /** FlagsOut */
+        FlagsOut: {
+            /**
+             * Flags
+             * @description Every known feature flag and whether it is on.
+             * @example {
+             *       "community": false,
+             *       "value_screen": true
+             *     }
+             */
+            flags: {
+                [key: string]: boolean;
+            };
         };
         /**
          * GameFinalAlertCreate
@@ -2209,6 +2852,11 @@ export interface components {
              */
             updated: number;
         };
+        /** MessageOut */
+        MessageOut: {
+            /** Message */
+            message: string;
+        };
         /** MetaOut */
         MetaOut: {
             /**
@@ -2452,6 +3100,21 @@ export interface components {
             current_password: string;
             /** New Password */
             new_password: string;
+        };
+        /** PasswordResetConfirmRequest */
+        PasswordResetConfirmRequest: {
+            /** New Password */
+            new_password: string;
+            /** Token */
+            token: string;
+        };
+        /** PasswordResetRequest */
+        PasswordResetRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /** PlayerDetailOut */
         PlayerDetailOut: {
@@ -2704,6 +3367,19 @@ export interface components {
             /** Home */
             home: number;
         };
+        /** SetFlagRequest */
+        SetFlagRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** SetUserPlanRequest */
+        SetUserPlanRequest: {
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "free" | "premium";
+        };
         /** SportsbookOut */
         SportsbookOut: {
             /** Key */
@@ -2717,6 +3393,17 @@ export interface components {
             key: string;
             /** Name */
             name: string;
+        };
+        /** StakeBucketOut */
+        StakeBucketOut: {
+            /** Bets */
+            bets: number;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Staked */
+            staked: number;
         };
         /**
          * StakeReminderOut
@@ -2752,6 +3439,14 @@ export interface components {
              * @description Total stake per week at which you want a reminder. Null turns it off.
              */
             weekly_stake_threshold: number | null;
+        };
+        /** SuspendUserRequest */
+        SuspendUserRequest: {
+            /**
+             * Reason
+             * @description Why the account is suspended. Stored in the audit log only.
+             */
+            reason: string;
         };
         /** SyncConnectionCreate */
         SyncConnectionCreate: {
@@ -2919,13 +3614,106 @@ export interface components {
             display_name: string;
             /** Email */
             email: string;
+            /**
+             * Email Verified
+             * @description Whether the email address was confirmed. Nothing is blocked while false.
+             * @default false
+             */
+            email_verified: boolean;
             /** Id */
             id: string;
+            /**
+             * Plan
+             * @description Set by an administrator only. There is no purchase route and no billing.
+             */
+            plan?: ("free" | "premium") | null;
             /**
              * Role
              * @enum {string}
              */
             role: "user" | "admin";
+        };
+        /** ValueRowOut */
+        ValueRowOut: {
+            /** @description Best open, non-stale price for the outcome. */
+            best_price: components["schemas"]["PriceOut"];
+            /**
+             * Books In Consensus
+             * @description Books in that mean (at least 2).
+             */
+            books_in_consensus: number;
+            /**
+             * Breakeven Probability
+             * @description 1 / decimal price: the probability at which the best price has zero EV.
+             */
+            breakeven_probability: number;
+            /**
+             * Consensus Probability
+             * @description Mean no-vig probability of the outcome over the other books at the same line. The sportsbook with the best price is not part of it.
+             */
+            consensus_probability: number;
+            /**
+             * Edge
+             * @description Expected value per 1 unit staked at the best price if the consensus probability were the true probability, as a fraction. Not a forecast.
+             */
+            edge: number;
+            event: components["schemas"]["EventSummaryOut"];
+            /**
+             * Last Updated
+             * @description When the sportsbook last updated the best price.
+             */
+            last_updated?: string | null;
+            /**
+             * Line
+             * @description The line this outcome is quoted at (spread and total).
+             */
+            line?: number | null;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "moneyline" | "spread" | "total";
+            /** Outcome Key */
+            outcome_key: string;
+            /** Outcome Name */
+            outcome_name: string;
+            /** @description The sportsbook offering that price. */
+            sportsbook: components["schemas"]["SportsbookRef"];
+            /**
+             * Stale After Seconds
+             * @description A quote older than this is stale and is not on this screen.
+             */
+            stale_after_seconds: number;
+        };
+        /** ValueScreenOut */
+        ValueScreenOut: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /**
+             * Caveat
+             * @description What this screen does not tell you.
+             */
+            caveat: string;
+            /**
+             * Data Mode
+             * @constant
+             */
+            data_mode: "synthetic";
+            /**
+             * Method
+             * @description How the numbers are computed.
+             */
+            method: string;
+            /** Min Edge */
+            min_edge: number;
+            /**
+             * Rows
+             * @description Largest edge first.
+             */
+            rows: components["schemas"]["ValueRowOut"][];
         };
         /** WatchlistItemCreate */
         WatchlistItemCreate: {
@@ -3007,6 +3795,217 @@ export interface operations {
             };
         };
     };
+    admin_list_audit: {
+        parameters: {
+            query?: {
+                action?: string | null;
+                user_id?: string | null;
+                /** @description `next_before` from the previous page. */
+                before?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditPageOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_list_email_outbox: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOutboxListOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_list_flags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFlagListOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_set_flag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFlagRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFlagOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_admin_overview: {
         parameters: {
             query?: never;
@@ -3036,6 +4035,250 @@ export interface operations {
             };
             /** @description Administrator role required */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_list_users: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                status?: ("active" | "suspended") | null;
+                plan?: ("free" | "premium") | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserListOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_set_user_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetUserPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_suspend_user: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuspendUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An administrator cannot be suspended */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_unsuspend_user: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3383,6 +4626,124 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The account is suspended */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_password_reset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The token is invalid, used or expired */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    request_password_reset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description The feature is switched off */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation error */
             422: {
                 headers: {
@@ -3427,6 +4788,122 @@ export interface operations {
             };
             /** @description Email already registered */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_email_verification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailVerificationConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailVerificationOut"];
+                };
+            };
+            /** @description The token is invalid, used or expired */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    request_email_verification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3528,6 +5005,53 @@ export interface operations {
             };
             /** @description Missing or invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_bet_analytics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetAnalyticsOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3833,6 +5357,47 @@ export interface operations {
             };
         };
     };
+    dev_latest_email: {
+        parameters: {
+            query: {
+                to: string;
+                template?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevEmailOut"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_events: {
         parameters: {
             query?: {
@@ -3991,6 +5556,26 @@ export interface operations {
             };
         };
     };
+    list_flags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlagsOut"];
+                };
+            };
+        };
+    };
     list_leagues: {
         parameters: {
             query?: never;
@@ -4064,6 +5649,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_entitlements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntitlementsOut"];
+                };
             };
             /** @description Missing or invalid credentials */
             401: {
@@ -5189,6 +6812,50 @@ export interface operations {
             };
             /** @description Missing or invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_value: {
+        parameters: {
+            query?: {
+                league?: ("nba" | "nfl" | "mlb" | "nhl" | "soccer") | null;
+                market?: ("moneyline" | "spread" | "total") | null;
+                /** @description Smallest edge to include, as a fraction. */
+                min_edge?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValueScreenOut"];
+                };
+            };
+            /** @description The feature is switched off */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -28,7 +28,13 @@ from oddvex_api.db import (
     make_session_factory,
 )
 from oddvex_api.providers import SyntheticProvider
-from oddvex_api.seed import DEMO_BET_COUNT, DEMO_EMAIL, DEMO_GRADEABLE_COUNT, seed_demo
+from oddvex_api.seed import (
+    DEMO_ADMIN_EMAIL,
+    DEMO_BET_COUNT,
+    DEMO_EMAIL,
+    DEMO_GRADEABLE_COUNT,
+    seed_demo,
+)
 
 from .conftest import EXTERNAL_DATABASE_URL, AppFactory, _reset_external_database
 from .test_provider_synthetic import REAL_NAMES
@@ -521,7 +527,7 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
     command.downgrade(config, "0003")
     engine = make_engine(url)
     tables = set(inspect(engine).get_table_names())
-    assert not TABLES_0004 & tables and NEW_TABLES <= tables
+    assert not TABLES_0004 & tables and tables >= NEW_TABLES
     assert not COLUMNS_0004 & {c["name"] for c in inspect(engine).get_columns("users")}
     with engine.connect() as connection:
         emails = connection.execute(text("SELECT email FROM users ORDER BY created_at")).scalars()
@@ -776,6 +782,65 @@ def test_seed_script_refuses_production(tmp_path: Path) -> None:
         [sys.executable, script], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
     )
     assert "0 bet(s) created" in second.stdout
+    # No administrator unless the operator asks for one.
+    assert "No admin user created" in first.stdout and "No admin user created" in second.stdout
+    engine = make_engine(env["DATABASE_URL"])
+    with make_session_factory(engine)() as db:
+        assert [u.email for u in db.scalars(select(User))] == [DEMO_EMAIL]
+        assert db.scalar(select(User)).email_verified is True
+
+    env["ODDVEX_ADMIN_EMAILS"] = "someone@example.test, admin@oddvex.test"
+    for _ in range(2):  # idempotent
+        third = subprocess.run(
+            [sys.executable, script],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert third.returncode == 0, third.stderr
+        assert "Admin user admin@oddvex.test ready (role: admin)." in third.stdout
+        assert "0 bet(s) created" in third.stdout
+    with make_session_factory(engine)() as db:
+        users = {u.email: u for u in db.scalars(select(User))}
+        assert set(users) == {DEMO_EMAIL, DEMO_ADMIN_EMAIL}  # nobody else was invented
+        assert (users[DEMO_ADMIN_EMAIL].role, users[DEMO_EMAIL].role) == ("admin", "user")
+        assert users[DEMO_ADMIN_EMAIL].email_verified is True
+    engine.dispose()
+
+
+def test_seed_verifies_the_demo_user_and_only_creates_a_listed_admin(
+    session_factory,
+    make_settings,  # type: ignore[no-untyped-def]
+) -> None:
+    with session_factory() as db:
+        seed_demo(db, "pw-one-1234", NOW)
+        seed_demo(db, "pw-one-1234", NOW, settings=make_settings())
+        seed_demo(db, "pw-one-1234", NOW, settings=make_settings(admin_emails="x@example.test"))
+        (demo,) = db.scalars(select(User))
+        assert demo.email == DEMO_EMAIL and demo.email_verified_at == NOW
+        assert (demo.role, demo.plan, demo.status) == ("user", "free", "active")
+
+        # A demo user from before email verification existed is marked verified too.
+        demo.email_verified_at = None
+        db.commit()
+        later = NOW + timedelta(days=1)
+        listed = make_settings(admin_emails="admin@oddvex.test")
+        assert seed_demo(db, "pw-two-5678", later, settings=listed) == 0
+        users = {u.email: u for u in db.scalars(select(User))}
+        assert set(users) == {DEMO_EMAIL, DEMO_ADMIN_EMAIL}
+        assert users[DEMO_EMAIL].email_verified_at == later
+        admin = users[DEMO_ADMIN_EMAIL]
+        assert (admin.role, admin.email_verified_at) == ("admin", later)
+        first_hash = admin.password_hash
+
+        # Idempotent: no second admin, password untouched.
+        seed_demo(db, "pw-three-9012", later, settings=listed)
+        assert len(list(db.scalars(select(User)))) == 2
+        db.refresh(admin)
+        assert admin.password_hash == first_hash
+        assert db.scalar(select(Bet.id).where(Bet.user_id == admin.id)) is None
 
 
 # -------------------------------------------------------------------- OpenAPI

@@ -1,8 +1,11 @@
 # OddVex API
 
 Backend for OddVex, a sports-betting **intelligence** product: odds comparison, player-prop
-research, betting math, bet tracking, alerts with in-app notifications and a rule-based assistant. It never accepts, places or
-facilitates wagers and never moves money.
+research, betting math, bet tracking with analytics, a market-discrepancy ("value") screen,
+alerts with in-app notifications and a rule-based assistant. It never accepts, places or
+facilitates wagers and never moves money. **There is no billing and no payment code, and no
+email is ever sent**: plans are set by an administrator and emails are written to a table
+(see [What is stubbed](#what-is-stubbed-no-billing-no-real-email)).
 
 **All sports data in this build is synthetic.** Teams, players, sportsbooks, prices and
 statistics are fictional and generated in-process. No real data provider is connected, no
@@ -17,13 +20,18 @@ cd services/api
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # or: uv venv && uv pip install -e ".[dev]"
 .venv/bin/alembic upgrade head                 # optional locally: tables are auto-created outside production
 .venv/bin/python scripts/seed_demo.py          # optional demo account (bets, alert rules, notifications)
+ODDVEX_ADMIN_EMAILS=admin@oddvex.test .venv/bin/python scripts/seed_demo.py   # ...and an administrator
 .venv/bin/python scripts/evaluate_alerts.py    # optional: evaluate every user's alert rules once
 .venv/bin/uvicorn oddvex_api.main:app --reload --port 8000
 ```
 
 - Interactive docs: http://localhost:8000/docs (disabled in production)
 - Demo login after seeding: `demo@oddvex.test` / `oddvex-demo-2026` (override with
-  `ODDVEX_DEMO_PASSWORD`). Development convenience only.
+  `ODDVEX_DEMO_PASSWORD`). Development convenience only. The demo user's email counts as
+  verified.
+- Administrator: there is no default one. `scripts/seed_demo.py` creates `admin@oddvex.test`
+  (same password) **only** when `ODDVEX_ADMIN_EMAILS` lists that address; any other listed
+  address becomes an administrator when it registers or next logs in.
 - Docker: `docker build -t oddvex-api .` then run with `DATABASE_URL` and `ODDVEX_JWT_SECRET`
   set. The image runs `alembic upgrade head` and then uvicorn on port 8000 as a non-root user.
 
@@ -46,8 +54,8 @@ ODDVEX_TEST_DATABASE_URL=postgresql+psycopg://oddvex:oddvex@localhost:5432/oddve
 
 Every test that goes through the app then uses that database. Tests that are about SQLite files
 (the Alembic CLI, table auto-creation) keep using a temporary SQLite file, and the
-`0001 -> 0002` and `0002 -> 0003` upgrade/downgrade tests run once on SQLite and once more on the
-external database. One test (two concurrent alert evaluations creating a single notification)
+`0001 -> 0002`, `0002 -> 0003` and `0003 -> 0004` upgrade/downgrade tests run once on SQLite
+and once more on the external database. One test (two concurrent alert evaluations creating a single notification)
 needs real concurrent writers and only runs against PostgreSQL.
 The database must use UTF-8 encoding (the official `postgres` image does; a cluster created with
 `initdb` under the `C` locale needs `-E UTF8`).
@@ -76,10 +84,17 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Per-IP limit shared by register, login and password change |
 | `ODDVEX_RATE_LIMIT_ASSISTANT_PER_MINUTE` | `20` | Per-IP limit on the assistant |
 | `ODDVEX_RATE_LIMIT_WINDOW_SECONDS` | `60` | Sliding window length |
+| `ODDVEX_ACCOUNT_LIMIT_WINDOW_SECONDS` | `900` | Window of the per-account limits below |
+| `ODDVEX_LOGIN_MAX_FAILURES` | `8` | Failed logins for one email inside that window before further attempts get `429`, from any IP |
+| `ODDVEX_EMAIL_REQUESTS_PER_WINDOW` | `3` | Verification emails per user and password-reset emails per address inside that window |
+| `ODDVEX_EMAIL_PROVIDER` | `outbox` | `outbox`: write emails to the `email_outbox` table, send nothing. `resend`: a stub; the app refuses to start (`NotImplementedError`). Real email needs Founder approval |
+| `ODDVEX_WEB_BASE_URL` | `http://localhost:3000` | Base of the links in emails (`/verify-email?token=`, `/reset-password?token=`) |
+| `ODDVEX_EMAIL_VERIFICATION_TTL_HOURS` | `24` | Lifetime of an email confirmation link |
+| `ODDVEX_PASSWORD_RESET_TTL_MINUTES` | `60` | Lifetime of a password reset link |
 | `ODDVEX_STALE_LIVE_SECONDS` | `120` | Live quotes older than this are stale |
 | `ODDVEX_STALE_PREGAME_SECONDS` | `900` | Pre-game quotes older than this are stale |
 | `ODDVEX_SYNTHETIC_SEED` | `20260101` | Seed of the synthetic data generator |
-| `ODDVEX_ADMIN_EMAILS` | empty | Emails that get the `admin` role at registration or next login |
+| `ODDVEX_ADMIN_EMAILS` | empty | Emails that get the `admin` role at registration or next login. The seed script creates `admin@oddvex.test` only if it is listed |
 | `ODDVEX_AUTO_SEED_DEMO` | `false` | Seed the demo account on startup. Ignored in production |
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
@@ -103,19 +118,56 @@ Errors always use one envelope, including validation errors and 404s:
 
 | Group | Routes |
 | --- | --- |
-| Meta | `GET /health`, `GET /v1/meta`, `GET /v1/leagues`, `GET /v1/sportsbooks` |
+| Meta | `GET /health`, `GET /v1/meta`, `GET /v1/leagues`, `GET /v1/sportsbooks`, `GET /v1/flags` |
 | Events | `GET /v1/events`, `GET /v1/events/{id}`, `GET /v1/events/{id}/odds`, `GET /v1/events/{id}/line-history` |
 | Players | `GET /v1/players`, `GET /v1/players/{id}`, `GET /v1/players/{id}/props`, `GET /v1/props` |
 | Calculators | `POST /v1/quant/convert`, `/no-vig`, `/ev`, `/parlay`, `/clv` (each returns `steps`) |
-| Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/me`, `DELETE /v1/me`, `POST /v1/me/password`, `GET /v1/me/export` |
+| Value | `GET /v1/value` |
+| Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/me`, `DELETE /v1/me`, `POST /v1/me/password`, `GET /v1/me/export`, `GET /v1/me/entitlements` |
+| Email flows | `POST /v1/auth/verify-email/request`, `POST /v1/auth/verify-email/confirm`, `POST /v1/auth/password-reset/request`, `POST /v1/auth/password-reset/confirm` |
 | Alerts | `GET/POST /v1/alerts`, `POST /v1/alerts/evaluate`, `PATCH/DELETE /v1/alerts/{id}` |
 | Notifications | `GET /v1/notifications`, `GET /v1/notifications/unread-count`, `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all`, `DELETE /v1/notifications/{id}` |
 | Preferences | `GET/PUT /v1/me/notification-preferences`, `GET/PUT /v1/me/stake-reminder` |
-| Bets | `GET/POST /v1/bets`, `GET /v1/bets/summary`, `POST /v1/bets/auto-settle`, `GET/PATCH/DELETE /v1/bets/{id}`, `POST /v1/bets/{id}/settle` |
+| Bets | `GET/POST /v1/bets`, `GET /v1/bets/summary`, `GET /v1/bets/analytics`, `POST /v1/bets/auto-settle`, `GET/PATCH/DELETE /v1/bets/{id}`, `POST /v1/bets/{id}/settle` |
 | Watchlist | `GET/POST /v1/watchlist`, `GET /v1/watchlist/events`, `DELETE /v1/watchlist/{id}` |
 | Sync | `GET /v1/sync/providers`, `GET/POST /v1/sync/connections`, `POST .../{id}/sync`, `GET .../{id}/runs`, `DELETE .../{id}?delete_data=` |
 | Assistant | `POST /v1/assistant/query` |
-| Admin | `GET /v1/admin/overview` |
+| Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
+| Dev (404 in production) | `GET /v1/dev/email-outbox/latest?to=` |
+
+### Feature flags
+
+Global on/off switches. The defaults live in code (`flags/catalog.py`); an administrator can
+override one with `PUT /v1/admin/flags/{key}`, which stores a row in `feature_flags`. Clients
+read `GET /v1/flags` (public) → `{"flags": {"community": false, ...}}`. A route behind a flag
+that is off answers `404 feature_disabled` with `details.flag`. In code:
+`dependencies=[Depends(require_flag("key"))]`.
+
+| Flag | Default | Gates |
+| --- | --- | --- |
+| `community` | off | Nothing yet. Reserved for community features, which are not built |
+| `value_screen` | on | `GET /v1/value` |
+| `tracker_analytics` | on | `GET /v1/bets/analytics` |
+| `email_flows` | on | The four email-flow routes, and the verification email queued at registration |
+| `premium_gating` | off | Whether plan entitlements are enforced. **Turning it on is a pricing decision: Founder approval first** |
+
+### Plans and entitlements (no billing)
+
+`users.plan` is `free` or `premium`, default `free`, shown as `plan` on the user object.
+**The only way a plan changes is an administrator calling `PUT /v1/admin/users/{id}/plan`.**
+There is no purchase, checkout, subscription or payment route, no payment provider and no
+price anywhere in this codebase. Pricing, payment terms and activating billing are Founder
+approval gates (`PROJECT_CONSTITUTION.md`, section 3).
+
+`GET /v1/me/entitlements` → `{plan, preview, features: {key: {enabled, limit}}}`, computed
+from one catalog, `entitlements/catalog.py`: `alerts.max_active` (100), `value_screen`,
+`tracker_analytics`, `odds_history_hours` (48). While `premium_gating` is off, `preview` is
+`true` and every feature is enabled for everyone. The enforcement helper
+`require_entitlement("feature")` exists and answers `403 plan_required` with
+`details: {feature, plan, required_plan}` (403, not 402: nothing can be paid for), but **no
+route uses it**, and the shipped catalog gives both plans the same thing, so nothing is gated
+even with the flag on. Which feature is premium-only is a packaging decision nobody has made;
+the tests exercise the helper with a premium-only feature that exists only in the tests.
 
 Behaviour worth knowing:
 
@@ -213,6 +265,73 @@ Behaviour worth knowing:
   1-800-GAMBLER. **OddVex never blocks, rejects or delays a bet because of it: the bet is always
   saved.** At most one reminder per user and week, even if the threshold changes or the
   notification is deleted.
+- **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
+  (public, flag `value_screen`). For every outcome of every live or upcoming event, the best
+  open, non-stale price is compared with the mean no-vig probability of the **other** open,
+  non-stale books quoting the same line. The book with the best price is left out of its own
+  consensus, and an outcome with fewer than 2 other books is skipped. `edge` is the quant
+  engine's EV per unit staked at the best price if the consensus probability were true
+  (`quant.value` on top of `quant.ev`); rows with `edge` above 0 and at least `min_edge`
+  (default 0) are returned, largest first, with `consensus_probability`,
+  `books_in_consensus`, `breakeven_probability`, `last_updated` and `stale_after_seconds`.
+  The response carries `as_of`, `data_mode`, `method` and a `caveat`: a price above the
+  consensus is not proof of an edge, the consensus can be wrong, limits and availability vary,
+  and it is not a prediction. On the synthetic data the screen is often short or empty
+  (typically 0 to 6 rows, mostly live games where the simulated books update at different
+  moments); the synthetic model gives no book a real edge.
+- **Tracker analytics.** `GET /v1/bets/analytics` (flag `tracker_analytics`) is computed only
+  from the caller's settled bets: `by_odds_band` (-200 or shorter, -199 to -110, -109 to
+  +100, +101 to +200, longer than +200, by the bet's rounded American price), `by_weekday`
+  (UTC day the bet was placed), `by_month` (UTC month it was settled), each row with `bets`,
+  `staked`, `profit`, `roi` and `win_rate` (wins / (wins + losses)); `longest_win_streak`,
+  `longest_loss_streak` and `current_streak` (a push or void neither extends nor ends a
+  run); `average_stake`; `average_odds` (mean decimal odds, as a price object); `clv`
+  (`sample`, `average`, `share_beating_close`, `buckets`); `stake_distribution`. Void bets
+  count as bets but not towards staked, average stake or average odds, as in the summary.
+  Ratios are fractions. With fewer than 30 settled bets `sample_note` says the results are
+  mostly noise.
+- **Email verification. No email is sent.** Registration queues a verification email in the
+  outbox. `POST /v1/auth/verify-email/request` (signed in) queues a new one and
+  `POST /v1/auth/verify-email/confirm` `{token}` sets `email_verified` on the user object.
+  Links expire after 24 hours and work once; a new request replaces the earlier link.
+  **An unverified user is not blocked from anything in this milestone.**
+- **Password reset.** `POST /v1/auth/password-reset/request` `{email}` always answers `202`
+  with the same body whether or not the account exists; the lookup and the email happen after
+  the response has been sent, so the response is the same in content and timing.
+  `POST /v1/auth/password-reset/confirm` `{token, new_password}` answers `204`, bumps
+  `token_version` (every access token issued before it is rejected), marks the email verified
+  and returns no token: sign in again. Links expire after 60 minutes and work once.
+- **Email tokens.** 32 random bytes, URL-safe. Only the SHA-256 hash is stored
+  (`email_tokens`). A used, expired, unknown or wrong-purpose token is
+  `400 invalid_or_expired_token`, always with the same message.
+- **Email limits.** The four routes share the per-IP auth limit. In addition a user can
+  request 3 verification emails and one address 3 reset emails per 15 minutes; the reset
+  limit is keyed on the address as typed, so it does not reveal whether an account exists.
+- **Login throttling.** After 8 failed logins for the same email within 15 minutes, further
+  attempts for that email get `429 rate_limited` (standard envelope, `Retry-After`) until the
+  window moves on, from any IP and even with the right password. It is keyed on the email as
+  typed, so the answer is the same for an address without an account. A successful login or
+  a completed password reset clears the count. In memory, per process, like the IP limiter,
+  and off when `ODDVEX_RATE_LIMIT_ENABLED=false`. Trade-off to know: someone who knows an
+  email can keep that account locked out of password login; the reset flow is the way back in.
+- **Suspension.** `POST /v1/admin/users/{id}/suspend` `{reason}` sets `users.status` to
+  `suspended`: the user's existing tokens get `401 account_suspended` and login gets
+  `403 account_suspended` with a neutral message (only after the correct password). The data
+  is kept; `unsuspend` restores access, including tokens that have not expired. An
+  administrator cannot suspend themselves (`409 cannot_suspend_self`) or another
+  administrator (`409 cannot_suspend_admin`).
+- **Admin.** Every route needs the `admin` role (`403 forbidden` otherwise). Every change
+  (suspend, unsuspend, plan, flag) writes an audit entry with the acting administrator as
+  `user_id`, the target as `entity_type`/`entity_id` and `details.before` / `details.after`
+  (plus `details.reason` for a suspension). `GET /v1/admin/users?q=&status=&plan=&limit=&offset=`
+  returns `{items, total, limit, offset}` with `bet_count` and `last_login_at`.
+  `GET /v1/admin/audit?action=&user_id=&before=&limit=` is newest first with a `next_before`
+  cursor; `user_id` matches entries a user caused and entries about that user. Admin responses
+  never contain password hashes, tokens or email bodies.
+- **Dev outbox.** `GET /v1/dev/email-outbox/latest?to=&template=` returns the latest outbox
+  email for an address, with `dev_link` and `token`, so a developer or an end-to-end test can
+  finish a flow. It needs no sign-in and **answers `404` when `ODDVEX_ENV=production`**. Do
+  not expose a non-production API with real accounts to the internet.
 - **Password change.** `POST /v1/me/password` takes `current_password` and `new_password`
   (10 to 128 characters, different from the current one) and returns a `TokenResponse` with a
   **new token** (200, not 204), because every token issued before the change is rejected with
@@ -221,7 +340,8 @@ Behaviour worth knowing:
 - **Data export.** `GET /v1/me/export` returns one JSON document (`format_version: 1`) with the
   profile, bets, watchlist, sync connections, import runs and the caller's own audit entries,
   plus `alerts`, `notifications`, `notification_preferences` and `stake_reminder` (added later;
-  optional for older clients). It never contains the password hash. Each export is itself
+  optional for older clients). The profile includes `plan` and `email_verified`. It never
+  contains the password hash, email tokens or outbox emails. Each export is itself
   audited.
 - **Sync.** Re-running an import never duplicates a bet: bets are keyed on user + provider +
   external bet id. A provider failure that survives the retries is recorded as a failed run and
@@ -231,8 +351,8 @@ Behaviour worth knowing:
 - **Request size.** Bodies over `ODDVEX_MAX_BODY_BYTES` are refused with `413 payload_too_large`
   in the usual envelope, whether the size is declared or the body is streamed.
 - **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
-  notifications, notification preferences, the staking reminder, sync connections and import
-  runs. The audit log keeps an entry with the opaque user id only.
+  notifications, notification preferences, the staking reminder, sync connections, import
+  runs, email tokens and outbox emails. The audit log keeps an entry with the opaque user id only.
 
 ## Architecture
 
@@ -243,12 +363,19 @@ src/oddvex_api/
   main.py            app factory, middleware, routers, OpenAPI post-processing
   config.py          settings from the environment; production safety checks
   quant/             pure betting math and grading. No I/O, no clock. Every number comes from here
+                     (value.py: best price vs. consensus; tracker.py: bands, buckets, streaks)
   providers/         SportsDataProvider protocol, SyntheticProvider, vendor-payload normalizer
-  board.py           read models: odds comparison, best price, consensus, prop research
-  api/               public data routes, calculators, admin
-  auth/              argon2id passwords, HS256 JWT, register/login/me, password change
+  board.py           read models: odds comparison, best price, consensus, prop research, value screen
+  api/               public data routes, calculators, admin (overview, users, flags, audit, outbox)
+  auth/              argon2id passwords, HS256 JWT, register/login/me, password change,
+                     email verification and password reset routes
+  flags/             feature flag catalog (defaults), DB overrides, require_flag, GET /v1/flags
+  entitlements/      plan catalog, require_entitlement, GET /v1/me/entitlements. No billing
+  mailer/            EmailSender protocol, OutboxEmailSender, ResendEmailSender stub, email
+                     templates (all wording), hashed single-use tokens, dev outbox route
   account/           data export
-  bets/              tracker: schemas, service (settlement, auto-settlement, summary), routes
+  bets/              tracker: schemas, service (settlement, auto-settlement, summary),
+                     analytics, routes
   watchlist/         watched teams, players and events
   alerts/            alert rules: schemas, pure evaluator, service (provider facts, state), throttle, routes
   notifications/     templates (all wording), NotificationChannel + InAppChannel, preferences,
@@ -260,7 +387,9 @@ src/oddvex_api/
 alembic/             migrations (0001: users, bets, bet_legs, sync_connections, sync_import_runs, audit_log;
                      0002: watchlist_items, users.token_version/password_changed_at, bets.settled_by,
                      bet_legs.outcome_key;
-                     0003: alert_rules, notifications, notification_preferences, stake_reminders)
+                     0003: alert_rules, notifications, notification_preferences, stake_reminders;
+                     0004: feature_flags, email_tokens, email_outbox,
+                     users.plan/status/last_login_at/email_verified_at)
 scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py
 docs/QUANT_METHODOLOGY.md
 ```
@@ -271,8 +400,9 @@ docs/QUANT_METHODOLOGY.md
   account-linking provider can be added without touching routes. Provider records carry
   `provider`, `provider_id` and `fetched_at`.
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
-  security headers, CORS allowlist, request body size limit, in-memory per-IP sliding-window
-  rate limit, audit log for auth events, password changes, bet create/settle/auto-settle/delete,
+  security headers, CORS allowlist, request body size limit, in-memory sliding-window rate
+  limits (per IP, and per account for failed logins and emails), audit log for auth events,
+  email verification, password resets, every admin change, password changes, bet create/settle/auto-settle/delete,
   watchlist changes, alert rule changes and firings, notification deletion, preference and
   staking-reminder changes, sync, data export and account deletion.
 
@@ -288,16 +418,34 @@ docs/QUANT_METHODOLOGY.md
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
 | Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle. With a provider it also gets five alert rules (one price alert that is already met and fires, the others stay active) and the notifications the engine produces for them |
 | Notification delivery | In-app only. No push, email or SMS provider is connected |
+| Email | Not sent. See below |
+| Billing | Does not exist. See below |
+
+## What is stubbed: no billing, no real email
+
+| Thing | What exists | What does not |
+| --- | --- | --- |
+| Plans | `users.plan` (`free` / `premium`), set by an administrator; an entitlement catalog and `require_entitlement`, enforced only with the `premium_gating` flag (off) and gating nothing as shipped | Prices, a purchase or subscription route, a payment provider, invoices, trials, webhooks. All of it needs Founder approval |
+| Email | The verification and reset flows end to end against an `EmailSender` protocol. `OutboxEmailSender` (the default) writes `to`, `template`, `subject`, `body_text`, `created_at` and a `dev_link` to `email_outbox` | Delivery. Nothing leaves the process. `ResendEmailSender` is a class that raises `NotImplementedError("Requires Founder approval and a Resend account")`; it is only selected by `ODDVEX_EMAIL_PROVIDER=resend`, and then the app refuses to start. No email SDK is installed and no HTTP call is made |
+| Email in production | The outbox row is still written, with the link replaced by a placeholder and `dev_link` empty, so the database never holds a usable token | A way for a real user to receive a link: **in production the verification and reset flows cannot be completed until a provider is approved and connected.** Consider turning `email_flows` off there until then |
+| Community | The `community` flag (off) | Any community feature |
 
 ## Limitations
 
 - No real odds, scores or statistics. Nothing here should be used to make a betting decision.
+- Email is not delivered, so nobody outside development can verify an address or reset a
+  password yet. An administrator cannot reset a password either.
+- `GET /v1/dev/email-outbox/latest` is unauthenticated outside production by design.
+- Flags are global: no per-user or percentage rollout. Each flagged request reads the flag
+  from the database.
+- The case-insensitive sportsbook filter on `GET /v1/bets` and the admin user search lower-case
+  with the database, which handles ASCII only on SQLite and on PostgreSQL with the `C` locale.
 - Rate limiting and caching are in process memory. With several workers each has its own
   counters; move them to a shared store before scaling out.
-- JWT access tokens only: no refresh tokens, no email verification, no password reset (a
-  forgotten password cannot be recovered), no per-session logout. Tokens are revoked in two
-  cases only: changing the password invalidates every earlier token, and deleting the account
-  invalidates all of them.
+- JWT access tokens only: no refresh tokens and no per-session logout. Tokens stop working
+  when the password is changed or reset (every earlier token), when the account is suspended
+  (until it is unsuspended) and when it is deleted. Password reset exists but depends on an
+  email that is not delivered (see above).
 - Auto-settlement grades full-game moneyline, spread and total from the provider's final score.
   Props, futures, half results, voids and cash-outs stay manual, and the score is synthetic.
   It runs when the client calls it; there is no background job.

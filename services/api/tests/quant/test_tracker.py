@@ -63,8 +63,19 @@ def test_odds_band_uses_the_rounded_american_price() -> None:
 
 @pytest.mark.parametrize(
     ("value", "index"),
-    [(-0.2, 0), (-0.05, 1), (-0.021, 1), (-0.02, 2), (-0.0001, 2), (0, 3), (0.0199, 3)]
-    + [(0.02, 4), (0.0499, 4), (0.05, 5), (3, 5)],
+    [
+        (-0.2, 0),
+        (-0.05, 1),
+        (-0.021, 1),
+        (-0.02, 2),
+        (-0.0001, 2),
+        (0, 3),
+        (0.0199, 3),
+        (0.02, 4),
+        (0.0499, 4),
+        (0.05, 5),
+        (3, 5),
+    ],
 )
 def test_clv_buckets_include_the_lower_bound(value: float, index: int) -> None:
     assert bucket_index(value, CLV_BOUNDS) == index
@@ -73,8 +84,18 @@ def test_clv_buckets_include_the_lower_bound(value: float, index: int) -> None:
 
 @pytest.mark.parametrize(
     ("stake", "index"),
-    [("0.01", 0), ("9.99", 0), ("10", 1), ("24.99", 1), ("25", 2), ("49.99", 2), ("50", 3)]
-    + [("99.99", 3), ("100", 4), ("1000000", 4)],
+    [
+        ("0.01", 0),
+        ("9.99", 0),
+        ("10", 1),
+        ("24.99", 1),
+        ("25", 2),
+        ("49.99", 2),
+        ("50", 3),
+        ("99.99", 3),
+        ("100", 4),
+        ("1000000", 4),
+    ],
 )
 def test_stake_buckets(stake: str, index: int) -> None:
     assert bucket_index(Decimal(stake), STAKE_BOUNDS) == index
