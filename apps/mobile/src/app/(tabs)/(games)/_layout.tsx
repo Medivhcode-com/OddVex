@@ -25,6 +25,13 @@ export default function GamesLayout() {
       <Stack.Screen name="event/[id]" options={{ title: 'Game' }} />
       <Stack.Screen name="assistant" options={{ title: 'OddVex AI' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+      {/* Behind the `community` flag: each screen shows "not available" while it is off. */}
+      <Stack.Screen name="community/index" options={{ title: 'Community' }} />
+      <Stack.Screen name="community/picks/[id]" options={{ title: 'Pick' }} />
+      <Stack.Screen name="community/profiles/[handle]" options={{ title: 'Profile' }} />
+      <Stack.Screen name="community/profile" options={{ title: 'Your profile' }} />
+      <Stack.Screen name="community/leaderboard" options={{ title: 'Leaderboard' }} />
+      <Stack.Screen name="community/guidelines" options={{ title: 'Community guidelines' }} />
     </Stack>
   );
 }

@@ -5,7 +5,7 @@ import * as api from '@/api/client';
 import type { AuthResponse, User } from '@/api/types';
 import { clearSession, loadSession, saveSession } from '@/session/store';
 
-type Topic = 'bets' | 'watchlist' | 'alerts' | 'notifications' | 'reminder';
+type Topic = 'bets' | 'watchlist' | 'alerts' | 'notifications' | 'reminder' | 'community';
 
 export type SessionValue = {
   /** `loading` only while the saved session is being read at launch. */
@@ -13,7 +13,13 @@ export type SessionValue = {
   user: User | null;
   logIn: (email: string, password: string) => Promise<void>;
   createAccount: (input: { email: string; password: string; display_name: string }) => Promise<void>;
-  logOut: () => Promise<void>;
+  /**
+   * Asks the API to end every session of the account (`POST /v1/auth/logout`), then clears the token from
+   * memory and SecureStore. The local clear happens whatever the API answers, including no answer at all.
+   * `local: true` skips the API call: used after a password reset, which has already ended every session of
+   * the account the link was for.
+   */
+  logOut: (options?: { local?: boolean }) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
   /** Reads `GET /v1/me` again, after something outside this provider changed the user (a confirmed email). */
@@ -24,14 +30,14 @@ export type SessionValue = {
    */
   suspended: boolean;
   /**
-   * Counters that go up when the user's bets, watchlist, alert rules, notifications or staking reminder change,
-   * so every screen showing them reloads.
+   * Counters that go up when the user's bets, watchlist, alert rules, notifications, staking reminder or
+   * community profile, follows and blocks change, so every screen showing them reloads.
    */
   revision: Record<Topic, number>;
   changed: (topic: Topic) => void;
 };
 
-export const NO_CHANGES: Record<Topic, number> = { bets: 0, watchlist: 0, alerts: 0, notifications: 0, reminder: 0 };
+export const NO_CHANGES: Record<Topic, number> = { bets: 0, watchlist: 0, alerts: 0, notifications: 0, reminder: 0, community: 0 };
 
 const signedOut: SessionValue = {
   status: 'signedOut',
@@ -125,7 +131,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       },
       createAccount: async (input) => begin(await api.register(input)),
-      logOut: () => end(),
+      logOut: async (options) => {
+        if (!options?.local) {
+          try {
+            await api.logout();
+          } catch {
+            // Offline, timed out or already rejected. The device is signed out either way.
+          }
+        }
+        await end();
+      },
       refreshUser: async () => {
         const started = epoch.current;
         const user = await api.getMe();

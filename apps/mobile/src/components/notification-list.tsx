@@ -24,6 +24,9 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   bet_settled: 'Settled bet',
   sync_finished: 'Sync result',
   stake_reminder: 'Staking reminder',
+  new_follower: 'New follower',
+  pick_comment: 'Comment on your pick',
+  pick_graded: 'Graded pick',
 };
 
 type Feed = { items: Notification[]; unread: number; nextBefore: string | null };

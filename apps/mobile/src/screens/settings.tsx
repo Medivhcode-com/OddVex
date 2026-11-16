@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { API_URL } from '@/api/client';
@@ -91,6 +92,30 @@ function Fact({ label, value, plain = false }: { label: string; value: string; p
   );
 }
 
+export const LOG_OUT_EVERYWHERE = 'Logging out ends every session for this account, on every device where it is signed in.';
+
+/** Log out: the API ends every session of the account, then this device forgets the token. */
+function LogOut() {
+  const session = useSession();
+  const [busy, setBusy] = useState(false);
+  async function logOut() {
+    setBusy(true);
+    try {
+      await session.logOut();
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <Button label={busy ? 'Logging out' : 'Log out'} variant="secondary" disabled={busy} onPress={() => void logOut()} />
+      <Txt variant="caption" tone="muted">
+        {LOG_OUT_EVERYWHERE}
+      </Txt>
+    </>
+  );
+}
+
 const PLAN_NAMES: Record<Plan, string> = { free: 'Free', premium: 'Premium' };
 
 function Account() {
@@ -123,7 +148,7 @@ function Account() {
       <EmailVerificationStatus />
       {session.user.plan ? <Fact label="Plan" value={PLAN_NAMES[session.user.plan]} plain /> : null}
       <EntitlementsLine userId={session.user.id} />
-      <Button label="Log out" variant="secondary" onPress={() => void session.logOut()} />
+      <LogOut />
     </View>
   );
 }

@@ -31,11 +31,7 @@ export type PasswordResetConfirm = Schemas['PasswordResetConfirmRequest'];
 
 export type ValueScreen = Schemas['ValueScreenOut'];
 export type ValueRow = Schemas['ValueRowOut'];
-/**
- * `streak_note` is not in the published schema yet. It is declared here as optional so the analytics screen
- * can show it the day the API starts sending it; drop this addition once the generated type has the field.
- */
-export type BetAnalytics = Schemas['BetAnalyticsOut'] & { streak_note?: string | null };
+export type BetAnalytics = Schemas['BetAnalyticsOut'];
 export type AnalyticsRow = Schemas['AnalyticsRowOut'];
 
 export type Bet = Schemas['BetOut'];
@@ -104,6 +100,33 @@ export type NotificationPreferences = Schemas['NotificationPreferencesOut'];
 /** A partial update: kinds left out keep their value. */
 export type NotificationPreferencesUpdate = { in_app: Partial<Record<NotificationKind, boolean>> };
 export type StakeReminder = Schemas['StakeReminderOut'];
+
+// Community (flags `community` and `community_leaderboard`). Other people are known by handle only.
+export type CommunityGuidelines = Schemas['CommunityGuidelinesOut'];
+export type CommunityProfile = Schemas['ProfileOut'];
+export type MyCommunityProfile = Schemas['MyProfileOut'];
+export type ProfileUpsert = Schemas['ProfileUpsert'];
+export type CommunityRecord = Schemas['CommunityRecordOut'];
+/** Named `CommunityPick` so it does not shadow TypeScript's own `Pick`. */
+export type CommunityPick = Schemas['PickOut'];
+export type PickPage = Schemas['PickPageOut'];
+export type PickCreate = Schemas['PickCreate'];
+export type PickStatus = CommunityPick['status'];
+export type PickOutcomeKey = PickCreate['outcome_key'];
+export type PickComment = Schemas['CommentOut'];
+export type CommentPage = Schemas['CommentPageOut'];
+export type LikeState = Schemas['LikeStateOut'];
+export type FollowState = Schemas['FollowStateOut'];
+export type BlockState = Schemas['BlockStateOut'];
+export type BlockEntry = Schemas['BlockEntryOut'];
+export type ReportCreate = Schemas['ReportCreate'];
+export type ReportReason = ReportCreate['reason'];
+export type ReportTarget = ReportCreate['target_type'];
+export type Report = Schemas['ReportOut'];
+export type Leaderboard = Schemas['LeaderboardOut'];
+export type LeaderboardRow = Schemas['LeaderboardRowOut'];
+export type LeaderboardWindow = Leaderboard['window'];
+export type FeedScope = 'following' | 'everyone';
 
 export type Market = Schemas['EventOddsOut']['market'];
 export const MARKETS: readonly { value: Market; label: string }[] = [

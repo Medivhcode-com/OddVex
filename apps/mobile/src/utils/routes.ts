@@ -4,7 +4,9 @@ import type { Href } from 'expo-router';
  * Turns a web route the API sends (assistant suggestions, notification links) into the matching screen in
  * this app, or null when there is none. `/app/games/{id}` is the game (opened on its `market` when the link
  * names one), `/app/props/{id}` the prop analyzer (with its `market`), and the section roots go to their
- * tabs. The odds board on the web is the Games tab here.
+ * tabs. The odds board on the web is the Games tab here. `/app/community/picks/{id}` and
+ * `/app/community/profiles/{handle}` open the pick and the profile; those screens check the `community` flag
+ * themselves, so a link that arrives while the flag is off lands on the "not available" state.
  */
 export function appRoute(href: string): Href | null {
   const [path, query = ''] = href.split('#')[0].split('?');
@@ -33,5 +35,15 @@ export function appRoute(href: string): Href | null {
   if (section === 'assistant') return '/assistant';
   if (section === 'notifications') return '/notifications';
   if (section === 'alerts') return { pathname: '/notifications', params: { tab: 'alerts' } };
+  if (section === 'community') {
+    const [, , kind, rawTarget] = parts;
+    const target = rawTarget ? decodeURIComponent(rawTarget) : undefined;
+    if (kind === undefined) return '/community';
+    if (kind === 'picks' && target) return { pathname: '/community/picks/[id]', params: { id: target } };
+    if (kind === 'profiles' && target) return { pathname: '/community/profiles/[handle]', params: { handle: target } };
+    if (kind === 'leaderboard') return '/community/leaderboard';
+    if (kind === 'guidelines') return '/community/guidelines';
+    return '/community';
+  }
   return null;
 }

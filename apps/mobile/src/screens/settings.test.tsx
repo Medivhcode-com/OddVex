@@ -9,7 +9,18 @@ import { WithFlags } from '@/test/flags';
 import { fakeSession, WithSession } from '@/test/session';
 
 const preferences = {
-  in_app: { price_alert: true, line_move: true, game_start: true, game_final: true, bet_settled: true, sync_finished: true, stake_reminder: true },
+  in_app: {
+    price_alert: true,
+    line_move: true,
+    game_start: true,
+    game_final: true,
+    bet_settled: true,
+    sync_finished: true,
+    stake_reminder: true,
+    new_follower: true,
+    pick_comment: true,
+    pick_graded: true,
+  },
 };
 
 afterEach(() => setAuthToken(null));
@@ -34,6 +45,41 @@ describe('SettingsScreen notifications', () => {
     expect(await screen.findByText('You have staked $250.00 this week.')).toBeOnTheScreen();
     expect(screen.getByText('Your reminder is set at $200.00 a week.')).toBeOnTheScreen();
     expect(screen.getByText(/free, confidential help is available at 1-800-GAMBLER\.$/)).toBeOnTheScreen();
+  });
+
+  it('adds the three community switches while the community flag is on', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    serveRoutes(fetchMock, { 'GET /v1/me/notification-preferences': preferences, 'GET /v1/me/stake-reminder': reminderExceeded });
+    await render(
+      <WithFlags flags={{ community: true }}>
+        <WithSession value={fakeSession()}>
+          <SettingsScreen />
+        </WithSession>
+      </WithFlags>,
+    );
+
+    for (const label of ['New followers', 'Comments on your picks', 'Graded picks']) {
+      expect(await screen.findByRole('switch', { name: label })).toBeChecked();
+    }
+    expect(screen.getAllByRole('switch')).toHaveLength(10);
+  });
+
+  it('logs out through the session and says that it ends every session for the account', async () => {
+    setAuthToken('token-1');
+    const { fetchMock } = installFetch();
+    serveRoutes(fetchMock, { 'GET /v1/me/notification-preferences': preferences, 'GET /v1/me/stake-reminder': reminderExceeded });
+    const session = fakeSession();
+    await render(
+      <WithSession value={session}>
+        <SettingsScreen />
+      </WithSession>,
+    );
+
+    expect(screen.getByText('Logging out ends every session for this account, on every device where it is signed in.')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: 'Log out' }));
+    expect(session.logOut).toHaveBeenCalledTimes(1);
+    expect(session.logOut).toHaveBeenCalledWith();
   });
 
   it('shows neither section signed out', async () => {

@@ -143,8 +143,9 @@ export function ResetPasswordScreen({ token }: { token: string }) {
       setPending(false);
       return;
     }
-    // The reset rejects every earlier token, including one saved on this device.
-    await session.logOut();
+    // The reset rejects every earlier token, including one saved on this device, so only the local copy is
+    // cleared. Calling the logout route here could end the sessions of a different account signed in on this device.
+    await session.logOut({ local: true });
     router.replace({ pathname: '/login', params: { reset: 'done' } });
   }
 

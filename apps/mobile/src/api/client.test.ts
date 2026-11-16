@@ -402,3 +402,114 @@ describe('flags, value screen, analytics and account flows', () => {
     client.setUnauthorizedHandler(null);
   });
 });
+
+describe('community and logout', () => {
+  const sentRequests = () =>
+    fetchMock.mock.calls.map(([url, init]) => ({
+      method: init.method as string,
+      path: String(url).replace(API_URL, ''),
+      headers: init.headers as Record<string, string>,
+      body: init.body === undefined ? undefined : JSON.parse(init.body),
+    }));
+
+  afterEach(() => {
+    setAuthToken(null);
+    setUnauthorizedHandler(null);
+  });
+
+  it("keeps the API's details on the error, so the content rule it names can be shown", async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(
+      jsonResponse({ error: { code: 'content_not_allowed', message: 'Do not present a result as certain.', details: { field: 'body', rule: 'guaranteed_outcome' } } }, 422),
+    );
+    const error = await client.createPickComment('pick_1', 'text').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 422, code: 'content_not_allowed', details: { field: 'body', rule: 'guaranteed_outcome' } });
+  });
+
+  it('reads the guidelines without a token and everything else with one', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
+    await client.getCommunityGuidelines();
+    await client.getCommunityFeed('everyone', 'cursor 1');
+    await client.getCommunityPicks({ handle: 'fictional_fox', status: 'graded' });
+    await client.getLeaderboard({ league: 'nfl', window: '30d' });
+    await client.getCommunityProfile('fictional_fox');
+
+    const sent = sentRequests();
+    expect(sent.map((request) => request.path)).toEqual([
+      '/v1/community/guidelines',
+      '/v1/community/feed?scope=everyone&before=cursor%201&limit=20',
+      '/v1/community/picks?handle=fictional_fox&status=graded&limit=20',
+      '/v1/community/leaderboard?league=nfl&window=30d',
+      '/v1/community/profiles/fictional_fox',
+    ]);
+    expect(sent[0].headers.authorization).toBeUndefined();
+    for (const request of sent.slice(1)) expect(request.headers.authorization).toBe('Bearer token-1');
+  });
+
+  it('refuses the signed-in routes without a token, before any request', async () => {
+    for (const call of [() => client.getCommunityFeed('following'), () => client.getMyCommunityProfile(), () => client.likeCommunityPick('p'), () => client.logout()]) {
+      await expect(call()).rejects.toMatchObject({ status: 401, code: 'not_logged_in' });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('answers null for "no profile yet" and passes every other failure on', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'not_found', message: 'You have no community profile yet' } }, 404));
+    await expect(client.getMyCommunityProfile()).resolves.toBeNull();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'feature_disabled', message: 'This feature is not available' } }, 404));
+    const disabled = await client.getMyCommunityProfile().catch((caught: unknown) => caught);
+    expect(client.isFeatureDisabled(disabled)).toBe(true);
+  });
+
+  it('uses the method each write needs', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    await client.saveCommunityProfile({ handle: 'sam', is_public: true });
+    await client.createCommunityPick({ event_id: 'evt_2', market: 'moneyline', outcome_key: 'home' });
+    await client.deleteCommunityPick('pick 1');
+    await client.likeCommunityPick('pick_1');
+    await client.unlikeCommunityPick('pick_1');
+    await client.createPickComment('pick_1', 'A comment.');
+    await client.deletePickComment('cmt_1');
+    await client.followProfile('fictional_fox');
+    await client.unfollowProfile('fictional_fox');
+    await client.blockProfile('fictional_fox');
+    await client.unblockProfile('fictional_fox');
+    await client.reportCommunityContent({ target_type: 'profile', target_id: 'fictional_fox', reason: 'spam' });
+
+    expect(sentRequests().map((request) => `${request.method} ${request.path}`)).toEqual([
+      'PUT /v1/community/profile',
+      'POST /v1/community/picks',
+      'DELETE /v1/community/picks/pick%201',
+      'PUT /v1/community/picks/pick_1/like',
+      'DELETE /v1/community/picks/pick_1/like',
+      'POST /v1/community/picks/pick_1/comments',
+      'DELETE /v1/community/comments/cmt_1',
+      'POST /v1/community/follows/fictional_fox',
+      'DELETE /v1/community/follows/fictional_fox',
+      'PUT /v1/community/blocks/fictional_fox',
+      'DELETE /v1/community/blocks/fictional_fox',
+      'POST /v1/community/reports',
+    ]);
+    expect(sentRequests()[1].body).toEqual({ event_id: 'evt_2', market: 'moneyline', outcome_key: 'home' });
+    expect(sentRequests()[5].body).toEqual({ body: 'A comment.' });
+  });
+
+  it('posts the logout with the token, and a 401 to it does not count as a rejected session', async () => {
+    setAuthToken('token-1');
+    const onUnauthorized = jest.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 204, json: async () => null });
+    await expect(client.logout()).resolves.toBeUndefined();
+    expect(sentRequests()[0]).toMatchObject({ method: 'POST', path: '/v1/auth/logout' });
+    expect(sentRequests()[0].headers.authorization).toBe('Bearer token-1');
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { code: 'invalid_token', message: 'The access token is invalid or has expired' } }, 401));
+    await expect(client.logout()).rejects.toMatchObject({ status: 401, code: 'invalid_token' });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+});

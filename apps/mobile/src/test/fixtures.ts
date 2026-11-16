@@ -5,6 +5,13 @@ import type {
   BetAnalytics,
   BetLeg,
   BookRow,
+  CommunityGuidelines,
+  CommunityPick,
+  CommunityProfile,
+  CommunityRecord,
+  Leaderboard,
+  MyCommunityProfile,
+  PickComment,
   EventSummary,
   GameLogEntry,
   Notification,
@@ -429,3 +436,158 @@ export const emptyAnalytics: BetAnalytics = {
 };
 
 export const flagsAllOn = { community: false, value_screen: true, tracker_analytics: true, email_flows: true, premium_gating: false };
+
+/** Both community flags on, next to the others. */
+export const flagsCommunityOn = { ...flagsAllOn, community: true, community_leaderboard: true };
+
+/** Worded differently from the API's real rules on purpose, so a test can tell they were not written in the app. */
+export const guidelines: CommunityGuidelines = {
+  version: '2026-11-16',
+  intro: 'Fixture intro: this community is for discussing research.',
+  rules: [
+    { key: 'be_civil', title: 'Fixture rule one', text: 'Discuss the pick, not the person.' },
+    { key: 'no_selling_or_links', title: 'Fixture rule two', text: 'No paid picks and no links of any kind.' },
+  ],
+  enforcement: 'Fixture enforcement: moderators can hide content.',
+  help: '21+. OddVex does not accept wagers. Gambling problem? Call 1-800-GAMBLER.',
+};
+
+export const smallRecord: CommunityRecord = {
+  verified: true,
+  picks: 6,
+  wins: 2,
+  losses: 3,
+  pushes: 1,
+  win_rate: 0.4,
+  win_rate_interval: { low: 0.1176, high: 0.7693, confidence_level: 0.95 },
+  average_price: price(107, 2.07, 0.4831),
+  flat_stake_roi: -0.0825,
+  units_profit: -0.495,
+  method: 'Fixture method: the same flat amount on every graded pick at the price recorded when it was posted.',
+  sample_note: 'Small sample: 6 graded picks. Fewer than 30 is too few to tell skill from luck.',
+  caveat: 'A record describes picks that were already graded. Past results do not predict future results.',
+};
+
+export const fullRecord: CommunityRecord = {
+  ...smallRecord,
+  picks: 36,
+  wins: 18,
+  losses: 18,
+  pushes: 0,
+  win_rate: 0.5,
+  win_rate_interval: { low: 0.3447, high: 0.6553, confidence_level: 0.95 },
+  average_price: price(119, 2.19, 0.4561),
+  flat_stake_roi: 0.0431,
+  sample_note: null,
+};
+
+export const myProfile: MyCommunityProfile = {
+  handle: 'sam_reads_lines',
+  bio: 'Totals and closing lines.',
+  joined: '2026-11',
+  follower_count: 2,
+  following_count: 3,
+  record: smallRecord,
+  is_following: false,
+  is_blocked: false,
+  is_me: true,
+  is_public: true,
+  can_post: true,
+  moderation_status: 'visible',
+  moderation_note: null,
+};
+export const privateProfile: MyCommunityProfile = { ...myProfile, is_public: false, can_post: false };
+
+export const otherProfile: CommunityProfile = {
+  handle: 'fictional_fox',
+  bio: 'Fictional profile. <b>Not markup</b> https://example.test',
+  joined: '2026-10',
+  follower_count: 1,
+  following_count: 4,
+  record: fullRecord,
+  is_following: false,
+  is_blocked: false,
+  is_me: false,
+};
+
+function pick(id: string, extra: Partial<CommunityPick> = {}): CommunityPick {
+  return {
+    id,
+    author: { handle: 'fictional_fox' },
+    event_id: 'evt_2',
+    event_label: 'Iron Valley Forge at Harbor City Gulls',
+    event_start_time: '2026-11-16T18:00:00Z',
+    league: 'nfl',
+    market: 'spread',
+    outcome_key: 'home',
+    line: -3.5,
+    selection: 'Harbor City Gulls -3.5 spread',
+    price: price(-108, 1.93, 0.5192),
+    sportsbook: { key: 'book_a', name: 'Northstar Sports' },
+    posted_at: '2026-11-15T17:00:00Z',
+    status: 'pending',
+    result: null,
+    graded_at: null,
+    final_score: null,
+    analysis: 'The line moved half a point since open.',
+    verified: true,
+    like_count: 2,
+    comment_count: 1,
+    liked_by_me: false,
+    is_mine: false,
+    moderation_status: 'visible',
+    moderation_note: null,
+    data_mode: 'synthetic',
+    ...extra,
+  };
+}
+
+export const upcomingPick = pick('pick_1');
+export const wonPick = pick('pick_2', {
+  market: 'moneyline',
+  line: null,
+  selection: 'Harbor City Gulls moneyline',
+  status: 'graded',
+  result: 'won',
+  graded_at: '2026-11-15T19:00:00Z',
+  final_score: { home: 17, away: 14 },
+  event_start_time: '2026-11-14T18:00:00Z',
+  analysis: null,
+  like_count: 1,
+  liked_by_me: true,
+  comment_count: 0,
+});
+export const lostPick = pick('pick_3', { ...wonPick, id: 'pick_3', result: 'lost', selection: 'Iron Valley Forge moneyline', outcome_key: 'away', liked_by_me: false, like_count: 0 });
+export const pushPick = pick('pick_4', { ...wonPick, id: 'pick_4', result: 'push', market: 'total', selection: 'Over 31 in Iron Valley Forge at Harbor City Gulls', line: 31, outcome_key: 'over', liked_by_me: false, like_count: 0 });
+export const voidPick = pick('pick_5', { status: 'void', event_start_time: '2026-11-01T18:00:00Z', analysis: null, like_count: 0, comment_count: 0 });
+export const myUpcomingPick = pick('pick_6', { author: { handle: 'sam_reads_lines' }, is_mine: true });
+export const myGradedPick = pick('pick_7', { ...wonPick, id: 'pick_7', author: { handle: 'sam_reads_lines' }, is_mine: true });
+
+export function comment(id: string, extra: Partial<PickComment> = {}): PickComment {
+  return {
+    id,
+    pick_id: 'pick_1',
+    author: { handle: 'madeup_mara' },
+    body: 'Which book moved first? <script>alert(1)</script> www.example.test',
+    created_at: '2026-11-15T18:00:00Z',
+    is_mine: false,
+    moderation_status: 'visible',
+    moderation_note: null,
+    ...extra,
+  };
+}
+
+export const leaderboard: Leaderboard = {
+  window: '90d',
+  league: null,
+  minimum_graded_picks: 30,
+  ranked_by: 'wilson_lower_bound',
+  items: [
+    { rank: 1, handle: 'fictional_fox', record: fullRecord },
+    { rank: 2, handle: 'sample_sam', record: { ...fullRecord, picks: 32, wins: 15, losses: 17, win_rate: 0.4688, win_rate_interval: { low: 0.3087, high: 0.6356, confidence_level: 0.95 } } },
+  ],
+  method: 'Fixture ranking method: ordered by the lower bound of the interval of the win rate.',
+  caveat: 'This ranking describes graded picks from the past. Past results do not predict future results.',
+  as_of: '2026-11-15T19:59:30Z',
+  data_mode: 'synthetic',
+};

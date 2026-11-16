@@ -14,6 +14,7 @@ import { useWatchlist } from '@/hooks/use-watchlist';
 import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
 import { useMeta } from '@/providers/meta';
+import { CommunityEntry } from '@/components/community-entry';
 import { ValueEntry } from '@/components/value-entry';
 import { space } from '@/theme';
 
@@ -124,6 +125,7 @@ export function GamesScreen() {
   const theme = useTheme();
   const meta = useMeta();
   const valueScreen = useFlag('value_screen');
+  const community = useFlag('community');
   const [league, setLeague] = useState<string | null>(null);
   const leagues = useResource('leagues', getLeagues);
   const events = useResource(`events:${league ?? ''}`, (signal) => getEvents({ league }, signal));
@@ -150,6 +152,7 @@ export function GamesScreen() {
         <View style={styles.header}>
           <AskCard />
           {valueScreen ? <ValueEntry compact /> : null}
+          {community ? <CommunityEntry /> : null}
           {session.user ? <Watchlist userId={session.user.id} leagues={leagueList} /> : null}
           <View style={styles.chips}>
             <FilterChips

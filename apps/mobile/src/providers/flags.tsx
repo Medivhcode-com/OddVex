@@ -7,7 +7,7 @@ import { useResource } from '@/hooks/use-resource';
 import { useSession } from '@/providers/session';
 
 /** The flags this app acts on. The API may know more; the others are ignored here. */
-export type FlagKey = 'value_screen' | 'tracker_analytics' | 'email_flows';
+export type FlagKey = 'value_screen' | 'tracker_analytics' | 'email_flows' | 'community' | 'community_leaderboard';
 
 export type FlagsValue = {
   /** `loading` until the first answer; `error` when no answer has ever arrived. */

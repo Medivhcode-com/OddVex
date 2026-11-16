@@ -146,6 +146,8 @@ describe('ResetPasswordScreen', () => {
     });
     expect(sent()[0].headers.authorization).toBeUndefined();
     expect(session.logOut).toHaveBeenCalledTimes(1);
+    // Only this device's copy is cleared: the reset already ended every session of that account.
+    expect(session.logOut).toHaveBeenCalledWith({ local: true });
   });
 
   it('explains a used or expired link and offers a new one', async () => {

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { router } from 'expo-router';
 
 import { setAuthToken } from '@/api/client';
-import { NotificationList } from '@/components/notification-list';
+import { NOTIFICATION_KIND_LABELS, NotificationList } from '@/components/notification-list';
 import { errorResponse, installFetch, jsonResponse, serveRoutes } from '@/test/api';
 import { finalNotification, priceNotification, settledNotification, stakeNotification } from '@/test/fixtures';
 import { fakeSession, WithSession } from '@/test/session';
@@ -28,6 +28,59 @@ beforeEach(() => {
   setAuthToken('token-1');
 });
 afterEach(() => setAuthToken(null));
+
+const followerNotification = {
+  ...priceNotification,
+  id: 'ntf_c1',
+  kind: 'new_follower' as const,
+  title: 'New follower',
+  body: 'fictional_fox started following you.',
+  href: '/app/community/profiles/fictional_fox',
+};
+const commentNotification = {
+  ...priceNotification,
+  id: 'ntf_c2',
+  kind: 'pick_comment' as const,
+  title: 'New comment on your pick',
+  body: 'madeup_mara commented on your pick, Harbor City Gulls moneyline.',
+  href: '/app/community/picks/pick_6',
+  read_at: '2026-11-15T19:00:00Z',
+};
+const gradedNotification = {
+  ...priceNotification,
+  id: 'ntf_c3',
+  kind: 'pick_graded' as const,
+  title: 'Pick graded: lost',
+  body: 'Your pick, Harbor City Gulls moneyline, was graded as lost.',
+  href: '/app/community/picks/pick_7',
+  read_at: '2026-11-15T19:00:00Z',
+};
+
+describe('community notifications', () => {
+  it('has a label for each of the three kinds', () => {
+    expect(NOTIFICATION_KIND_LABELS.new_follower).toBe('New follower');
+    expect(NOTIFICATION_KIND_LABELS.pick_comment).toBe('Comment on your pick');
+    expect(NOTIFICATION_KIND_LABELS.pick_graded).toBe('Graded pick');
+  });
+
+  it('shows the kinds and opens the profile or the pick the link names', async () => {
+    await show({
+      [LIST]: { items: [followerNotification, commentNotification, gradedNotification], unread_count: 1, next_before: null },
+      'POST /v1/notifications/ntf_c1/read': { ...followerNotification, read_at: '2026-11-15T20:00:00Z' },
+    });
+
+    expect(await screen.findByText(/^New follower · /)).toBeOnTheScreen();
+    expect(screen.getByText(/^Comment on your pick · /)).toBeOnTheScreen();
+    expect(screen.getByText(/^Graded pick · /)).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: /^New\. New follower\./ }));
+    expect(router.push).toHaveBeenLastCalledWith({ pathname: '/community/profiles/[handle]', params: { handle: 'fictional_fox' } });
+    await fireEvent.press(screen.getByRole('button', { name: /^Comment on your pick\./ }));
+    expect(router.push).toHaveBeenLastCalledWith({ pathname: '/community/picks/[id]', params: { id: 'pick_6' } });
+    await fireEvent.press(screen.getByRole('button', { name: /^Graded pick\. Pick graded: lost\./ }));
+    expect(router.push).toHaveBeenLastCalledWith({ pathname: '/community/picks/[id]', params: { id: 'pick_7' } });
+  });
+});
 
 describe('NotificationList', () => {
   it("lists notifications with the API's own words, their kind, and the word New on unread ones", async () => {

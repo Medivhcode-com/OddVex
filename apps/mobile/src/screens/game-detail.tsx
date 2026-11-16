@@ -9,6 +9,7 @@ import { Segmented } from '@/components/choice';
 import { EventStatus } from '@/components/game-card';
 import { ConsensusRow, OddsRow, type OddsColumn } from '@/components/odds-row';
 import { QuickBet, quickBetOptions } from '@/components/quick-bet';
+import { SharePick } from '@/components/share-pick';
 import { Button, ErrorState, Notice, Panel, PanelHeading, SkeletonCards } from '@/components/states';
 import { Num, Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
@@ -203,6 +204,7 @@ export function GameDetailScreen({ eventId, initialMarket }: { eventId: string; 
             it.
           </Txt>
           {summary ? <TrackBet event={summary} odds={odds.data} /> : null}
+          {summary ? <SharePick event={summary} odds={odds.data} /> : null}
           {summary ? <SetAlert event={summary} odds={odds.data} /> : null}
         </>
       ) : null}
