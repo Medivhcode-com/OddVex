@@ -8,6 +8,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -15,19 +16,29 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import DateTime, bindparam, inspect, select, text
+from sqlalchemy import DateTime, bindparam, func, inspect, select, text
 
 from oddvex_api.auth.security import hash_password
+from oddvex_api.community.content_rules import check_text
+from oddvex_api.community.seed import FICTIONAL_PROFILES
 from oddvex_api.db import (
     AlertRule,
     Base,
     Bet,
+    CommunityComment,
+    CommunityFollow,
+    CommunityLike,
+    CommunityPick,
+    CommunityProfile,
+    FeatureFlag,
     Notification,
     User,
     make_engine,
     make_session_factory,
 )
+from oddvex_api.flags import service as flags_service
 from oddvex_api.providers import SyntheticProvider
+from oddvex_api.quant import grade_leg
 from oddvex_api.seed import (
     DEMO_ADMIN_EMAIL,
     DEMO_BET_COUNT,
@@ -573,6 +584,233 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
         _reset_external_database(url)
 
 
+TABLES_0005 = {
+    "community_profiles",
+    "community_picks",
+    "community_comments",
+    "community_follows",
+    "community_likes",
+    "community_blocks",
+    "community_reports",
+}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0004_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0005.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0004")
+    engine = make_engine(url)
+    assert not TABLES_0005 & set(inspect(engine).get_table_names())
+    assert "search_key" not in {c["name"] for c in inspect(engine).get_columns("users")}
+    assert "sportsbook_key" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+
+    # Rows written by the 0004 release: two users and bets at sportsbooks whose names
+    # SQL lower() cannot fold on SQLite or on PostgreSQL with the C locale.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    users = (("u" * 32, "old@example.test", "Zoë ÜNSAL"), ("v" * 32, "jose@example.test", "JOSÉ"))
+    bets = (
+        ("a" * 32, "u" * 32, "Éclair Sports"),
+        ("b" * 32, "u" * 32, "ÉCLAIR SPORTS"),
+        ("c" * 32, "u" * 32, "Northline"),
+        ("d" * 32, "v" * 32, "STRASSE Wetten"),
+    )
+    with engine.begin() as connection:
+        for user_id, email, name in users:
+            connection.execute(
+                text(
+                    "INSERT INTO users (id, email, password_hash, display_name, role, "
+                    "is_active, age_confirmed_at, created_at, token_version, plan, status) "
+                    "VALUES (:id, :email, :hash, :name, 'user', :active, :at, :at, 0, 'free', "
+                    "'active')"
+                ).bindparams(at),
+                {
+                    "id": user_id,
+                    "email": email,
+                    "name": name,
+                    "hash": hash_password("correct-horse-battery"),
+                    "active": True,
+                    "at": stamp,
+                },
+            )
+        for bet_id, user_id, sportsbook in bets:
+            connection.execute(
+                text(
+                    "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, stake, "
+                    "odds_decimal, odds_source, placed_at, source, created_at, updated_at) "
+                    "VALUES (:id, :user, 'straight', 'pending', 'nba', :sportsbook, 10, 2.0, "
+                    "'legs', :at, 'manual', :at, :at)"
+                ).bindparams(at),
+                {"id": bet_id, "user": user_id, "sportsbook": sportsbook, "at": stamp},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO bet_legs (id, bet_id, position, selection, market, "
+                    "odds_decimal) VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', 2.0)"
+                ),
+                {"id": bet_id.upper(), "bet": bet_id},
+            )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) >= TABLES_0005
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Nothing was invented: nobody has a profile until they create one.
+        for table in sorted(TABLES_0005):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+        # Existing rows were backfilled with the keys the application computes.
+        keys = dict(connection.execute(text("SELECT email, search_key FROM users")).all())
+        assert keys == {
+            "old@example.test": "old@example.test\nzoë ünsal",
+            "jose@example.test": "jose@example.test\njosé",
+        }
+        books = dict(connection.execute(text("SELECT id, sportsbook_key FROM bets")).all())
+        assert books == {
+            "a" * 32: "éclair sports",
+            "b" * 32: "éclair sports",
+            "c" * 32: "northline",
+            "d" * 32: "strasse wetten",
+        }
+        # The names themselves are untouched.
+        names = connection.execute(text("SELECT sportsbook FROM bets ORDER BY id")).scalars()
+        assert list(names) == [b[2] for b in bets]
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: the filters work on the old rows, and the
+    # new features work for the old account.
+    app = make_app(
+        database_url=url,
+        env="production",
+        jwt_secret="k" * 48,
+        admin_emails="boss@example.test",
+        community_grade_min_seconds=0,
+    )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        found = client.get("/v1/bets", params={"sportsbook": "éclair sports"}, headers=headers)
+        assert sorted(b["sportsbook"] for b in found.json()) == ["ÉCLAIR SPORTS", "Éclair Sports"]
+        assert len(client.get("/v1/bets", headers=headers).json()) == 3
+        assert client.get("/health").json()["database"] == "ok"
+
+        admin = client.post(
+            "/v1/auth/register",
+            json={
+                "email": "boss@example.test",
+                "password": "correct-horse-battery",
+                "display_name": "Boss",
+                "age_confirmed": True,
+            },
+        ).json()
+        admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        searched = client.get("/v1/admin/users", params={"q": "ZOË ünsal"}, headers=admin_headers)
+        assert [u["email"] for u in searched.json()["items"]] == ["old@example.test"]
+        searched = client.get("/v1/admin/users", params={"q": "josé"}, headers=admin_headers)
+        assert [u["email"] for u in searched.json()["items"]] == ["jose@example.test"]
+
+        # Community: off, then on, then used by the account from before the migration.
+        assert client.get("/v1/community/feed", headers=headers).status_code == 404
+        for key in ("community", "community_leaderboard"):
+            turned_on = client.put(
+                f"/v1/admin/flags/{key}", json={"enabled": True}, headers=admin_headers
+            )
+            assert turned_on.status_code == 200, turned_on.text
+        profile = client.put(
+            "/v1/community/profile",
+            json={"handle": "old_timer", "is_public": True},
+            headers=headers,
+        )
+        assert profile.status_code == 201, profile.text
+        event = client.get("/v1/events", params={"status": "upcoming"}).json()[0]
+        pick = client.post(
+            "/v1/community/picks",
+            json={"event_id": event["id"], "market": "moneyline", "outcome_key": "home"},
+            headers=headers,
+        )
+        assert pick.status_code == 201, pick.text
+        liked = client.put(f"/v1/community/picks/{pick.json()['id']}/like", headers=admin_headers)
+        assert liked.json()["like_count"] == 1
+        reported = client.post(
+            "/v1/community/reports",
+            json={"target_type": "pick", "target_id": pick.json()["id"], "reason": "other"},
+            headers=admin_headers,
+        )
+        assert reported.status_code == 201, reported.text
+        assert (
+            len(client.get("/v1/community/feed?scope=everyone", headers=headers).json()["items"])
+            == 1
+        )
+        assert client.get("/v1/community/leaderboard", headers=headers).json()["items"] == []
+        export = client.get("/v1/me/export", headers=headers).json()
+        assert export["community"]["profile"]["handle"] == "old_timer"
+        assert len(export["community"]["picks"]) == 1 and len(export["bets"]) == 3
+        assert client.post("/v1/auth/logout", headers=headers).status_code == 204
+        assert client.get("/v1/me", headers=headers).status_code == 401
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0005 added; the 0004 data is untouched.
+    command.downgrade(config, "0004")
+    engine = make_engine(url)
+    tables = set(inspect(engine).get_table_names())
+    assert not TABLES_0005 & tables and tables >= TABLES_0004 | NEW_TABLES
+    assert "search_key" not in {c["name"] for c in inspect(engine).get_columns("users")}
+    assert "sportsbook_key" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+    with engine.connect() as connection:
+        emails = connection.execute(text("SELECT email FROM users ORDER BY created_at, email"))
+        assert list(emails.scalars()) == [
+            "jose@example.test",
+            "old@example.test",
+            "boss@example.test",
+        ]
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 4
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 4
+        names = connection.execute(text("SELECT sportsbook FROM bets ORDER BY id")).scalars()
+        assert list(names) == [b[2] for b in bets]
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004"
+        )
+    engine.dispose()
+
+    # Up again: the keys are backfilled again and the community tables start empty.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        for table in sorted(TABLES_0005):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+        missing = connection.execute(
+            text("SELECT count(*) FROM bets WHERE sportsbook_key IS NULL")
+        ).scalar()
+        assert missing == 0
+        missing = connection.execute(
+            text("SELECT count(*) FROM users WHERE search_key IS NULL")
+        ).scalar()
+        assert missing == 0
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+    command.check(config)
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
 def test_app_works_on_a_migrated_database_without_auto_create(
     tmp_path: Path, make_app: AppFactory
 ) -> None:
@@ -737,6 +975,165 @@ def test_seed_with_a_provider_adds_alert_rules_and_notifications(session_factory
         assert list(db.scalars(select(AlertRule))) == []
 
 
+def test_seed_adds_no_community_data_while_the_flag_is_off(session_factory) -> None:  # type: ignore[no-untyped-def]
+    provider = SyntheticProvider(seed=20260101, clock=lambda: NOW)
+    with session_factory() as db:
+        seed_demo(db, "demo-password-123", NOW, provider=provider)
+        assert db.scalar(select(func.count()).select_from(CommunityProfile)) == 0
+        assert db.scalar(select(func.count()).select_from(CommunityPick)) == 0
+        assert db.scalar(select(func.count()).select_from(FeatureFlag)) == 0
+        assert [u.email for u in db.scalars(select(User))] == [DEMO_EMAIL]
+
+
+def test_seed_with_community_creates_fictional_profiles_and_is_idempotent(
+    session_factory,  # type: ignore[no-untyped-def]
+    make_settings,  # type: ignore[no-untyped-def]
+) -> None:
+    provider = SyntheticProvider(seed=20260101, clock=lambda: NOW)
+    settings = make_settings()
+
+    def snapshot() -> dict[str, Any]:
+        with session_factory() as db:
+            return {
+                "users": db.scalar(select(func.count()).select_from(User)),
+                "profiles": db.scalar(select(func.count()).select_from(CommunityProfile)),
+                "picks": db.scalar(select(func.count()).select_from(CommunityPick)),
+                "comments": db.scalar(select(func.count()).select_from(CommunityComment)),
+                "follows": db.scalar(select(func.count()).select_from(CommunityFollow)),
+                "likes": db.scalar(select(func.count()).select_from(CommunityLike)),
+                "notifications": db.scalar(select(func.count()).select_from(Notification)),
+            }
+
+    with session_factory() as db:
+        seed_demo(
+            db, "demo-password-123", NOW, provider=provider, settings=settings, with_community=True
+        )
+        # --with-community turns both flags on in this database.
+        assert flags_service.flag_states(db, settings)["community"] is True
+        assert flags_service.flag_states(db, settings)["community_leaderboard"] is True
+    first = snapshot()
+    assert first["profiles"] == len(FICTIONAL_PROFILES) + 1 == 7
+    assert first["users"] == 7 and first["comments"] >= 3
+    assert first["follows"] >= 12 and first["likes"] >= 10
+
+    with session_factory() as db:
+        profiles = {p.handle: p for p in db.scalars(select(CommunityProfile))}
+        assert set(profiles) == {handle for handle, _, _ in FICTIONAL_PROFILES} | {"demo_bettor"}
+        demo = db.scalar(select(User).where(User.email == DEMO_EMAIL))
+        assert profiles["demo_bettor"].user_id == demo.id and profiles["demo_bettor"].is_public
+        # Obviously fictional: the handle says so and so does the bio.
+        for handle, profile in profiles.items():
+            assert profile.is_public and profile.moderation_status == "visible"
+            if handle == "demo_bettor":
+                assert "Demo account" in profile.bio and "Fictional" in profile.bio
+                continue
+            assert handle.split("_")[0] in {
+                "fictional",
+                "sample",
+                "madeup",
+                "placeholder",
+                "notreal",
+                "example",
+            }
+            assert "Fictional demo profile" in profile.bio and "Not a real person" in profile.bio
+        emails = [u.email for u in db.scalars(select(User)) if u.email != DEMO_EMAIL]
+        assert all(email.endswith("@community.oddvex.test") for email in emails)
+        picks = list(db.scalars(select(CommunityPick)))
+        by_user: dict[str, list[CommunityPick]] = {}
+        for pick in picks:
+            by_user.setdefault(pick.user_id, []).append(pick)
+        assert len(by_user) == 7
+        for owned in by_user.values():
+            # A spread of graded and upcoming picks for every profile.
+            assert any(p.status == "graded" for p in owned)
+            assert any(p.status == "pending" and p.event_start_time > NOW for p in owned)
+        graded = [p for p in picks if p.status == "graded"]
+        assert {p.result for p in graded} == {"won", "lost", "push"} or {
+            p.result for p in graded
+        } == {"won", "lost"}
+        assert {p.market for p in picks} == {"moneyline", "spread", "total"}
+        for pick in graded:
+            # Posted before the event, priced, and graded by the grading function from the
+            # event's real (synthetic) final score.
+            assert pick.posted_at < pick.event_start_time and pick.price_decimal > 1
+            event = provider.get_event(pick.event_id)
+            assert event is not None and event.status == "final" and event.score is not None
+            assert (pick.home_score, pick.away_score) == (event.score.home, event.score.away)
+            assert pick.result == grade_leg(
+                pick.market,
+                pick.outcome_key,
+                pick.line,
+                event.score.home,
+                event.score.away,
+                three_way=event.league == "soccer",
+            )
+        assert not [p for p in picks if p.status == "pending" and p.event_start_time <= NOW]
+        # Two profiles have enough graded picks for the leaderboard to rank them.
+        ranked = [
+            owned for owned in by_user.values() if sum(p.status == "graded" for p in owned) >= 30
+        ]
+        assert len(ranked) == 2
+        # Every text in the seed passes the content rules a user's text would have to pass.
+        texts = [p.analysis for p in picks] + [p.bio for p in profiles.values()]
+        texts += [c.body for c in db.scalars(select(CommunityComment))]
+        assert all(check_text(text) is None for text in texts)
+        names = " ".join(p.event_label + p.selection for p in picks)
+        assert not any(name in names for name in REAL_NAMES)
+
+    # Running it again creates nothing new, with or without the option.
+    with session_factory() as db:
+        seed_demo(
+            db, "demo-password-123", NOW, provider=provider, settings=settings, with_community=True
+        )
+    assert snapshot() == first
+    with session_factory() as db:
+        seed_demo(db, "demo-password-123", NOW, provider=provider, settings=settings)
+    assert snapshot() == first
+
+
+def test_seeded_community_is_served_by_the_api(
+    make_app: AppFactory, provider: SyntheticProvider
+) -> None:
+    app = make_app(community_grade_min_seconds=0)
+    Base.metadata.create_all(app.state.engine)
+    with app.state.session_factory() as db:
+        seed_demo(
+            db,
+            app.state.settings.demo_password,
+            provider.now(),
+            provider=provider,
+            settings=app.state.settings,
+            with_community=True,
+        )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": DEMO_EMAIL, "password": app.state.settings.demo_password},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        profile = client.get("/v1/community/profile", headers=headers).json()
+        assert (profile["handle"], profile["is_public"], profile["can_post"]) == (
+            "demo_bettor",
+            True,
+            True,
+        )
+        assert profile["following_count"] == 3 and profile["record"]["picks"] >= 4
+        assert profile["record"]["sample_note"]  # a handful of picks: the note says so
+        following = client.get("/v1/community/feed", headers=headers).json()["items"]
+        everyone = client.get(
+            "/v1/community/feed", params={"scope": "everyone", "limit": 100}, headers=headers
+        ).json()["items"]
+        assert following and len(everyone) == 100
+        assert {p["status"] for p in everyone} >= {"pending", "graded"}
+        board = client.get("/v1/community/leaderboard", headers=headers).json()
+        assert [row["handle"] for row in board["items"]] and len(board["items"]) == 2
+        assert {row["handle"] for row in board["items"]} == {"fictional_fox", "sample_sam"}
+        assert all(row["record"]["picks"] >= 30 for row in board["items"])
+        assert "example.test" not in str(everyone) and "oddvex.test" not in str(everyone)
+    app.state.engine.dispose()
+
+
 def test_demo_user_can_log_in_and_see_a_summary(make_app: AppFactory) -> None:
     app = make_app(auto_seed_demo=True, demo_password="demo-password-123")
     with TestClient(app) as client:
@@ -823,6 +1220,44 @@ def test_seed_script_refuses_production(tmp_path: Path) -> None:
         assert set(users) == {DEMO_EMAIL, DEMO_ADMIN_EMAIL}  # nobody else was invented
         assert (users[DEMO_ADMIN_EMAIL].role, users[DEMO_EMAIL].role) == ("admin", "user")
         assert users[DEMO_ADMIN_EMAIL].email_verified is True
+        assert db.scalar(select(func.count()).select_from(CommunityProfile)) == 0
+    assert "Community flag is off" in third.stdout
+
+    # --with-community turns the flags on in that database and adds the fictional profiles.
+    for _ in range(2):  # idempotent
+        fourth = subprocess.run(
+            [sys.executable, script, "--with-community"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert fourth.returncode == 0, fourth.stderr
+        assert "Community: 7 profile(s)" in fourth.stdout and "demo_bettor" in fourth.stdout
+    with make_session_factory(engine)() as db:
+        assert db.scalar(select(func.count()).select_from(CommunityProfile)) == 7
+        picks = db.scalar(select(func.count()).select_from(CommunityPick))
+        enabled = {f.key for f in db.scalars(select(FeatureFlag)) if f.enabled}
+        assert enabled == {"community", "community_leaderboard"}
+    # From then on the plain script keeps the community data up to date as well.
+    fifth = subprocess.run(
+        [sys.executable, script], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
+    )
+    assert fifth.returncode == 0 and "Community: 7 profile(s)" in fifth.stdout
+    with make_session_factory(engine)() as db:
+        assert db.scalar(select(func.count()).select_from(CommunityPick)) == picks
+    # The grading script runs against the same database and finds nothing left to grade.
+    graded = subprocess.run(
+        [sys.executable, str(API_ROOT / "scripts" / "grade_picks.py")],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert graded.returncode == 0, graded.stderr
+    assert "0 graded, 0 voided" in graded.stdout
     engine.dispose()
 
 

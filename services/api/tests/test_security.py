@@ -19,10 +19,10 @@ from sqlalchemy import select
 
 from oddvex_api.auth.security import JWT_ISSUER, create_access_token
 from oddvex_api.config import DEV_JWT_SECRET
-from oddvex_api.db import Bet, User
+from oddvex_api.db import Bet, CommunityReport, User
 from oddvex_api.ratelimit import SlidingWindowRateLimiter
 
-from .conftest import PASSWORD, AppFactory, admin_headers, auth_headers, register
+from .conftest import PASSWORD, AppFactory, admin_headers, auth_headers, register, set_flag
 
 Headers = dict[str, str]
 BET = {
@@ -759,3 +759,333 @@ def test_account_limiter_primitives() -> None:
     limiter.forget("k")
     assert limiter.blocked_for("k", 2) == 0.0
     limiter.forget("never-seen")
+
+
+# ------------------------------------------------------------------ community
+def community_app(make_app: AppFactory) -> FastAPI:
+    return make_app(admin_emails="boss@example.test", community_grade_min_seconds=0)
+
+
+def community_member(client: TestClient, handle: str) -> Headers:
+    headers = auth_headers(client, f"{handle}@example.test")
+    created = client.put(
+        "/v1/community/profile", json={"handle": handle, "is_public": True}, headers=headers
+    )
+    assert created.status_code == 201, created.text
+    return headers
+
+
+def community_pick(client: TestClient, headers: Headers, index: int = 0) -> dict[str, Any]:
+    event = client.get("/v1/events", params={"status": "upcoming"}).json()[index]
+    created = client.post(
+        "/v1/community/picks",
+        json={"event_id": event["id"], "market": "moneyline", "outcome_key": "home"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    return created.json()  # type: ignore[no-any-return]
+
+
+def test_every_community_route_requires_a_token(make_app: AppFactory) -> None:
+    with TestClient(community_app(make_app)) as client:
+        admin = admin_headers(client, "boss@example.test")
+        set_flag(client, admin, "community", True)
+        set_flag(client, admin, "community_leaderboard", True)
+        schema = client.get("/openapi.json").json()
+        checked = 0
+        for path, item in schema["paths"].items():
+            if not path.startswith(("/v1/community", "/v1/admin/community")):
+                continue
+            for method in item:
+                if path == "/v1/community/guidelines":
+                    assert client.get(path).status_code == 200  # the one public route
+                    continue
+                url = path.replace("{", "").replace("}", "")
+                response = client.request(method.upper(), url, json={})
+                assert response.status_code == 401, (method, path, response.status_code)
+                assert response.json()["error"]["code"] == "not_authenticated", path
+                assert response.headers["www-authenticate"] == "Bearer"
+                forged = client.request(method.upper(), url, json={}, headers=bearer("x.y.z"))
+                assert forged.status_code == 401, (method, path)
+                checked += 1
+        assert checked == 25
+
+
+def test_community_idor_on_picks_and_comments(make_app: AppFactory) -> None:
+    with TestClient(community_app(make_app)) as client:
+        set_flag(client, admin_headers(client, "boss@example.test"), "community", True)
+        a, b = community_member(client, "owner_a"), community_member(client, "other_b")
+        pick = community_pick(client, a)
+        comment = client.post(
+            f"/v1/community/picks/{pick['id']}/comments", json={"body": "mine"}, headers=a
+        ).json()
+
+        # B cannot delete A's pick or A's comment, by id or by any other route.
+        refused = client.delete(f"/v1/community/picks/{pick['id']}", headers=b)
+        assert refused.status_code == 403 and refused.json()["error"]["code"] == "forbidden"
+        refused = client.delete(f"/v1/community/comments/{comment['id']}", headers=b)
+        assert refused.status_code == 403 and refused.json()["error"]["code"] == "forbidden"
+        # There is no route to edit a pick or a comment at all.
+        for method in ("PUT", "PATCH", "POST"):
+            edited = client.request(
+                method,
+                f"/v1/community/picks/{pick['id']}",
+                json={"result": "won", "price": 99},
+                headers=a,
+            )
+            assert edited.status_code == 405, method
+            edited = client.request(
+                method, f"/v1/community/comments/{comment['id']}", json={"body": "x"}, headers=b
+            )
+            assert edited.status_code == 405, method
+        # B cannot post in A's name, and ids in the body are refused, not ignored.
+        a_id = client.get("/v1/me", headers=a).json()["id"]
+        event = client.get("/v1/events", params={"status": "upcoming"}).json()[1]
+        injected = client.post(
+            "/v1/community/picks",
+            json={
+                "event_id": event["id"],
+                "market": "moneyline",
+                "outcome_key": "home",
+                "user_id": a_id,
+                "author": {"handle": "owner_a"},
+            },
+            headers=b,
+        )
+        assert injected.status_code == 422
+        injected = client.post(
+            f"/v1/community/picks/{pick['id']}/comments",
+            json={"body": "hi", "user_id": a_id, "author": "owner_a"},
+            headers=b,
+        )
+        assert injected.status_code == 422
+        own = client.post(
+            f"/v1/community/picks/{pick['id']}/comments", json={"body": "by b"}, headers=b
+        ).json()
+        assert own["author"] == {"handle": "other_b"}
+        # Everything of A's is intact.
+        assert client.get(f"/v1/community/picks/{pick['id']}", headers=a).status_code == 200
+        bodies = [
+            c["body"]
+            for c in client.get(f"/v1/community/picks/{pick['id']}/comments", headers=a).json()[
+                "items"
+            ]
+        ]
+        assert sorted(bodies) == ["by b", "mine"]
+
+
+def test_community_idor_on_blocks_follows_and_likes(make_app: AppFactory) -> None:
+    with TestClient(community_app(make_app)) as client:
+        set_flag(client, admin_headers(client, "boss@example.test"), "community", True)
+        a, b, c = (community_member(client, handle) for handle in ("owner_a", "other_b", "third_c"))
+        pick = community_pick(client, c)
+        client.put("/v1/community/blocks/other_b", headers=a)
+        client.post("/v1/community/follows/third_c", headers=a)
+        client.put(f"/v1/community/picks/{pick['id']}/like", headers=a)
+
+        # Each list is the caller's own; there is no way to ask for someone else's.
+        assert client.get("/v1/community/blocks", headers=b).json() == {"items": []}
+        assert client.get("/v1/community/blocks", headers=c).json() == {"items": []}
+        assert client.get("/v1/community/following", headers=b).json() == {"items": []}
+        for extra in ({"handle": "owner_a"}, {"user_id": "x"}, {"blocker": "owner_a"}):
+            listed = client.get("/v1/community/blocks", params=extra, headers=b).json()
+            assert listed == {"items": []}
+        # B and C cannot lift A's block, undo A's follow or remove A's like.
+        assert client.delete("/v1/community/blocks/other_b", headers=b).status_code == 204
+        assert client.delete("/v1/community/blocks/other_b", headers=c).status_code == 204
+        assert client.delete("/v1/community/blocks/owner_a", headers=b).status_code == 204
+        assert client.delete("/v1/community/follows/third_c", headers=c).status_code == 204
+        assert client.delete(f"/v1/community/picks/{pick['id']}/like", headers=c).status_code == 200
+        blocks = client.get("/v1/community/blocks", headers=a).json()["items"]
+        assert [entry["handle"] for entry in blocks] == ["other_b"]
+        following = client.get("/v1/community/following", headers=a).json()["items"]
+        assert [entry["handle"] for entry in following] == ["third_c"]
+        liked = client.get(f"/v1/community/picks/{pick['id']}", headers=a).json()
+        assert (liked["liked_by_me"], liked["like_count"]) == (True, 1)
+        # The block still holds for B.
+        assert client.get("/v1/community/profiles/owner_a", headers=b).status_code == 404
+
+
+def test_community_reports_are_private_and_moderation_is_admin_only(
+    make_app: AppFactory,
+) -> None:
+    with TestClient(community_app(make_app)) as client:
+        admin = admin_headers(client, "boss@example.test")
+        set_flag(client, admin, "community", True)
+        a, b = community_member(client, "owner_a"), community_member(client, "other_b")
+        pick = community_pick(client, a)
+        report = client.post(
+            "/v1/community/reports",
+            json={"target_type": "pick", "target_id": pick["id"], "reason": "spam"},
+            headers=b,
+        )
+        assert report.status_code == 201
+        report_id = report.json()["id"]
+
+        # A report cannot be read, listed, changed or deleted through the user routes.
+        for method in ("GET", "PUT", "PATCH", "DELETE"):
+            for who in (a, b):
+                response = client.request(
+                    method, f"/v1/community/reports/{report_id}", json={}, headers=who
+                )
+                assert response.status_code in (404, 405), method
+        assert client.get("/v1/community/reports", headers=a).status_code == 405
+        # The reported person learns nothing: not from their pick, not from notifications.
+        assert "report" not in client.get(f"/v1/community/picks/{pick['id']}", headers=a).text
+        assert client.get("/v1/notifications", headers=a).json()["items"] == []
+        # A non-admin cannot reach moderation, whatever role the request claims.
+        for who in (a, b):
+            for method, path, body in (
+                ("GET", "/v1/admin/community/reports", None),
+                ("GET", "/v1/admin/community/overview", None),
+                (
+                    "POST",
+                    f"/v1/admin/community/reports/{report_id}/resolve",
+                    {"action": "dismiss", "note": "self-service", "role": "admin"},
+                ),
+            ):
+                response = client.request(method, path, json=body, headers=who)
+                assert response.status_code == 403, path
+        b_id = client.get("/v1/me", headers=b).json()["id"]
+        forged = jwt.encode(claims(b_id, role="admin"), DEV_JWT_SECRET, algorithm="HS256")
+        assert client.get("/v1/admin/community/reports", headers=bearer(forged)).status_code == 403
+        with client.app.state.session_factory() as db:  # type: ignore[attr-defined]
+            (stored,) = db.scalars(select(CommunityReport)).all()
+            assert (stored.status, stored.reporter_id) == ("open", b_id)
+        # A report cannot be filed in someone else's name.
+        injected = client.post(
+            "/v1/community/reports",
+            json={
+                "target_type": "pick",
+                "target_id": pick["id"],
+                "reason": "spam",
+                "reporter_id": client.get("/v1/me", headers=a).json()["id"],
+            },
+            headers=b,
+        )
+        assert injected.status_code == 422
+
+
+def test_handle_enumeration_does_not_leak_emails_or_account_data(make_app: AppFactory) -> None:
+    with TestClient(community_app(make_app)) as client:
+        set_flag(client, admin_headers(client, "boss@example.test"), "community", True)
+        viewer = community_member(client, "viewer_v")
+        target = register(client, "very.private.address@example.test", display_name="Real Name")
+        target_headers = bearer(target["access_token"])
+        client.put(
+            "/v1/community/profile",
+            json={"handle": "public_p", "bio": "Totals.", "is_public": True},
+            headers=target_headers,
+        )
+        pick = community_pick(client, target_headers)
+        client.post("/v1/community/follows/public_p", headers=viewer)
+        hidden = auth_headers(client, "hidden@example.test")
+        client.put(
+            "/v1/community/profile",
+            json={"handle": "hidden_h", "is_public": False},
+            headers=hidden,
+        )
+        secrets = (
+            "very.private.address",
+            "example.test",
+            "Real Name",
+            target["user"]["id"],
+            "password",
+            "premium",
+            '"plan"',
+            '"email"',
+            '"display_name"',
+            '"user_id"',
+            '"role"',
+        )
+        pages = [
+            client.get("/v1/community/profiles/public_p", headers=viewer),
+            client.get("/v1/community/picks", params={"handle": "public_p"}, headers=viewer),
+            client.get(f"/v1/community/picks/{pick['id']}", headers=viewer),
+            client.get("/v1/community/feed", params={"scope": "everyone"}, headers=viewer),
+            client.get("/v1/community/following", headers=viewer),
+            client.get("/v1/community/followers", headers=target_headers),
+        ]
+        for page in pages:
+            assert page.status_code == 200
+            for secret in secrets:
+                assert secret not in page.text, (secret, page.request.url)
+        # Trying an email address, a user id or a name as the handle finds nothing, and a
+        # handle that exists but is private answers exactly like one that does not.
+        probes = (
+            "very.private.address@example.test",
+            "very.private.address",
+            target["user"]["id"],
+            "Real Name",
+            "hidden_h",
+            "nobody_at_all",
+            "admin",
+            "%",
+            "_",
+            "public_p%",
+            "public_p' OR '1'='1",
+        )
+        answers = set()
+        for probe in probes:
+            response = client.get(f"/v1/community/profiles/{probe}", headers=viewer)
+            assert response.status_code == 404, probe
+            body = response.json()["error"]
+            assert body["code"] == "not_found"
+            answers.add(body["message"].replace(probe[:20], "<handle>"))
+            for secret in ("example.test", "Real Name", target["user"]["id"]):
+                assert secret not in response.text.replace(probe, ""), probe
+        assert answers == {"Profile '<handle>' was not found"}
+        # The same goes for following, blocking and reporting by handle.
+        for method, path in (
+            ("POST", "/v1/community/follows/hidden_h"),
+            ("PUT", "/v1/community/blocks/hidden_h"),
+            ("POST", "/v1/community/follows/nobody_at_all"),
+            ("PUT", "/v1/community/blocks/nobody_at_all"),
+        ):
+            assert client.request(method, path, headers=viewer).status_code == 404, path
+        for handle in ("hidden_h", "nobody_at_all"):
+            reported = client.post(
+                "/v1/community/reports",
+                json={"target_type": "profile", "target_id": handle, "reason": "spam"},
+                headers=viewer,
+            )
+            assert reported.status_code == 404
+        # Taking a handle is the only thing that tells you it exists, public or not.
+        taken = client.put(
+            "/v1/community/profile", json={"handle": "hidden_h", "is_public": True}, headers=viewer
+        )
+        assert taken.status_code == 409 and "example.test" not in taken.text
+
+
+def test_hostile_text_in_community_fields(make_app: AppFactory) -> None:
+    with TestClient(community_app(make_app)) as client:
+        set_flag(client, admin_headers(client, "boss@example.test"), "community", True)
+        a = community_member(client, "owner_a")
+        pick = community_pick(client, a)
+        for payload in PAYLOADS:
+            handle = client.put(
+                "/v1/community/profile", json={"handle": payload[:64], "is_public": True}, headers=a
+            )
+            assert handle.status_code == 422, payload
+            for path in (
+                f"/v1/community/profiles/{payload[:20]}",
+                f"/v1/community/picks/{payload[:20]}",
+            ):
+                assert client.get(path, headers=a).status_code in (404, 422), payload
+            listed = client.get(
+                "/v1/community/picks",
+                params={"event_id": payload[:64], "league": payload[:32]},
+                headers=a,
+            )
+            assert listed.status_code == 200 and listed.json()["items"] == [], payload
+            comment = client.post(
+                f"/v1/community/picks/{pick['id']}/comments",
+                json={"body": payload[:500]},
+                headers=a,
+            )
+            # Stored verbatim or refused by a content rule: never an error, never executed.
+            assert comment.status_code in (201, 422), payload
+            if comment.status_code == 201:
+                assert comment.json()["body"] == payload[:500]
+        assert client.get("/v1/community/profile", headers=a).json()["handle"] == "owner_a"
+        assert client.get(f"/v1/community/picks/{pick['id']}", headers=a).status_code == 200

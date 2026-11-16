@@ -2,7 +2,8 @@
 
 Backend for OddVex, a sports-betting **intelligence** product: odds comparison, player-prop
 research, betting math, bet tracking with analytics, a market-discrepancy ("value") screen,
-alerts with in-app notifications and a rule-based assistant. It never accepts, places or
+alerts with in-app notifications, a rule-based assistant and, behind a feature flag that is
+off by default, a community for discussing research. It never accepts, places or
 facilitates wagers and never moves money. **There is no billing and no payment code, and no
 email is ever sent**: plans are set by an administrator and emails are written to a table
 (see [What is stubbed](#what-is-stubbed-no-billing-no-real-email)).
@@ -21,7 +22,9 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # or: uv venv && uv 
 .venv/bin/alembic upgrade head                 # optional locally: tables are auto-created outside production
 .venv/bin/python scripts/seed_demo.py          # optional demo account (bets, alert rules, notifications)
 ODDVEX_ADMIN_EMAILS=admin@oddvex.test .venv/bin/python scripts/seed_demo.py   # ...and an administrator
+.venv/bin/python scripts/seed_demo.py --with-community   # ...and fictional community profiles (turns the two community flags on in that database)
 .venv/bin/python scripts/evaluate_alerts.py    # optional: evaluate every user's alert rules once
+.venv/bin/python scripts/grade_picks.py        # optional: grade pending community picks once
 .venv/bin/uvicorn oddvex_api.main:app --reload --port 8000
 ```
 
@@ -30,8 +33,9 @@ ODDVEX_ADMIN_EMAILS=admin@oddvex.test .venv/bin/python scripts/seed_demo.py   # 
   `ODDVEX_DEMO_PASSWORD`). Development convenience only. The demo user's email counts as
   verified.
 - Administrator: there is no default one. `scripts/seed_demo.py` creates `admin@oddvex.test`
-  (same password) **only** when `ODDVEX_ADMIN_EMAILS` lists that address; any other listed
-  address becomes an administrator when it registers or next logs in.
+  (same password, email counted as confirmed) **only** when `ODDVEX_ADMIN_EMAILS` lists that
+  address. Any other listed address becomes an administrator once its email is confirmed
+  (see "Admin role" below).
 - Docker: `docker build -t oddvex-api .` then run with `DATABASE_URL` and `ODDVEX_JWT_SECRET`
   set. The image runs `alembic upgrade head` and then uvicorn on port 8000 as a non-root user.
 
@@ -54,11 +58,14 @@ ODDVEX_TEST_DATABASE_URL=postgresql+psycopg://oddvex:oddvex@localhost:5432/oddve
 
 Every test that goes through the app then uses that database. Tests that are about SQLite files
 (the Alembic CLI, table auto-creation) keep using a temporary SQLite file, and the
-`0001 -> 0002`, `0002 -> 0003` and `0003 -> 0004` upgrade/downgrade tests run once on SQLite
-and once more on the external database. One test (two concurrent alert evaluations creating a single notification)
+`0001 -> 0002`, `0002 -> 0003`, `0003 -> 0004` and `0004 -> 0005` upgrade/downgrade tests run
+once on SQLite and once more on the external database. One test (two concurrent alert evaluations creating a single notification)
 needs real concurrent writers and only runs against PostgreSQL.
 The database must use UTF-8 encoding (the official `postgres` image does; a cluster created with
-`initdb` under the `C` locale needs `-E UTF8`).
+`initdb` under the `C` locale needs `-E UTF8`). A throwaway local cluster is enough, for example
+`initdb -D /tmp/pg -E UTF8 --locale=C -U oddvex --auth=trust`, `pg_ctl -D /tmp/pg -o "-p 54329" start`,
+`createdb -p 54329 -U oddvex oddvex_test`: the `C` locale is the one where SQL `lower()` only
+folds ASCII, which the case-insensitive filters are tested against.
 
 In GitHub Actions, add a `postgres:16` service with `POSTGRES_USER: oddvex`,
 `POSTGRES_PASSWORD: oddvex`, `POSTGRES_DB: oddvex_test`, port `5432:5432` and a `pg_isready`
@@ -94,12 +101,17 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_STALE_LIVE_SECONDS` | `120` | Live quotes older than this are stale |
 | `ODDVEX_STALE_PREGAME_SECONDS` | `900` | Pre-game quotes older than this are stale |
 | `ODDVEX_SYNTHETIC_SEED` | `20260101` | Seed of the synthetic data generator |
-| `ODDVEX_ADMIN_EMAILS` | empty | Emails that get the `admin` role at registration or next login. The seed script creates `admin@oddvex.test` only if it is listed |
+| `ODDVEX_ADMIN_EMAILS` | empty | The only source of the `admin` role. A listed address gets it (once its email is confirmed, while `email_flows` is on); an address taken off the list loses it at its next login or token use. The seed script creates `admin@oddvex.test` only if it is listed |
 | `ODDVEX_AUTO_SEED_DEMO` | `false` | Seed the demo account on startup. Ignored in production |
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
 | `ODDVEX_SYNC_MAX_ATTEMPTS` | `3` | Fetch attempts per import run |
 | `ODDVEX_ALERT_EVAL_MIN_SECONDS` | `30` | Minimum seconds between two alert evaluations triggered by one user reading their notifications. `0` evaluates on every read (tests) |
+| `ODDVEX_COMMUNITY_PICKS_PER_DAY` | `20` | Community picks one user can post in 24 hours |
+| `ODDVEX_COMMUNITY_COMMENTS_PER_HOUR` | `30` | Community comments one user can post in an hour |
+| `ODDVEX_COMMUNITY_REPORTS_PER_HOUR` | `10` | Reports one user can file in an hour |
+| `ODDVEX_COMMUNITY_FOLLOWS_PER_HOUR` | `60` | New follows one user can make in an hour |
+| `ODDVEX_COMMUNITY_GRADE_MIN_SECONDS` | `15` | Minimum seconds between two grading passes triggered by reading the community. `0` grades on every read (tests) |
 | `ODDVEX_MAX_BODY_BYTES` | `65536` | Largest request body accepted (minimum 1024). Larger requests get `413 payload_too_large` |
 | `ODDVEX_LOG_LEVEL` | `INFO` | Log level |
 
@@ -123,7 +135,7 @@ Errors always use one envelope, including validation errors and 404s:
 | Players | `GET /v1/players`, `GET /v1/players/{id}`, `GET /v1/players/{id}/props`, `GET /v1/props` |
 | Calculators | `POST /v1/quant/convert`, `/no-vig`, `/ev`, `/parlay`, `/clv` (each returns `steps`) |
 | Value | `GET /v1/value` |
-| Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/me`, `DELETE /v1/me`, `POST /v1/me/password`, `GET /v1/me/export`, `GET /v1/me/entitlements` |
+| Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/me`, `DELETE /v1/me`, `POST /v1/me/password`, `GET /v1/me/export`, `GET /v1/me/entitlements` |
 | Email flows | `POST /v1/auth/verify-email/request`, `POST /v1/auth/verify-email/confirm`, `POST /v1/auth/password-reset/request`, `POST /v1/auth/password-reset/confirm` |
 | Alerts | `GET/POST /v1/alerts`, `POST /v1/alerts/evaluate`, `PATCH/DELETE /v1/alerts/{id}` |
 | Notifications | `GET /v1/notifications`, `GET /v1/notifications/unread-count`, `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all`, `DELETE /v1/notifications/{id}` |
@@ -132,23 +144,27 @@ Errors always use one envelope, including validation errors and 404s:
 | Watchlist | `GET/POST /v1/watchlist`, `GET /v1/watchlist/events`, `DELETE /v1/watchlist/{id}` |
 | Sync | `GET /v1/sync/providers`, `GET/POST /v1/sync/connections`, `POST .../{id}/sync`, `GET .../{id}/runs`, `DELETE .../{id}?delete_data=` |
 | Assistant | `POST /v1/assistant/query` |
+| Community (flag `community`) | `GET /v1/community/guidelines`, `PUT/GET /v1/community/profile`, `GET /v1/community/profiles/{handle}`, `POST/GET /v1/community/picks`, `GET/DELETE /v1/community/picks/{id}`, `GET /v1/community/feed`, `PUT/DELETE /v1/community/picks/{id}/like`, `POST/GET /v1/community/picks/{id}/comments`, `DELETE /v1/community/comments/{id}`, `POST/DELETE /v1/community/follows/{handle}`, `GET /v1/community/following`, `GET /v1/community/followers`, `PUT/DELETE /v1/community/blocks/{handle}`, `GET /v1/community/blocks`, `POST /v1/community/reports`, `GET /v1/community/leaderboard` (also flag `community_leaderboard`) |
 | Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
+| Moderation (admin, flag `community`) | `GET /v1/admin/community/overview`, `GET /v1/admin/community/reports`, `POST /v1/admin/community/reports/{id}/resolve` |
 | Dev (404 in production) | `GET /v1/dev/email-outbox/latest?to=` |
 
 ### Feature flags
 
 Global on/off switches. The defaults live in code (`flags/catalog.py`); an administrator can
-override one with `PUT /v1/admin/flags/{key}`, which stores a row in `feature_flags`. Clients
+override one with `PUT /v1/admin/flags/{key}`, which stores a row in `feature_flags`. A stored
+override always wins over the default, in every environment. Clients
 read `GET /v1/flags` (public) → `{"flags": {"community": false, ...}}`. A route behind a flag
 that is off answers `404 feature_disabled` with `details.flag`. In code:
 `dependencies=[Depends(require_flag("key"))]`.
 
 | Flag | Default | Gates |
 | --- | --- | --- |
-| `community` | off | Nothing yet. Reserved for community features, which are not built |
+| `community` | off | Every `/v1/community/*` and `/v1/admin/community/*` route. **Off until user-generated content and moderation have been reviewed**: the threat model lists community as a review trigger, the guidelines need the same counsel review as the other policy pages, and someone has to be there to work the report queue. Turning it on is a launch decision, not a default |
+| `community_leaderboard` | off | `GET /v1/community/leaderboard`, in addition to `community`. **Off until a responsible-gambling review approves leaderboards** (`docs/compliance/RESPONSIBLE_GAMBLING.md`, section 8: a review gate "before build"; the roadmap allows leaderboards "only if RG review approves"). A ranking of bettors is the part of a community most likely to push people to bet more, so it has its own switch |
 | `value_screen` | on | `GET /v1/value` |
 | `tracker_analytics` | on | `GET /v1/bets/analytics` |
-| `email_flows` | on | The four email-flow routes, and the verification email queued at registration |
+| `email_flows` | on, **off when `ODDVEX_ENV=production`** | The four email-flow routes, the verification email queued at registration, and whether the admin role waits for a confirmed email. Off in production because no email provider is connected there: a reset request would be accepted and go nowhere. Turn it on in production only together with a real sender |
 | `premium_gating` | off | Whether plan entitlements are enforced. **Turning it on is a pricing decision: Founder approval first** |
 
 ### Plans and entitlements (no billing)
@@ -182,7 +198,7 @@ Behaviour worth knowing:
   as American, decimal or fractional and stored as decimal. Every bet query is filtered by the
   authenticated user, so another user's bet id returns 404.
 - **Bet list.** `GET /v1/bets` takes `status`, `sport`, `market` (any leg), `sportsbook` (exact,
-  case-insensitive), `bet_type`, `sort` (`placed_at`, `stake`, `profit`, each with a `-` prefix
+  case-insensitive for any script: see "Case-insensitive matching" below), `bet_type`, `sort` (`placed_at`, `stake`, `profit`, each with a `-` prefix
   for descending; default `-placed_at`), `limit` (1 to 1000, default 500) and `offset`. Pending
   bets have no profit and sort last either way. An unknown `sort` is a 422.
 - **Structured legs.** A leg may carry `outcome_key` (`home`, `away`, `draw`, `over`, `under`)
@@ -285,7 +301,10 @@ Behaviour worth knowing:
   (UTC day the bet was placed), `by_month` (UTC month it was settled), each row with `bets`,
   `staked`, `profit`, `roi` and `win_rate` (wins / (wins + losses)); `longest_win_streak`,
   `longest_loss_streak` and `current_streak` (a push or void neither extends nor ends a
-  run); `average_stake`; `average_odds` (mean decimal odds, as a price object); `clv`
+  run), with `streak_note` next to them: streaks describe the order of past results and say
+  nothing about what happens next. No congratulatory or encouraging wording appears anywhere
+  in the analytics (a banned-phrase test covers the strings); `average_stake`; `average_odds`
+  (mean decimal odds, as a price object); `clv`
   (`sample`, `average`, `share_beating_close`, `buckets`); `stake_distribution`. Void bets
   count as bets but not towards staked, average stake or average odds, as in the summary.
   Ratios are fractions. With fewer than 30 settled bets `sample_note` says the results are
@@ -320,14 +339,50 @@ Behaviour worth knowing:
   is kept; `unsuspend` restores access, including tokens that have not expired. An
   administrator cannot suspend themselves (`409 cannot_suspend_self`) or another
   administrator (`409 cannot_suspend_admin`).
+- **Data rights of a suspended account.** A suspended user's token still works on exactly two
+  routes, `GET /v1/me/export` and `DELETE /v1/me`, and on nothing else (one dependency,
+  `get_data_rights_user`, used by those two routes only; a test walks every other route).
+  Both calls are audited with `details.account_status: "suspended"`. Known gap: a suspended
+  account cannot sign in, so this only helps while it still holds an unexpired token (60
+  minutes by default). After that the export or deletion has to be requested from support;
+  there is no admin route that does it yet.
 - **Admin.** Every route needs the `admin` role (`403 forbidden` otherwise). Every change
   (suspend, unsuspend, plan, flag) writes an audit entry with the acting administrator as
   `user_id`, the target as `entity_type`/`entity_id` and `details.before` / `details.after`
-  (plus `details.reason` for a suspension). `GET /v1/admin/users?q=&status=&plan=&limit=&offset=`
+  (plus `details.reason` for a suspension). Reads are audited too, coarsely: one `admin.read`
+  row per request to the overview, the user list, the email outbox or the community report
+  queue, with the resource as `entity_type` and no payload (not the search term, not the rows
+  returned). Reading the audit log and the flag list is not recorded.
+- **Admin role.** `ODDVEX_ADMIN_EMAILS` is the only source of the role. It is checked at
+  registration, at login and on every token use, so taking an address off the list demotes
+  that user at their next request (`role.removed` in the audit log) and adding one promotes
+  it (`role.granted`). While `email_flows` is on, the role is only granted once the address
+  has been confirmed, so registering a listed address first gains nothing. With `email_flows`
+  off (the production default, because nothing can be confirmed without a sender) a listed
+  address is an administrator from registration: **in production, only list addresses that
+  are already registered by their owners, or register them yourself first.** There is still
+  no second factor for administrators. `GET /v1/admin/users?q=&status=&plan=&limit=&offset=`
   returns `{items, total, limit, offset}` with `bet_count` and `last_login_at`.
   `GET /v1/admin/audit?action=&user_id=&before=&limit=` is newest first with a `next_before`
   cursor; `user_id` matches entries a user caused and entries about that user. Admin responses
   never contain password hashes, tokens or email bodies.
+- **Logout.** `POST /v1/auth/logout` answers `204` and **ends every session of the account**,
+  not only the one that called it: it bumps the user's token version, so every access token
+  issued before it gets `401 invalid_token`, on every device. There are no per-session tokens
+  to revoke one at a time. Audited as `auth.logout`.
+- **Health.** `GET /health` always answers 200 while the process is up. `database` is `ok` or
+  `error` from a `SELECT 1`; when it fails `status` is `degraded` instead of `ok` and the
+  error is logged, never returned. `data_mode` on `/health` and `/v1/meta` is what the active
+  provider reports. The response models only allow `synthetic`, so a provider reporting
+  anything else is refused by response validation until that value is added to the schema on
+  purpose, rather than being served under the wrong label.
+- **Case-insensitive matching.** The `sportsbook` filter on `GET /v1/bets` and the admin user
+  search `q` compare against keys folded in Python (`textnorm.fold`: NFKC, `str.casefold()`,
+  whitespace collapsed) and stored in `bets.sportsbook_key` and `users.search_key`, which
+  mapper events keep in step on every insert and update. Matching is therefore the same on
+  SQLite and on PostgreSQL in any locale, for any script: `ÉCLAIR` finds `Éclair` and
+  `strasse` finds `Straße`. Accents stay significant (`eclair` does not find `éclair`).
+  Migration 0005 backfills both keys.
 - **Dev outbox.** `GET /v1/dev/email-outbox/latest?to=&template=` returns the latest outbox
   email for an address, with `dev_link` and `token`, so a developer or an end-to-end test can
   finish a flow. It needs no sign-in and **answers `404` when `ODDVEX_ENV=production`**. Do
@@ -340,9 +395,11 @@ Behaviour worth knowing:
 - **Data export.** `GET /v1/me/export` returns one JSON document (`format_version: 1`) with the
   profile, bets, watchlist, sync connections, import runs and the caller's own audit entries,
   plus `alerts`, `notifications`, `notification_preferences` and `stake_reminder` (added later;
-  optional for older clients). The profile includes `plan` and `email_verified`. It never
-  contains the password hash, email tokens or outbox emails. Each export is itself
-  audited.
+  optional for older clients) and `community` (profile, picks, comments, handles followed,
+  liked pick ids, handles blocked and reports made; present with empty lists for an account
+  that never used the community, and whether or not the flag is on). The profile includes
+  `plan` and `email_verified`. It never contains the password hash, email tokens or outbox
+  emails. Each export is itself audited.
 - **Sync.** Re-running an import never duplicates a bet: bets are keyed on user + provider +
   external bet id. A provider failure that survives the retries is recorded as a failed run and
   returned as `502 sync_failed` with `details.run_id` and `details.retryable`. Two imports of
@@ -352,7 +409,133 @@ Behaviour worth knowing:
   in the usual envelope, whether the size is declared or the body is streamed.
 - **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
   notifications, notification preferences, the staking reminder, sync connections, import
-  runs, email tokens and outbox emails. The audit log keeps an entry with the opaque user id only.
+  runs, email tokens and outbox emails, and all of the account's community data (see
+  "Community" below). The audit log keeps an entry with the opaque user id only.
+
+### Community (flags `community` and `community_leaderboard`, both off by default)
+
+Research discussion, not tipping or touting. No money, no stakes or units, no paid picks, no
+affiliate links, no direct messages. While `community` is off, **every** route under
+`/v1/community` and `/v1/admin/community` answers `404 feature_disabled`, signed in or not.
+Every route except the guidelines needs a signed-in user. Other users are identified by
+handle only: no response in this module carries an email address, a display name, a plan,
+a user id or anything from the bet tracker.
+
+- **Profiles are opt-in.** `PUT /v1/community/profile` `{handle, bio?, is_public}` creates
+  (201) or updates (200) the caller's profile. `handle`: 3 to 20 characters of `a-z`, `0-9`
+  and `_` (`422 invalid_handle`), lowered on the way in so it is unique whatever the case
+  (`409 handle_taken`), not a reserved word such as `admin`, `oddvex`, `support`,
+  `moderator`, `staff`, `official`, `help`, `root` or `system`, alone or as an
+  underscore-separated part (`422 handle_reserved`), and it goes through the content rules
+  too. `bio`: plain text, at most 280 characters. `GET /v1/community/profile` is the caller's
+  own; `GET /v1/community/profiles/{handle}` returns handle, bio, `joined` (month), follower
+  and following counts, the record, `is_following`, `is_blocked` and `is_me`. A user without
+  a public profile cannot post picks or comments or follow anyone (`403 profile_required`
+  with `details.reason`) and is not discoverable: a private, moderated, suspended or
+  blocking profile answers the same `404` as a handle that does not exist. Liking, blocking,
+  reporting and reading do not need a profile.
+- **Picks are structured and gradeable, nothing else.** `POST /v1/community/picks` takes
+  `event_id`, `market` (moneyline, spread, total), `outcome_key`, `line` (spread and total)
+  and optional `analysis` (plain text, at most 1000 characters). Any other field is a 422:
+  there is no stake, no unit size, no confidence rating and no client-supplied price. The
+  server records the best open, non-stale price at that moment (`Board.best_price`, the code
+  the odds endpoint and the price alerts use; for spread and total among the books quoting
+  exactly that line, `422 price_not_available` otherwise), the sportsbook offering it and
+  `posted_at`. The event must be upcoming (`422 event_not_open`; also `unknown_event`,
+  `market_not_available`, `invalid_selection`). One pick per user per event and market
+  (`409 pick_exists`), 20 per user per day. `GET /v1/community/picks?handle=&event_id=&league=&status=&before=&limit=`
+  and `GET /v1/community/picks/{id}` read them; `status` is `pending`, `graded` or `void`.
+  The author can delete a pick only while its event is still upcoming; afterwards it stays,
+  so a record cannot be tidied up (`409 pick_locked`). There is no route to edit a pick.
+- **Every pick is verified; self-reported picks do not exist.** `verified` is always `true`
+  because every pick is structured, timestamped by the server before the event and graded by
+  the server. **Free-text picks, picks entered after the fact, imported records and
+  screenshots are intentionally not supported**, so there is nothing unverified to separate
+  from the verified record.
+- **Grading.** Picks are graded `won`, `lost` or `push` from the final score by
+  `quant.grade_leg`, the function the bet tracker's auto-settlement uses (a test grades the
+  same selection both ways). There is no background worker: grading runs when someone reads
+  the community (at most once per `ODDVEX_COMMUNITY_GRADE_MIN_SECONDS`) and when
+  `scripts/grade_picks.py` runs (`--dry-run` saves nothing). A pick whose event the provider
+  no longer serves is marked `void` seven days after the scheduled start and counts in no
+  record.
+- **Record.** Per profile, from graded picks only: `picks`, `wins`, `losses`, `pushes`,
+  `win_rate` (wins / (wins + losses)) with its Wilson 95% interval, `average_price`, and
+  `flat_stake_roi` with `units_profit`: one unit on every graded pick at the price recorded
+  when it was posted (`quant/record.py`), with a `method` string saying exactly that. Below
+  30 graded picks `sample_note` says the sample is too few to tell skill from luck, and
+  `caveat` always says past results do not predict future results. A pick that moderators hid
+  still counts, so hiding a pick's text cannot improve a record.
+- **Follows.** `POST/DELETE /v1/community/follows/{handle}`, `GET /v1/community/following`,
+  `GET /v1/community/followers`. You cannot follow yourself (`422 cannot_follow_self`), a
+  profile you blocked (`409 profile_blocked`) or one that blocked you (`404`, like a handle
+  that does not exist). Counts and lists only include public, active profiles.
+- **Feed.** `GET /v1/community/feed?scope=following|everyone&before=&limit=`: picks, newest
+  first, by time only. No ranking by results or popularity. People you blocked or who blocked
+  you, hidden or removed content and suspended or non-public authors are left out.
+- **Comments.** `POST/GET /v1/community/picks/{id}/comments`, `DELETE /v1/community/comments/{id}`
+  (the author, or an administrator as a moderator action). Plain text, at most 500
+  characters, **stored and returned exactly as sent: clients must escape it when rendering.**
+  30 per user per hour.
+- **Likes.** `PUT/DELETE /v1/community/picks/{id}/like`, idempotent; picks carry `like_count`
+  and `liked_by_me`. A like notifies nobody.
+- **Blocks.** `PUT/DELETE /v1/community/blocks/{handle}`, `GET /v1/community/blocks`. Blocking
+  removes the follow in both directions and hides each of the two from the other everywhere:
+  profile, picks, feed, comments, follower lists and the leaderboard. The blocked person is
+  not told and sees a plain `404`. The blocker can still look the profile up, to unblock it.
+- **Reports.** `POST /v1/community/reports` `{target_type: pick|comment|profile, target_id, reason, details?}`
+  with `reason` one of `spam`, `harassment`, `inducement_to_bet`, `misleading_claims`,
+  `personal_information`, `other`. For a profile `target_id` is the handle. One open report
+  per reporter and target (the open one is returned with 200), 10 per user per hour, not on
+  your own content, and only on something you can see. The reported person is not told.
+- **Content rules** (`community/content_rules.py`, one module, a pure function). Every bio,
+  analysis and comment, and every handle, is checked before it is stored:
+  - links: any text containing `http://`, `https://` or `www.` is `422 links_not_allowed`.
+    That removes most spam and every affiliate link;
+  - everything else is `422 content_not_allowed` with `details.rule`:
+    `guaranteed_outcome` ("guaranteed", "lock of the", "can't lose", "can't miss", "sure
+    thing", "risk-free", "free money"), `inducement_to_bet` ("bet the house", "max bet",
+    "chase" together with "losses", "win it back"), `selling_or_promotion` ("promo code",
+    "sign up bonus", "cashapp", "venmo", "paypal"), `contact_solicitation` ("dm me",
+    "telegram", "whatsapp") and `contact_details` (email addresses and phone-number-like
+    digit runs).
+
+  The rules match phrases on word boundaries, not intent. "Locker room", "unlock" and "the
+  chase for the eighth seed" pass; "do not chase your losses" and "no result is guaranteed"
+  are rejected, and so is a score followed by a year in the shape of a phone number
+  ("112-108 2025"). Spelling tricks get past them. They are a first filter in front of
+  reports and moderators, not a replacement.
+- **Moderation.** Administrators only, every decision audited (`community.report_resolved`
+  with the administrator, the report, the target, its author and the note).
+  `GET /v1/admin/community/reports?status=open|resolved` is the queue, with the reported text
+  as stored; `POST /v1/admin/community/reports/{id}/resolve` `{action, note}` decides one:
+  `dismiss` (only that report), `hide_content` or `remove_content` (the pick, comment or
+  profile disappears from every public read; its author still sees their own item with the
+  text replaced by "Removed by moderators."; every other open report on it is closed with
+  the same decision) or `suspend_author` (the existing account suspension, same code path, so
+  an administrator cannot be suspended). `note` is required. There is no "restore" action
+  yet: `hidden` and `removed` behave the same today and differ only as a label. A hidden
+  profile becomes visible again when its owner changes the handle or the bio.
+  `GET /v1/admin/community/overview` counts profiles, picks, comments and open reports.
+- **Leaderboard.** `GET /v1/community/leaderboard?league=&window=30d|90d|all`, behind its own
+  flag. Only profiles with at least 30 graded picks in the window are ranked, by the **lower
+  bound of the Wilson 95% interval** of their win rate: not by the raw win rate, so a short
+  lucky run cannot rank first, and not by ROI. Each row shows the sample size and the
+  interval, and the response carries a `method` and a `caveat` that past results do not
+  predict future results and that a ranking is not a recommendation.
+- **Notifications.** Three kinds were added to the in-app system, each with its own switch
+  in the preferences: `new_follower` (once per follower, ever), `pick_comment` (someone else
+  commented on your pick; the comment text is not repeated) and `pick_graded`. Same copy
+  rules and the same banned-phrase test as the others: facts only, no praise for a win.
+- **Account lifecycle.** `DELETE /v1/me` deletes the profile, follows in both directions,
+  likes, blocks, reports made, comments and **every pick, graded ones included**: no public
+  record is left behind without an account. Comments and likes other people left on those
+  picks go with them, and so do reports about the deleted account's content.
+- **Guidelines.** `GET /v1/community/guidelines` returns the rules as a structured list (be
+  civil; no guarantees or pressure to bet; no selling picks and no links; no personal
+  information; 21 and over; picks are opinions, not advice) plus the helpline line, so every
+  client shows one source of truth. Flag-gated like everything else, but no sign-in needed.
+  The wording is a product draft and needs counsel review before the flag is turned on.
 
 ## Architecture
 
@@ -363,10 +546,14 @@ src/oddvex_api/
   main.py            app factory, middleware, routers, OpenAPI post-processing
   config.py          settings from the environment; production safety checks
   quant/             pure betting math and grading. No I/O, no clock. Every number comes from here
-                     (value.py: best price vs. consensus; tracker.py: bands, buckets, streaks)
+                     (value.py: best price vs. consensus; tracker.py: bands, buckets, streaks;
+                     record.py: flat-stake record of graded picks)
   providers/         SportsDataProvider protocol, SyntheticProvider, vendor-payload normalizer
   board.py           read models: odds comparison, best price, consensus, prop research, value screen
   api/               public data routes, calculators, admin (overview, users, flags, audit, outbox)
+  community/         profiles, picks, grading, records, follows, feed, comments, likes, blocks,
+                     reports (service.py, router.py), moderation (admin_router.py), the content
+                     rules (content_rules.py, pure), the guidelines and the demo seed
   auth/              argon2id passwords, HS256 JWT, register/login/me, password change,
                      email verification and password reset routes
   flags/             feature flag catalog (defaults), DB overrides, require_flag, GET /v1/flags
@@ -383,14 +570,18 @@ src/oddvex_api/
   sync/              SyncProvider protocol, MockSyncProvider, idempotent import
   assistant/         intent router, data tools, Explainer protocol + TemplateExplainer
   db/                SQLAlchemy 2 models, portable UTC datetime type, session factory
+  textnorm.py        caseless text keys folded in Python, the same on every database
   errors.py middleware.py ratelimit.py cache.py logging_config.py deps.py
 alembic/             migrations (0001: users, bets, bet_legs, sync_connections, sync_import_runs, audit_log;
                      0002: watchlist_items, users.token_version/password_changed_at, bets.settled_by,
                      bet_legs.outcome_key;
                      0003: alert_rules, notifications, notification_preferences, stake_reminders;
                      0004: feature_flags, email_tokens, email_outbox,
-                     users.plan/status/last_login_at/email_verified_at)
-scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py
+                     users.plan/status/last_login_at/email_verified_at;
+                     0005: community_profiles, community_picks, community_comments,
+                     community_follows, community_likes, community_blocks, community_reports,
+                     users.search_key, bets.sportsbook_key)
+scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py
 docs/QUANT_METHODOLOGY.md
 ```
 
@@ -401,8 +592,10 @@ docs/QUANT_METHODOLOGY.md
   `provider`, `provider_id` and `fetched_at`.
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
   security headers, CORS allowlist, request body size limit, in-memory sliding-window rate
-  limits (per IP, and per account for failed logins and emails), audit log for auth events,
-  email verification, password resets, every admin change, password changes, bet create/settle/auto-settle/delete,
+  limits (per IP, per account for failed logins and emails, and per user for community
+  picks, comments, reports and follows), audit log for auth events including logout,
+  email verification, password resets, every admin change, admin reads, role grants and
+  removals, community posts, follows, blocks, reports and moderation decisions, password changes, bet create/settle/auto-settle/delete,
   watchlist changes, alert rule changes and firings, notification deletion, preference and
   staking-reminder changes, sync, data export and account deletion.
 
@@ -416,6 +609,7 @@ docs/QUANT_METHODOLOGY.md
 | Sportsbook sync | `MockSyncProvider` only: a fictional account with a fixed bet history and a simulated failure switch. No credentials, no real sportsbook |
 | Assistant | Keyword/regex intent router and templates. **No language model is connected** |
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
+| Community demo data | Six fictional profiles (`fictional_fox`, `sample_sam`, `madeup_mara`, `placeholder_pat`, `notreal_nia`, `example_eli`) and the demo user's `demo_bettor`, with graded and upcoming picks, comments, follows and likes. Seeded only when the `community` flag is on in that database or `--with-community` is passed. Graded picks are written as posted before events that are final by now, priced from the synthetic line history, and graded by the API's own grading code |
 | Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle. With a provider it also gets five alert rules (one price alert that is already met and fires, the others stay active) and the notifications the engine produces for them |
 | Notification delivery | In-app only. No push, email or SMS provider is connected |
 | Email | Not sent. See below |
@@ -427,8 +621,8 @@ docs/QUANT_METHODOLOGY.md
 | --- | --- | --- |
 | Plans | `users.plan` (`free` / `premium`), set by an administrator; an entitlement catalog and `require_entitlement`, enforced only with the `premium_gating` flag (off) and gating nothing as shipped | Prices, a purchase or subscription route, a payment provider, invoices, trials, webhooks. All of it needs Founder approval |
 | Email | The verification and reset flows end to end against an `EmailSender` protocol. `OutboxEmailSender` (the default) writes `to`, `template`, `subject`, `body_text`, `created_at` and a `dev_link` to `email_outbox` | Delivery. Nothing leaves the process. `ResendEmailSender` is a class that raises `NotImplementedError("Requires Founder approval and a Resend account")`; it is only selected by `ODDVEX_EMAIL_PROVIDER=resend`, and then the app refuses to start. No email SDK is installed and no HTTP call is made |
-| Email in production | The outbox row is still written, with the link replaced by a placeholder and `dev_link` empty, so the database never holds a usable token | A way for a real user to receive a link: **in production the verification and reset flows cannot be completed until a provider is approved and connected.** Consider turning `email_flows` off there until then |
-| Community | The `community` flag (off) | Any community feature |
+| Email in production | `email_flows` is **off by default in production**, so the four routes answer `404 feature_disabled` and no email is queued. If an operator turns it on, the outbox row is written with the link replaced by a placeholder and `dev_link` empty, so the database never holds a usable token | A way for a real user to receive a link: **in production the verification and reset flows cannot be completed until a provider is approved and connected**, which is why the flag is off there |
+| Community | Everything described under "Community", behind the `community` flag (off) and, for the leaderboard, `community_leaderboard` (off). The demo seed adds fictional profiles only when the flag is on or `--with-community` is passed | Self-reported or free-text picks, stakes or units, paid picks, links, direct messages, images, mentions, editing a pick or a comment, a "restore" moderation action, appeals, per-moderator roles, and any review of the guidelines by counsel or of the leaderboard by a responsible-gambling adviser |
 
 ## Limitations
 
@@ -438,13 +632,21 @@ docs/QUANT_METHODOLOGY.md
 - `GET /v1/dev/email-outbox/latest` is unauthenticated outside production by design.
 - Flags are global: no per-user or percentage rollout. Each flagged request reads the flag
   from the database.
-- The case-insensitive sportsbook filter on `GET /v1/bets` and the admin user search lower-case
-  with the database, which handles ASCII only on SQLite and on PostgreSQL with the `C` locale.
+- Case-insensitive matching (sportsbook filter, admin search) ignores case for any script but
+  not accents, and a row written by something other than the application or migration 0005
+  has no key and does not match until it is next saved.
+- Community: grading has no background worker (it runs on reads and from
+  `scripts/grade_picks.py`), the per-user limits are in process memory like the other
+  limiters, the content rules match phrases and can be evaded or over-match (see above),
+  moderation has no restore action, and the feed and the leaderboard are computed per request
+  without caching. The leaderboard reads every eligible profile's graded picks: fine for a
+  demo, not designed for a large community. Prices are snapshots of synthetic data.
 - Rate limiting and caching are in process memory. With several workers each has its own
   counters; move them to a shared store before scaling out.
-- JWT access tokens only: no refresh tokens and no per-session logout. Tokens stop working
-  when the password is changed or reset (every earlier token), when the account is suspended
-  (until it is unsuspended) and when it is deleted. Password reset exists but depends on an
+- JWT access tokens only: no refresh tokens and no per-session logout. `POST /v1/auth/logout`
+  ends every session of the account at once. Tokens also stop working when the password is
+  changed or reset (every earlier token), when the account is suspended (until it is
+  unsuspended; the two data-rights routes excepted) and when it is deleted. Password reset exists but depends on an
   email that is not delivered (see above).
 - Auto-settlement grades full-game moneyline, spread and total from the provider's final score.
   Props, futures, half results, voids and cash-outs stay manual, and the score is synthetic.
