@@ -84,7 +84,7 @@ Important caveats:
 | INTL-06 | Formula transparency | Formula on each tool + `/methodology` | Free | M1 | Built in M1 | MKT-03 |
 | INTL-07 | Hedge & arbitrage calculators | Additional tools | Free | M2 | Planned | — |
 | INTL-08 | Bankroll / staking calculator | e.g. fractional staking | Free | M3 | Planned | RG review of framing before build |
-| INTL-09 | Market discrepancy / +EV screen | Market-wide scan vs. reference price | Premium | M4 | Planned | Licensed provider; reference-price methodology; claims review |
+| INTL-09 | Market discrepancy / +EV screen | Market-wide scan vs. reference price | Premium | M4 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | Licensed provider; reference-price methodology; claims review |
 | INTL-10 | Backtesting | Test projections/strategies on history | Premium | M4 | Planned | Historical data licence; DATA-05 |
 | INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated on app open or by script; no background worker) | Real-time provider; NOTF-01 |
 | INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Built in code, never run on a device (converter, no-vig, EV, CLV) | MOB-01 |
@@ -105,7 +105,7 @@ Important caveats:
 | TRKR-10 | Spending-awareness insights | Neutral summaries; optional reminders | Free (never paywalled) | M3 | Planned | RG policy review |
 | TRKR-11 | Mobile tracker | Tracker in Expo app | Free | M3 | Built in code, never run on a device (log, settle, edit, delete, settle from final scores, mock sync; profit chart and breakdowns are web-only) | MOB-02 |
 | TRKR-12 | Multi-leg bets | Parlays with legs in tracker | Free | M1 | Built in M1 | TRKR-01 |
-| TRKR-13 | Advanced analytics | Deeper breakdowns, custom date ranges | Premium | M4 | Planned | PREM-01 |
+| TRKR-13 | Advanced analytics | Deeper breakdowns, custom date ranges | Premium | M4 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | PREM-01 |
 
 ## G. Sportsbook Sync
 
@@ -154,14 +154,14 @@ Important caveats:
 
 | ID | Feature | Description | Tier (proposal) | MS | Status | Dependencies |
 |---|---|---|---|---|---|---|
-| COMM-01 | Profiles | Pseudonymous handle, avatar | Free | M5 | Planned | UGC policy |
-| COMM-02 | Discussions | Threads on games/props | Free | M5 | Planned | COMM-05, COMM-06 |
-| COMM-03 | Share tracked bets | "Synced" vs. "self-reported" badge | Free | M5 | Planned | TRKR, SYNC-05 |
-| COMM-04 | Follow & feed | Social graph | Free | M5 | Planned | COMM-01 |
-| COMM-05 | Report / block / mute | User safety controls | Free | M5 | Planned | Store UGC requirements |
-| COMM-06 | Moderation | Queue, actions, appeals | n/a | M5 | Planned | ADMN-05; staffing; counsel |
-| COMM-07 | Leaderboards | Only if RG review approves | Free | M5 | Planned | RG review; **Founder decision** |
-| COMM-08 | Community guidelines | No pick-selling / guaranteed-win claims | n/a | M5 | Planned | Counsel review |
+| COMM-01 | Profiles | Pseudonymous handle, avatar | Free | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | UGC policy |
+| COMM-02 | Discussions | Threads on games/props | Free | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | COMM-05, COMM-06 |
+| COMM-03 | Share tracked bets | "Synced" vs. "self-reported" badge | Free | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | TRKR, SYNC-05 |
+| COMM-04 | Follow & feed | Social graph | Free | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | COMM-01 |
+| COMM-05 | Report / block / mute | User safety controls | Free | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | Store UGC requirements |
+| COMM-06 | Moderation | Queue, actions, appeals | n/a | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | ADMN-05; staffing; counsel |
+| COMM-07 | Leaderboards | Only if RG review approves | Free | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | RG review; **Founder decision** |
+| COMM-08 | Community guidelines | No pick-selling / guaranteed-win claims | n/a | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | Counsel review |
 
 ## K. Premium
 
@@ -180,13 +180,13 @@ Important caveats:
 | ID | Feature | Description | Tier (proposal) | MS | Status | Dependencies |
 |---|---|---|---|---|---|---|
 | ADMN-01 | Admin overview endpoint | Role-gated aggregates + health | n/a | M1 | Built in M1 | AUTH-07 |
-| ADMN-02 | Admin console UI | Internal web console | n/a | M5 | Planned | ADMN-07 |
-| ADMN-03 | User management | Lookup, suspend, deletion/export requests | n/a | M5 | Planned | ADMN-07 |
+| ADMN-02 | Admin console UI | Internal web console | n/a | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | ADMN-07 |
+| ADMN-03 | User management | Lookup, suspend, deletion/export requests | n/a | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | ADMN-07 |
 | ADMN-04 | Data health monitor | Provider status and freshness | n/a | M2 basic / M5 | Planned | DATA-03 |
-| ADMN-05 | Moderation queue | For Community | n/a | M5 | Planned | COMM-06 |
-| ADMN-06 | Feature flags | Remote config / kill switches | n/a | M3 | Planned | — |
+| ADMN-05 | Moderation queue | For Community | n/a | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | COMM-06 |
+| ADMN-06 | Feature flags | Remote config / kill switches | n/a | M3 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | — |
 | ADMN-07 | Admin audit log | Immutable record of admin actions | n/a | M2 | Planned | Must precede any admin write action |
-| ADMN-08 | Subscription support tools | Entitlement lookup/adjust | n/a | M5 | Planned | PREM-01 |
+| ADMN-08 | Subscription support tools | Entitlement lookup/adjust | n/a | M5 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | PREM-01 |
 | ADMN-09 | Assistant quality review | Privacy-preserving sampling | n/a | M4 | Planned | AI-07; privacy review |
 
 ## Cross-cutting: Accounts, Settings, Notifications, Data, Marketing, Mobile
@@ -196,7 +196,7 @@ Important caveats:
 | AUTH-01 | Email/password auth | Signup, login | Free | M1 | Built in M1 | — |
 | AUTH-02 | 21+ attestation & legal acceptance | Recorded with timestamp/version | Free | M1 | Built in M1 (attestation timestamp; no legal-version record) | Draft legal pages; counsel to confirm adequacy |
 | AUTH-03 | Sessions & logout | Session lifecycle | Free | M1 | Built in M1 | — |
-| AUTH-04 | Email verification & password reset | Via transactional email | Free | M2 | Planned | **Founder gate** (real customer email, paid email service) |
+| AUTH-04 | Email verification & password reset | Via transactional email | Free | M2 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | **Founder gate** (real customer email, paid email service) |
 | AUTH-05 | MFA / passkeys / social login | Stronger auth options | Free | M3 | Planned | — |
 | AUTH-06 | Account deletion & data export | Self-serve | Free | M1 / M2 | Built | Required before any real user; store account-deletion rules |
 | AUTH-07 | RBAC | `user`, `admin` roles | n/a | M1 | Built in M1 | — |

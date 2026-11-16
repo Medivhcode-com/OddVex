@@ -21,7 +21,7 @@ const AREAS: { name: string; href?: string; live: boolean; body: string }[] = [
   { name: "OddVex AI", href: "/ai", live: true, body: "Answers from OddVex data tools with sources and freshness. Rule-based in this version." },
   { name: "Sportsbook sync", live: false, body: "The sync layer is built against a mock provider. Real connections need an authorized vendor." },
   { name: "Alerts and watchlists", live: false, body: "Line-move and price alerts on the markets you follow." },
-  { name: "Community", live: false, body: "Profiles, public picks and leaderboards that separate verified results from self-reported ones." },
+  { name: "Community", live: false, body: "Profiles and public picks that are timestamped before the game and graded from the final score. Built, and switched off until it has been reviewed." },
   { name: "Mobile apps", href: "/download", live: false, body: "iOS and Android apps are in development and not yet in the stores." },
 ];
 
