@@ -75,24 +75,36 @@ Shared: header (logo, Features, Pricing, Help, Log in, Get started), footer (leg
 
 ## 4. Mobile app (Expo React Native)
 
-M1 ships the **first slice only: games + odds.** Everything else is planned. Route names follow Expo Router conventions and are proposals for engineering to confirm.
+**Status: built in code, never run on a device or simulator.** The app covers the web app's signed-in loop, not
+only games and odds. It passes the type checker, the linter, its Jest suite and a JS bundle export for both
+platforms; nobody has looked at these screens on a phone, in a simulator or in Expo Go. Layout, the native tab bar,
+modals, keyboard handling, safe areas, Dynamic Type, screen readers and SecureStore on real hardware are unverified.
+`apps/mobile/README.md` is the source of truth for what each screen does; `docs/product/BUILD_STATUS.md` records
+what was checked. Routes are the files under `apps/mobile/src/app`. The MS column is the milestone the screen was
+planned for.
 
-| # | Route (proposed) | Screen | Purpose | Key components | States | Entry points | MS |
-|---|---|---|---|---|---|---|---|
-| N-01 | `(tabs)/games` | Games | Browse games/scores | Sport chips; date strip; virtualised game list; pull-to-refresh; demo-data banner | Skeleton rows / "No games for this date" / stale badge + last updated / error with retry; offline notice | App launch (default tab) | M1 |
-| N-02 | `games/[id]` | Game detail | Score + odds snapshot | Score header; odds by sportsbook; link to full comparison | Skeleton / "Odds not yet posted" / stale badge / not-found, error | Game row | M1 |
-| N-03 | `(tabs)/odds` | Odds comparison | Compare prices | Market segmented control; game list with horizontally scrolling book prices; best-line marker; format toggle | Skeleton / "No markets" / stale cells marked / error with retry | Tab bar; game detail | M1 |
-| N-04 | `(auth)/login`, `(auth)/signup` | Auth | Account access incl. 21+ attestation | Same fields as web | As web | Launch (when required) | M2 |
-| N-05 | `(tabs)/props`, `props/[playerId]` | Prop analyzer | Research props | As web, mobile layout | As web | Tab bar; game detail | M3 |
-| N-06 | `tools` | Calculators | Betting maths | Calculator cards | As web | Tab/More | M3 |
-| N-07 | `parlay` | Parlay research | Build/understand parlay | As web incl. correlation warning | As web | Add-to-parlay actions | M3 |
-| N-08 | `(tabs)/tracker` | Bet tracker | Log/settle/review | As web | As web | Tab bar | M3 |
-| N-09 | `assistant` | OddVex AI | Ask questions | As web | As web | Tab/More | M4 |
-| N-10 | `settings` | Settings | Preferences, RG resources, legal, **in-app account deletion** | List settings | — | Profile/More | M2 |
-| N-11 | `alerts` | Alerts centre | Manage alerts | Alert rules, history, push permission primer | — | Tab/More; push tap | M3 |
-| N-12 | `paywall` | Premium | Upgrade | Plan details with renewal disclosure, restore purchases | — | Gated features | M4 |
+| # | Route | Screen | Purpose | Key components | States | Entry points | MS | Status |
+|---|---|---|---|---|---|---|---|---|
+| N-01 | `(tabs)/(games)/index` | Games | Browse games/scores | League chips; Live / Upcoming / Final groups; best moneyline per side with the book's name; pull-to-refresh; "Your watchlist" when logged in; notifications bell with unread count; synthetic-data badge | Loading / empty / stale label / error with retry | App launch (default tab) | M1 | Built, not run on a device |
+| N-02 | `(tabs)/(games)/event/[id]` | Game detail | Score + odds comparison | Market switcher; one row per sportsbook with price, freshness, hold, "Best" in words; no-vig consensus; Follow toggles; "Track a bet on this game"; "Set an alert" | Loading / "not offered" / stale / not-found, error | Game row; notification | M1 | Built, not run on a device |
+| N-03 | (none) | Odds comparison | Compare prices | No separate odds board on mobile: the Games tab and game detail stand in for it. Odds format is set in Settings | — | — | M1 | Not built as its own screen |
+| N-04 | `login`, `signup` | Auth | Account access incl. 21+ attestation | Modals above the tabs; name, email, password (10+ characters), "I am 21 or older" switch | Submitting / validation errors / rate-limit message | Any screen that needs an account | M2 | Built, not run on a device |
+| N-05 | `(tabs)/(props)/props`, `(tabs)/(props)/player/[id]` | Prop board and analyzer | Research props | League and stat filters; window and split selectors; over rate with "x of n games" and 95% range; game-log bars labelled Over / Under / Push; per-book offers; Follow toggle | As web | Tab bar | M3 | Built, not run on a device |
+| N-06 | `(tabs)/(tools)/tools` | Calculators | Betting maths | Converter, no-vig, EV, CLV; "Show the working" | As web | Tab bar | M3 | Built, not run on a device |
+| N-07 | `(tabs)/(tools)/parlay` | Parlay research | Build/understand parlay | Legs from current games or custom; combined odds, payout, break-even; correlation warning with "Not shown" | As web | Tools tab | M3 | Built, not run on a device |
+| N-08 | `(tabs)/(tracker)/tracker`, `(tabs)/(tracker)/log-bet` | Bet tracker | Log/settle/review | Summary; open and settled bets; settle, settle a parlay by leg, edit, delete; "Settle from final scores"; mock sync; staking-reminder notice | Signed out: invitation to log in. Otherwise as web | Tab bar | M3 | Built, not run on a device. Profit chart and breakdowns are web-only |
+| N-09 | `(tabs)/(games)/assistant` | OddVex AI | Ask questions | Chat, example questions, suggestion chips, sources line and disclaimer | As web | Games tab; Settings | M4 | Built, not run on a device |
+| N-10 | `(tabs)/(settings)/settings` | Settings | Preferences, RG line, **in-app account deletion** | Account, odds format, notification switches, weekly staking reminder, change password, delete account (typed DELETE) | — | Tab bar | M2 | Built, not run on a device. Data export and the legal pages are web-only |
+| N-11 | `(tabs)/(games)/notifications` | Notifications and alerts | Read notifications, manage alerts | Two segments: notifications (mark read, delete, load more) and alert rules (pause, resume, set again, delete, "Check now") | Signed out: invitation to log in | Bell on Games; Settings | M3 | Built, not run on a device. In-app only: no push, no email, no background checks |
+| N-12 | `paywall` | Premium | Upgrade | Plan details with renewal disclosure, restore purchases | — | Gated features | M4 | Planned. Not built; pricing and billing need Founder approval |
 
-Mobile-specific requirements: safe areas; Dynamic Type / font scaling; 44 pt targets; dark and light themes; VoiceOver/TalkBack labels on prices (e.g. "Northgate −110 at Book A, best price"); no push permission prompt until alerts exist (M3).
+Mobile-specific requirements, **all unverified until the app runs on a device**: safe areas; Dynamic Type / font
+scaling; 44 pt targets; dark and light themes (the app follows the system setting; there is no in-app toggle);
+VoiceOver/TalkBack labels on prices (e.g. "Northgate −110 at Book A, best price"). There is no push permission
+prompt because the app has no push notifications.
+
+Not built on mobile: push notifications, automatic refresh, offline cache, token refresh, tablet layouts, final icon
+and splash art, EAS project and store configuration. Nothing has been published.
 
 ## 5. Admin
 

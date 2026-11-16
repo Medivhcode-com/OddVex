@@ -12,14 +12,16 @@ export const metadata: Metadata = {
 const AREAS: { name: string; href?: string; live: boolean; body: string }[] = [
   { name: "Games and live scores", href: "/app/games", live: true, body: "Live, upcoming and final games by league with status, score and the best moneyline on each side." },
   { name: "Odds comparison", href: "/odds-comparison", live: true, body: "Moneyline, spread and total across books with best price, no-vig consensus, freshness and line history." },
+  { name: "Value screen", href: "/app/value", live: true, body: "Outcomes where one book's best price is above the no-vig consensus of the other books, with the method and its limits stated. A price comparison, not a prediction." },
   { name: "Player prop analyzer", href: "/player-props", live: true, body: "Game logs against the line, windows and splits, and hit rates with confidence ranges." },
   { name: "Calculators", href: "/app/tools", live: true, body: "Odds converter, no-vig, expected value and closing line value, each showing its working." },
   { name: "Parlay research", href: "/app/parlay", live: true, body: "Combined price and payout for any legs, with a warning when legs are correlated instead of a made-up probability." },
   { name: "Bet tracker", href: "/bet-tracking", live: true, body: "Log, settle and analyze bets with profit, ROI, closing line value and breakdowns." },
+  { name: "Tracker analytics", href: "/app/tracker/analytics", live: true, body: "Your settled bets by odds band, weekday and month, with streaks, closing line value and stake sizes, and a note when the sample is too small to mean much." },
   { name: "OddVex AI", href: "/ai", live: true, body: "Answers from OddVex data tools with sources and freshness. Rule-based in this version." },
   { name: "Sportsbook sync", live: false, body: "The sync layer is built against a mock provider. Real connections need an authorized vendor." },
   { name: "Alerts and watchlists", live: false, body: "Line-move and price alerts on the markets you follow." },
-  { name: "Community", live: false, body: "Profiles, public picks and leaderboards that separate verified results from self-reported ones." },
+  { name: "Community", live: false, body: "Profiles and public picks that are timestamped before the game and graded from the final score. Built, and switched off until it has been reviewed." },
   { name: "Mobile apps", href: "/download", live: false, body: "iOS and Android apps are in development and not yet in the stores." },
 ];
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
@@ -15,20 +16,36 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import DateTime, bindparam, inspect, select, text
+from sqlalchemy import DateTime, bindparam, func, inspect, select, text
 
 from oddvex_api.auth.security import hash_password
+from oddvex_api.community.content_rules import check_text
+from oddvex_api.community.seed import FICTIONAL_PROFILES
 from oddvex_api.db import (
     AlertRule,
     Base,
     Bet,
+    CommunityComment,
+    CommunityFollow,
+    CommunityLike,
+    CommunityPick,
+    CommunityProfile,
+    FeatureFlag,
     Notification,
     User,
     make_engine,
     make_session_factory,
 )
+from oddvex_api.flags import service as flags_service
 from oddvex_api.providers import SyntheticProvider
-from oddvex_api.seed import DEMO_BET_COUNT, DEMO_EMAIL, DEMO_GRADEABLE_COUNT, seed_demo
+from oddvex_api.quant import grade_leg
+from oddvex_api.seed import (
+    DEMO_ADMIN_EMAIL,
+    DEMO_BET_COUNT,
+    DEMO_EMAIL,
+    DEMO_GRADEABLE_COUNT,
+    seed_demo,
+)
 
 from .conftest import EXTERNAL_DATABASE_URL, AppFactory, _reset_external_database
 from .test_provider_synthetic import REAL_NAMES
@@ -46,6 +63,16 @@ TABLES = {
     "notifications",
     "notification_preferences",
     "stake_reminders",
+    "feature_flags",
+    "email_tokens",
+    "email_outbox",
+    "community_profiles",
+    "community_picks",
+    "community_comments",
+    "community_follows",
+    "community_likes",
+    "community_blocks",
+    "community_reports",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -303,7 +330,7 @@ def test_upgrade_from_0002_with_existing_data_then_downgrade(
         }
         assert client.get("/v1/alerts", headers=headers).json() == {"items": []}
         preferences = client.get("/v1/me/notification-preferences", headers=headers).json()
-        assert all(preferences["in_app"].values()) and len(preferences["in_app"]) == 7
+        assert all(preferences["in_app"].values()) and len(preferences["in_app"]) == 10
         # The bet from before the migration counts towards this week's total.
         reminder = client.get("/v1/me/stake-reminder", headers=headers).json()
         assert reminder["weekly_stake_threshold"] is None and reminder["staked_this_week"] == 40.0
@@ -354,6 +381,427 @@ def test_upgrade_from_0002_with_existing_data_then_downgrade(
     with engine.connect() as connection:
         for table in sorted(NEW_TABLES):
             assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
+TABLES_0004 = {"feature_flags", "email_tokens", "email_outbox"}
+COLUMNS_0004 = {"plan", "status", "last_login_at", "email_verified_at"}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0003_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0004.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0003")
+    engine = make_engine(url)
+    assert not TABLES_0004 & set(inspect(engine).get_table_names())
+    assert not COLUMNS_0004 & {c["name"] for c in inspect(engine).get_columns("users")}
+
+    # Rows written by the 0003 release: a user with a bet, an alert rule and a notification.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+                "age_confirmed_at, created_at, token_version) VALUES (:id, :email, :hash, "
+                "'Old', 'user', :active, :at, :at, 0)"
+            ).bindparams(at),
+            {
+                "id": "u" * 32,
+                "email": "old@example.test",
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bets (id, user_id, bet_type, status, result, sport, sportsbook, "
+                "stake, odds_decimal, odds_source, payout, profit, placed_at, settled_at, "
+                "settled_by, source, created_at, updated_at) VALUES (:id, :user, 'straight', "
+                "'settled', 'won', 'nba', 'Northline', 40, 2.0, 'legs', 80, 40, :at, :at, "
+                "'user', 'manual', :at, :at)"
+            ).bindparams(at),
+            {"id": "b" * 32, "user": "u" * 32, "at": stamp},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bet_legs (id, bet_id, position, selection, market, odds_decimal) "
+                "VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', 2.0)"
+            ),
+            {"id": "B" * 32, "bet": "b" * 32},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO notifications (id, user_id, kind, title, body, data, dedupe_key, "
+                "created_at) VALUES (:id, :user, 'bet_settled', 'Bet settled', 'Won.', '{}', "
+                "'k1', :at)"
+            ).bindparams(at),
+            {"id": "n" * 32, "user": "u" * 32, "at": stamp},
+        )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) >= TABLES_0004
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Existing users get the safe defaults; nothing else is invented.
+        row = connection.execute(
+            text("SELECT plan, status, last_login_at, email_verified_at FROM users")
+        ).one()
+        assert tuple(row) == ("free", "active", None, None)
+        for table in sorted(TABLES_0004):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: the old login, then the new features.
+    app = make_app(
+        database_url=url,
+        env="production",
+        jwt_secret="k" * 48,
+        admin_emails="boss@example.test",
+    )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        user = login.json()["user"]
+        assert (user["plan"], user["email_verified"]) == ("free", False)
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        assert client.get("/v1/flags").json()["flags"]["community"] is False
+        entitlements = client.get("/v1/me/entitlements", headers=headers).json()
+        assert entitlements["plan"] == "free" and entitlements["preview"] is True
+        analytics = client.get("/v1/bets/analytics", headers=headers).json()
+        assert analytics["settled_count"] == 1 and analytics["sample_note"]
+        assert client.get("/v1/value").status_code == 200
+        # Production: ``email_flows`` is off until an operator turns it on.
+        assert client.get("/v1/flags").json()["flags"]["email_flows"] is False
+        off = client.post("/v1/auth/verify-email/request", headers=headers)
+        assert off.status_code == 404 and off.json()["error"]["code"] == "feature_disabled"
+
+        admin = client.post(
+            "/v1/auth/register",
+            json={
+                "email": "boss@example.test",
+                "password": "correct-horse-battery",
+                "display_name": "Boss",
+                "age_confirmed": True,
+            },
+        ).json()
+        admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        turned_on = client.put(
+            "/v1/admin/flags/email_flows", json={"enabled": True}, headers=admin_headers
+        )
+        assert turned_on.status_code == 200, turned_on.text
+        requested = client.post("/v1/auth/verify-email/request", headers=headers)
+        assert requested.status_code == 202, requested.text
+        reset = client.post("/v1/auth/password-reset/request", json={"email": user["email"]})
+        assert reset.status_code == 202
+        listed = client.get("/v1/admin/users", headers=admin_headers).json()
+        assert listed["total"] == 2
+        old = next(u for u in listed["items"] if u["email"] == "old@example.test")
+        assert (old["bet_count"], old["status"], old["last_login_at"] is not None) == (
+            1,
+            "active",
+            True,
+        )
+        assert (
+            client.put(
+                "/v1/admin/flags/community", json={"enabled": True}, headers=admin_headers
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"/v1/admin/users/{old['id']}/plan", json={"plan": "premium"}, headers=admin_headers
+            ).json()["plan"]
+            == "premium"
+        )
+    app.state.engine.dispose()
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM feature_flags")).scalar() == 2
+        # Two emails queued for the old user, none sent. The administrator registered
+        # while ``email_flows`` was still off, so no confirmation email was queued.
+        assert connection.execute(text("SELECT count(*) FROM email_outbox")).scalar() == 2
+        # Production: the outbox never holds a usable link.
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM email_outbox WHERE dev_link IS NOT NULL")
+            ).scalar()
+            == 0
+        )
+    engine.dispose()
+
+    # Downgrade removes only what 0004 added; the 0003 data is untouched.
+    command.downgrade(config, "0003")
+    engine = make_engine(url)
+    tables = set(inspect(engine).get_table_names())
+    assert not TABLES_0004 & tables and tables >= NEW_TABLES
+    assert not COLUMNS_0004 & {c["name"] for c in inspect(engine).get_columns("users")}
+    with engine.connect() as connection:
+        emails = connection.execute(text("SELECT email FROM users ORDER BY created_at")).scalars()
+        assert list(emails) == ["old@example.test", "boss@example.test"]
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 1
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 1
+        assert connection.execute(text("SELECT count(*) FROM notifications")).scalar() == 1
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003"
+        )
+    engine.dispose()
+
+    # Up again (defaults again, new tables empty), then all the way down.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        plans = connection.execute(text("SELECT DISTINCT plan, status FROM users")).all()
+        assert [tuple(r) for r in plans] == [("free", "active")]
+        for table in sorted(TABLES_0004):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
+TABLES_0005 = {
+    "community_profiles",
+    "community_picks",
+    "community_comments",
+    "community_follows",
+    "community_likes",
+    "community_blocks",
+    "community_reports",
+}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0004_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0005.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0004")
+    engine = make_engine(url)
+    assert not TABLES_0005 & set(inspect(engine).get_table_names())
+    assert "search_key" not in {c["name"] for c in inspect(engine).get_columns("users")}
+    assert "sportsbook_key" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+
+    # Rows written by the 0004 release: two users and bets at sportsbooks whose names
+    # SQL lower() cannot fold on SQLite or on PostgreSQL with the C locale.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    users = (("u" * 32, "old@example.test", "Zoë ÜNSAL"), ("v" * 32, "jose@example.test", "JOSÉ"))
+    bets = (
+        ("a" * 32, "u" * 32, "Éclair Sports"),
+        ("b" * 32, "u" * 32, "ÉCLAIR SPORTS"),
+        ("c" * 32, "u" * 32, "Northline"),
+        ("d" * 32, "v" * 32, "STRASSE Wetten"),
+    )
+    with engine.begin() as connection:
+        for user_id, email, name in users:
+            connection.execute(
+                text(
+                    "INSERT INTO users (id, email, password_hash, display_name, role, "
+                    "is_active, age_confirmed_at, created_at, token_version, plan, status) "
+                    "VALUES (:id, :email, :hash, :name, 'user', :active, :at, :at, 0, 'free', "
+                    "'active')"
+                ).bindparams(at),
+                {
+                    "id": user_id,
+                    "email": email,
+                    "name": name,
+                    "hash": hash_password("correct-horse-battery"),
+                    "active": True,
+                    "at": stamp,
+                },
+            )
+        for bet_id, user_id, sportsbook in bets:
+            connection.execute(
+                text(
+                    "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, stake, "
+                    "odds_decimal, odds_source, placed_at, source, created_at, updated_at) "
+                    "VALUES (:id, :user, 'straight', 'pending', 'nba', :sportsbook, 10, 2.0, "
+                    "'legs', :at, 'manual', :at, :at)"
+                ).bindparams(at),
+                {"id": bet_id, "user": user_id, "sportsbook": sportsbook, "at": stamp},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO bet_legs (id, bet_id, position, selection, market, "
+                    "odds_decimal) VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', 2.0)"
+                ),
+                {"id": bet_id.upper(), "bet": bet_id},
+            )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) >= TABLES_0005
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Nothing was invented: nobody has a profile until they create one.
+        for table in sorted(TABLES_0005):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+        # Existing rows were backfilled with the keys the application computes.
+        keys = dict(connection.execute(text("SELECT email, search_key FROM users")).all())
+        assert keys == {
+            "old@example.test": "old@example.test\nzoë ünsal",
+            "jose@example.test": "jose@example.test\njosé",
+        }
+        books = dict(connection.execute(text("SELECT id, sportsbook_key FROM bets")).all())
+        assert books == {
+            "a" * 32: "éclair sports",
+            "b" * 32: "éclair sports",
+            "c" * 32: "northline",
+            "d" * 32: "strasse wetten",
+        }
+        # The names themselves are untouched.
+        names = connection.execute(text("SELECT sportsbook FROM bets ORDER BY id")).scalars()
+        assert list(names) == [b[2] for b in bets]
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: the filters work on the old rows, and the
+    # new features work for the old account.
+    app = make_app(
+        database_url=url,
+        env="production",
+        jwt_secret="k" * 48,
+        admin_emails="boss@example.test",
+        community_grade_min_seconds=0,
+    )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        found = client.get("/v1/bets", params={"sportsbook": "éclair sports"}, headers=headers)
+        assert sorted(b["sportsbook"] for b in found.json()) == ["ÉCLAIR SPORTS", "Éclair Sports"]
+        assert len(client.get("/v1/bets", headers=headers).json()) == 3
+        assert client.get("/health").json()["database"] == "ok"
+
+        admin = client.post(
+            "/v1/auth/register",
+            json={
+                "email": "boss@example.test",
+                "password": "correct-horse-battery",
+                "display_name": "Boss",
+                "age_confirmed": True,
+            },
+        ).json()
+        admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        searched = client.get("/v1/admin/users", params={"q": "ZOË ünsal"}, headers=admin_headers)
+        assert [u["email"] for u in searched.json()["items"]] == ["old@example.test"]
+        searched = client.get("/v1/admin/users", params={"q": "josé"}, headers=admin_headers)
+        assert [u["email"] for u in searched.json()["items"]] == ["jose@example.test"]
+
+        # Community: off, then on, then used by the account from before the migration.
+        assert client.get("/v1/community/feed", headers=headers).status_code == 404
+        for key in ("community", "community_leaderboard"):
+            turned_on = client.put(
+                f"/v1/admin/flags/{key}", json={"enabled": True}, headers=admin_headers
+            )
+            assert turned_on.status_code == 200, turned_on.text
+        profile = client.put(
+            "/v1/community/profile",
+            json={"handle": "old_timer", "is_public": True},
+            headers=headers,
+        )
+        assert profile.status_code == 201, profile.text
+        event = client.get("/v1/events", params={"status": "upcoming"}).json()[0]
+        pick = client.post(
+            "/v1/community/picks",
+            json={"event_id": event["id"], "market": "moneyline", "outcome_key": "home"},
+            headers=headers,
+        )
+        assert pick.status_code == 201, pick.text
+        liked = client.put(f"/v1/community/picks/{pick.json()['id']}/like", headers=admin_headers)
+        assert liked.json()["like_count"] == 1
+        reported = client.post(
+            "/v1/community/reports",
+            json={"target_type": "pick", "target_id": pick.json()["id"], "reason": "other"},
+            headers=admin_headers,
+        )
+        assert reported.status_code == 201, reported.text
+        assert (
+            len(client.get("/v1/community/feed?scope=everyone", headers=headers).json()["items"])
+            == 1
+        )
+        assert client.get("/v1/community/leaderboard", headers=headers).json()["items"] == []
+        export = client.get("/v1/me/export", headers=headers).json()
+        assert export["community"]["profile"]["handle"] == "old_timer"
+        assert len(export["community"]["picks"]) == 1 and len(export["bets"]) == 3
+        assert client.post("/v1/auth/logout", headers=headers).status_code == 204
+        assert client.get("/v1/me", headers=headers).status_code == 401
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0005 added; the 0004 data is untouched.
+    command.downgrade(config, "0004")
+    engine = make_engine(url)
+    tables = set(inspect(engine).get_table_names())
+    assert not TABLES_0005 & tables and tables >= TABLES_0004 | NEW_TABLES
+    assert "search_key" not in {c["name"] for c in inspect(engine).get_columns("users")}
+    assert "sportsbook_key" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+    with engine.connect() as connection:
+        emails = connection.execute(text("SELECT email FROM users ORDER BY created_at, email"))
+        assert list(emails.scalars()) == [
+            "jose@example.test",
+            "old@example.test",
+            "boss@example.test",
+        ]
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 4
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 4
+        names = connection.execute(text("SELECT sportsbook FROM bets ORDER BY id")).scalars()
+        assert list(names) == [b[2] for b in bets]
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004"
+        )
+    engine.dispose()
+
+    # Up again: the keys are backfilled again and the community tables start empty.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        for table in sorted(TABLES_0005):
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+        missing = connection.execute(
+            text("SELECT count(*) FROM bets WHERE sportsbook_key IS NULL")
+        ).scalar()
+        assert missing == 0
+        missing = connection.execute(
+            text("SELECT count(*) FROM users WHERE search_key IS NULL")
+        ).scalar()
+        assert missing == 0
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+    command.check(config)
     engine.dispose()
     command.downgrade(config, "base")
     engine = make_engine(url)
@@ -527,6 +975,165 @@ def test_seed_with_a_provider_adds_alert_rules_and_notifications(session_factory
         assert list(db.scalars(select(AlertRule))) == []
 
 
+def test_seed_adds_no_community_data_while_the_flag_is_off(session_factory) -> None:  # type: ignore[no-untyped-def]
+    provider = SyntheticProvider(seed=20260101, clock=lambda: NOW)
+    with session_factory() as db:
+        seed_demo(db, "demo-password-123", NOW, provider=provider)
+        assert db.scalar(select(func.count()).select_from(CommunityProfile)) == 0
+        assert db.scalar(select(func.count()).select_from(CommunityPick)) == 0
+        assert db.scalar(select(func.count()).select_from(FeatureFlag)) == 0
+        assert [u.email for u in db.scalars(select(User))] == [DEMO_EMAIL]
+
+
+def test_seed_with_community_creates_fictional_profiles_and_is_idempotent(
+    session_factory,  # type: ignore[no-untyped-def]
+    make_settings,  # type: ignore[no-untyped-def]
+) -> None:
+    provider = SyntheticProvider(seed=20260101, clock=lambda: NOW)
+    settings = make_settings()
+
+    def snapshot() -> dict[str, Any]:
+        with session_factory() as db:
+            return {
+                "users": db.scalar(select(func.count()).select_from(User)),
+                "profiles": db.scalar(select(func.count()).select_from(CommunityProfile)),
+                "picks": db.scalar(select(func.count()).select_from(CommunityPick)),
+                "comments": db.scalar(select(func.count()).select_from(CommunityComment)),
+                "follows": db.scalar(select(func.count()).select_from(CommunityFollow)),
+                "likes": db.scalar(select(func.count()).select_from(CommunityLike)),
+                "notifications": db.scalar(select(func.count()).select_from(Notification)),
+            }
+
+    with session_factory() as db:
+        seed_demo(
+            db, "demo-password-123", NOW, provider=provider, settings=settings, with_community=True
+        )
+        # --with-community turns both flags on in this database.
+        assert flags_service.flag_states(db, settings)["community"] is True
+        assert flags_service.flag_states(db, settings)["community_leaderboard"] is True
+    first = snapshot()
+    assert first["profiles"] == len(FICTIONAL_PROFILES) + 1 == 7
+    assert first["users"] == 7 and first["comments"] >= 3
+    assert first["follows"] >= 12 and first["likes"] >= 10
+
+    with session_factory() as db:
+        profiles = {p.handle: p for p in db.scalars(select(CommunityProfile))}
+        assert set(profiles) == {handle for handle, _, _ in FICTIONAL_PROFILES} | {"demo_bettor"}
+        demo = db.scalar(select(User).where(User.email == DEMO_EMAIL))
+        assert profiles["demo_bettor"].user_id == demo.id and profiles["demo_bettor"].is_public
+        # Obviously fictional: the handle says so and so does the bio.
+        for handle, profile in profiles.items():
+            assert profile.is_public and profile.moderation_status == "visible"
+            if handle == "demo_bettor":
+                assert "Demo account" in profile.bio and "Fictional" in profile.bio
+                continue
+            assert handle.split("_")[0] in {
+                "fictional",
+                "sample",
+                "madeup",
+                "placeholder",
+                "notreal",
+                "example",
+            }
+            assert "Fictional demo profile" in profile.bio and "Not a real person" in profile.bio
+        emails = [u.email for u in db.scalars(select(User)) if u.email != DEMO_EMAIL]
+        assert all(email.endswith("@community.oddvex.test") for email in emails)
+        picks = list(db.scalars(select(CommunityPick)))
+        by_user: dict[str, list[CommunityPick]] = {}
+        for pick in picks:
+            by_user.setdefault(pick.user_id, []).append(pick)
+        assert len(by_user) == 7
+        for owned in by_user.values():
+            # A spread of graded and upcoming picks for every profile.
+            assert any(p.status == "graded" for p in owned)
+            assert any(p.status == "pending" and p.event_start_time > NOW for p in owned)
+        graded = [p for p in picks if p.status == "graded"]
+        assert {p.result for p in graded} == {"won", "lost", "push"} or {
+            p.result for p in graded
+        } == {"won", "lost"}
+        assert {p.market for p in picks} == {"moneyline", "spread", "total"}
+        for pick in graded:
+            # Posted before the event, priced, and graded by the grading function from the
+            # event's real (synthetic) final score.
+            assert pick.posted_at < pick.event_start_time and pick.price_decimal > 1
+            event = provider.get_event(pick.event_id)
+            assert event is not None and event.status == "final" and event.score is not None
+            assert (pick.home_score, pick.away_score) == (event.score.home, event.score.away)
+            assert pick.result == grade_leg(
+                pick.market,
+                pick.outcome_key,
+                pick.line,
+                event.score.home,
+                event.score.away,
+                three_way=event.league == "soccer",
+            )
+        assert not [p for p in picks if p.status == "pending" and p.event_start_time <= NOW]
+        # Two profiles have enough graded picks for the leaderboard to rank them.
+        ranked = [
+            owned for owned in by_user.values() if sum(p.status == "graded" for p in owned) >= 30
+        ]
+        assert len(ranked) == 2
+        # Every text in the seed passes the content rules a user's text would have to pass.
+        texts = [p.analysis for p in picks] + [p.bio for p in profiles.values()]
+        texts += [c.body for c in db.scalars(select(CommunityComment))]
+        assert all(check_text(text) is None for text in texts)
+        names = " ".join(p.event_label + p.selection for p in picks)
+        assert not any(name in names for name in REAL_NAMES)
+
+    # Running it again creates nothing new, with or without the option.
+    with session_factory() as db:
+        seed_demo(
+            db, "demo-password-123", NOW, provider=provider, settings=settings, with_community=True
+        )
+    assert snapshot() == first
+    with session_factory() as db:
+        seed_demo(db, "demo-password-123", NOW, provider=provider, settings=settings)
+    assert snapshot() == first
+
+
+def test_seeded_community_is_served_by_the_api(
+    make_app: AppFactory, provider: SyntheticProvider
+) -> None:
+    app = make_app(community_grade_min_seconds=0)
+    Base.metadata.create_all(app.state.engine)
+    with app.state.session_factory() as db:
+        seed_demo(
+            db,
+            app.state.settings.demo_password,
+            provider.now(),
+            provider=provider,
+            settings=app.state.settings,
+            with_community=True,
+        )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": DEMO_EMAIL, "password": app.state.settings.demo_password},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        profile = client.get("/v1/community/profile", headers=headers).json()
+        assert (profile["handle"], profile["is_public"], profile["can_post"]) == (
+            "demo_bettor",
+            True,
+            True,
+        )
+        assert profile["following_count"] == 3 and profile["record"]["picks"] >= 4
+        assert profile["record"]["sample_note"]  # a handful of picks: the note says so
+        following = client.get("/v1/community/feed", headers=headers).json()["items"]
+        everyone = client.get(
+            "/v1/community/feed", params={"scope": "everyone", "limit": 100}, headers=headers
+        ).json()["items"]
+        assert following and len(everyone) == 100
+        assert {p["status"] for p in everyone} >= {"pending", "graded"}
+        board = client.get("/v1/community/leaderboard", headers=headers).json()
+        assert [row["handle"] for row in board["items"]] and len(board["items"]) == 2
+        assert {row["handle"] for row in board["items"]} == {"fictional_fox", "sample_sam"}
+        assert all(row["record"]["picks"] >= 30 for row in board["items"])
+        assert "example.test" not in str(everyone) and "oddvex.test" not in str(everyone)
+    app.state.engine.dispose()
+
+
 def test_demo_user_can_log_in_and_see_a_summary(make_app: AppFactory) -> None:
     app = make_app(auto_seed_demo=True, demo_password="demo-password-123")
     with TestClient(app) as client:
@@ -588,6 +1195,103 @@ def test_seed_script_refuses_production(tmp_path: Path) -> None:
         [sys.executable, script], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
     )
     assert "0 bet(s) created" in second.stdout
+    # No administrator unless the operator asks for one.
+    assert "No admin user created" in first.stdout and "No admin user created" in second.stdout
+    engine = make_engine(env["DATABASE_URL"])
+    with make_session_factory(engine)() as db:
+        assert [u.email for u in db.scalars(select(User))] == [DEMO_EMAIL]
+        assert db.scalar(select(User)).email_verified is True
+
+    env["ODDVEX_ADMIN_EMAILS"] = "someone@example.test, admin@oddvex.test"
+    for _ in range(2):  # idempotent
+        third = subprocess.run(
+            [sys.executable, script],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert third.returncode == 0, third.stderr
+        assert "Admin user admin@oddvex.test ready (role: admin)." in third.stdout
+        assert "0 bet(s) created" in third.stdout
+    with make_session_factory(engine)() as db:
+        users = {u.email: u for u in db.scalars(select(User))}
+        assert set(users) == {DEMO_EMAIL, DEMO_ADMIN_EMAIL}  # nobody else was invented
+        assert (users[DEMO_ADMIN_EMAIL].role, users[DEMO_EMAIL].role) == ("admin", "user")
+        assert users[DEMO_ADMIN_EMAIL].email_verified is True
+        assert db.scalar(select(func.count()).select_from(CommunityProfile)) == 0
+    assert "Community flag is off" in third.stdout
+
+    # --with-community turns the flags on in that database and adds the fictional profiles.
+    for _ in range(2):  # idempotent
+        fourth = subprocess.run(
+            [sys.executable, script, "--with-community"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert fourth.returncode == 0, fourth.stderr
+        assert "Community: 7 profile(s)" in fourth.stdout and "demo_bettor" in fourth.stdout
+    with make_session_factory(engine)() as db:
+        assert db.scalar(select(func.count()).select_from(CommunityProfile)) == 7
+        picks = db.scalar(select(func.count()).select_from(CommunityPick))
+        enabled = {f.key for f in db.scalars(select(FeatureFlag)) if f.enabled}
+        assert enabled == {"community", "community_leaderboard"}
+    # From then on the plain script keeps the community data up to date as well.
+    fifth = subprocess.run(
+        [sys.executable, script], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
+    )
+    assert fifth.returncode == 0 and "Community: 7 profile(s)" in fifth.stdout
+    with make_session_factory(engine)() as db:
+        assert db.scalar(select(func.count()).select_from(CommunityPick)) == picks
+    # The grading script runs against the same database and finds nothing left to grade.
+    graded = subprocess.run(
+        [sys.executable, str(API_ROOT / "scripts" / "grade_picks.py")],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert graded.returncode == 0, graded.stderr
+    assert "0 graded, 0 voided" in graded.stdout
+    engine.dispose()
+
+
+def test_seed_verifies_the_demo_user_and_only_creates_a_listed_admin(
+    session_factory,
+    make_settings,  # type: ignore[no-untyped-def]
+) -> None:
+    with session_factory() as db:
+        seed_demo(db, "pw-one-1234", NOW)
+        seed_demo(db, "pw-one-1234", NOW, settings=make_settings())
+        seed_demo(db, "pw-one-1234", NOW, settings=make_settings(admin_emails="x@example.test"))
+        (demo,) = db.scalars(select(User))
+        assert demo.email == DEMO_EMAIL and demo.email_verified_at == NOW
+        assert (demo.role, demo.plan, demo.status) == ("user", "free", "active")
+
+        # A demo user from before email verification existed is marked verified too.
+        demo.email_verified_at = None
+        db.commit()
+        later = NOW + timedelta(days=1)
+        listed = make_settings(admin_emails="admin@oddvex.test")
+        assert seed_demo(db, "pw-two-5678", later, settings=listed) == 0
+        users = {u.email: u for u in db.scalars(select(User))}
+        assert set(users) == {DEMO_EMAIL, DEMO_ADMIN_EMAIL}
+        assert users[DEMO_EMAIL].email_verified_at == later
+        admin = users[DEMO_ADMIN_EMAIL]
+        assert (admin.role, admin.email_verified_at) == ("admin", later)
+        first_hash = admin.password_hash
+
+        # Idempotent: no second admin, password untouched.
+        seed_demo(db, "pw-three-9012", later, settings=listed)
+        assert len(list(db.scalars(select(User)))) == 2
+        db.refresh(admin)
+        assert admin.password_hash == first_hash
+        assert db.scalar(select(Bet.id).where(Bet.user_id == admin.id)) is None
 
 
 # -------------------------------------------------------------------- OpenAPI
@@ -649,6 +1353,50 @@ EXPECTED_OPERATIONS = {
     ("DELETE", "/v1/sync/connections/{connection_id}"): "delete_sync_connection",
     ("POST", "/v1/assistant/query"): "assistant_query",
     ("GET", "/v1/admin/overview"): "get_admin_overview",
+    ("GET", "/v1/flags"): "list_flags",
+    ("GET", "/v1/me/entitlements"): "get_entitlements",
+    ("GET", "/v1/value"): "list_value",
+    ("GET", "/v1/bets/analytics"): "get_bet_analytics",
+    ("GET", "/v1/admin/users"): "admin_list_users",
+    ("POST", "/v1/admin/users/{user_id}/suspend"): "admin_suspend_user",
+    ("POST", "/v1/admin/users/{user_id}/unsuspend"): "admin_unsuspend_user",
+    ("PUT", "/v1/admin/users/{user_id}/plan"): "admin_set_user_plan",
+    ("GET", "/v1/admin/flags"): "admin_list_flags",
+    ("PUT", "/v1/admin/flags/{key}"): "admin_set_flag",
+    ("GET", "/v1/admin/audit"): "admin_list_audit",
+    ("GET", "/v1/admin/email-outbox"): "admin_list_email_outbox",
+    ("POST", "/v1/auth/verify-email/request"): "request_email_verification",
+    ("POST", "/v1/auth/verify-email/confirm"): "confirm_email_verification",
+    ("POST", "/v1/auth/password-reset/request"): "request_password_reset",
+    ("POST", "/v1/auth/password-reset/confirm"): "confirm_password_reset",
+    ("GET", "/v1/dev/email-outbox/latest"): "dev_latest_email",
+    ("POST", "/v1/auth/logout"): "logout",
+    ("GET", "/v1/community/guidelines"): "get_community_guidelines",
+    ("PUT", "/v1/community/profile"): "upsert_my_profile",
+    ("GET", "/v1/community/profile"): "get_my_profile",
+    ("GET", "/v1/community/profiles/{handle}"): "get_profile",
+    ("POST", "/v1/community/picks"): "create_pick",
+    ("GET", "/v1/community/picks"): "list_picks",
+    ("GET", "/v1/community/picks/{pick_id}"): "get_pick",
+    ("DELETE", "/v1/community/picks/{pick_id}"): "delete_pick",
+    ("GET", "/v1/community/feed"): "get_feed",
+    ("PUT", "/v1/community/picks/{pick_id}/like"): "like_pick",
+    ("DELETE", "/v1/community/picks/{pick_id}/like"): "unlike_pick",
+    ("POST", "/v1/community/picks/{pick_id}/comments"): "create_comment",
+    ("GET", "/v1/community/picks/{pick_id}/comments"): "list_comments",
+    ("DELETE", "/v1/community/comments/{comment_id}"): "delete_comment",
+    ("POST", "/v1/community/follows/{handle}"): "follow_profile",
+    ("DELETE", "/v1/community/follows/{handle}"): "unfollow_profile",
+    ("GET", "/v1/community/following"): "list_following",
+    ("GET", "/v1/community/followers"): "list_followers",
+    ("PUT", "/v1/community/blocks/{handle}"): "block_profile",
+    ("DELETE", "/v1/community/blocks/{handle}"): "unblock_profile",
+    ("GET", "/v1/community/blocks"): "list_blocks",
+    ("POST", "/v1/community/reports"): "create_report",
+    ("GET", "/v1/community/leaderboard"): "get_leaderboard",
+    ("GET", "/v1/admin/community/overview"): "admin_community_overview",
+    ("GET", "/v1/admin/community/reports"): "admin_list_reports",
+    ("POST", "/v1/admin/community/reports/{report_id}/resolve"): "admin_resolve_report",
 }
 
 

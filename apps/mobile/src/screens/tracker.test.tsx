@@ -6,6 +6,7 @@ import type { BetSummary } from '@/api/types';
 import { TrackerScreen } from '@/screens/tracker';
 import { installFetch, jsonResponse } from '@/test/api';
 import { lostSyncedBet, openBet, reminderExceeded, wonBet } from '@/test/fixtures';
+import { WithFlags } from '@/test/flags';
 import { fakeSession, WithSession } from '@/test/session';
 
 const summary: BetSummary = {
@@ -69,6 +70,31 @@ describe('TrackerScreen', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Create an account' }));
     expect(router.push).toHaveBeenCalledWith('/signup');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('links to Analytics only while its flag is on', async () => {
+    const { fetchMock } = installFetch();
+    serve(fetchMock);
+    const off = await render(
+      <WithFlags flags={{ tracker_analytics: false }}>
+        <WithSession value={fakeSession()}>
+          <TrackerScreen />
+        </WithSession>
+      </WithFlags>,
+    );
+    expect(await screen.findByRole('button', { name: 'Log a bet' })).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Open analytics' })).toBeNull();
+    await off.unmount();
+
+    await render(
+      <WithFlags flags={{ tracker_analytics: true }}>
+        <WithSession value={fakeSession()}>
+          <TrackerScreen />
+        </WithSession>
+      </WithFlags>,
+    );
+    await fireEvent.press(await screen.findByRole('button', { name: 'Open analytics' }));
+    expect(router.push).toHaveBeenCalledWith('/analytics');
   });
 
   it('shows the performance summary and the open and settled bets', async () => {

@@ -390,6 +390,9 @@ ALL_ON = {
     "bet_settled": True,
     "sync_finished": True,
     "stake_reminder": True,
+    "new_follower": True,
+    "pick_comment": True,
+    "pick_graded": True,
 }
 
 

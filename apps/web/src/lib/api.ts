@@ -1,26 +1,39 @@
 import "server-only";
-import { cookies } from "next/headers";
+import { cookies, headers as incomingHeaders } from "next/headers";
+import { API_URL, SESSION_COOKIE } from "@/lib/config";
+import { isRequestId, upstreamMetaHeaders } from "@/lib/request-meta";
 
-export const API_URL = (process.env.ODDVEX_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
-export const SESSION_COOKIE = "ov_session";
+export { API_URL, SESSION_COOKIE };
 
 export class ApiError extends Error {
+  /**
+   * Next.js keeps an error's own `digest` and hands it to the client error boundary (the
+   * message is redacted in production), so the request id is what `app/app/error.tsx` shows
+   * as "Reference <id>". The same id is in the API's log line for the failed call.
+   */
+  digest?: string;
+
   constructor(
     public status: number,
     public code: string,
     message: string,
     public details?: unknown,
+    public requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
+    if (requestId) this.digest = requestId;
   }
 }
 
 /** Thrown when the API cannot be reached at all, as opposed to answering with an error. */
 export class ApiUnavailableError extends Error {
-  constructor() {
+  digest?: string;
+
+  constructor(public requestId?: string) {
     super("The OddVex API is not reachable.");
     this.name = "ApiUnavailableError";
+    if (requestId) this.digest = requestId;
   }
 }
 
@@ -40,7 +53,7 @@ export function withQuery(path: string, query?: Query): string {
   return qs ? `${path}?${qs}` : path;
 }
 
-export async function parseError(response: Response): Promise<ApiError> {
+export async function parseError(response: Response, requestId?: string): Promise<ApiError> {
   let code = "http_error";
   let message = `Request failed (${response.status}).`;
   let details: unknown;
@@ -52,18 +65,30 @@ export async function parseError(response: Response): Promise<ApiError> {
       details = body.error.details;
     }
   } catch {}
-  return new ApiError(response.status, code, message, details);
+  // Prefer the id the API actually logged; it equals ours unless the API replaced it.
+  const upstreamId = response.headers.get("x-request-id");
+  return new ApiError(response.status, code, message, details, isRequestId(upstreamId) ? upstreamId : requestId);
 }
 
 /**
  * Server-side API call. Data is live by nature, so nothing is cached here.
  * Pass `auth: true` to attach the session token.
+ *
+ * Every call forwards the visitor's address (`X-Forwarded-For`) and a request id
+ * (`X-Request-ID`, set once per request by `src/proxy.ts`), so the API can rate-limit per
+ * visitor instead of per web server and its logs can be joined to a web error. The API only
+ * honours `X-Forwarded-For` when `ODDVEX_TRUST_PROXY=true`; see `lib/request-meta.ts`.
+ *
+ * Reading request headers makes the calling route dynamic, so `api()` may only be called from
+ * request-scoped code (the `/app` tree, auth pages, server actions), never at module scope
+ * and never from a marketing page, which must stay static.
  */
 export async function api<T>(
   path: string,
   options: { query?: Query; method?: string; body?: unknown; auth?: boolean } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { accept: "application/json" };
+  const meta = upstreamMetaHeaders(await incomingHeaders());
+  const headers: Record<string, string> = { accept: "application/json", ...meta.headers };
   if (options.body !== undefined) headers["content-type"] = "application/json";
   if (options.auth) {
     const token = await sessionToken();
@@ -79,9 +104,9 @@ export async function api<T>(
       signal: AbortSignal.timeout(8000),
     });
   } catch {
-    throw new ApiUnavailableError();
+    throw new ApiUnavailableError(meta.requestId);
   }
-  if (!response.ok) throw await parseError(response);
+  if (!response.ok) throw await parseError(response, meta.requestId);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

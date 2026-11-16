@@ -72,3 +72,26 @@ export function formatDay(iso: string, timeZone = "America/New_York"): string {
 export function titleCase(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/** Swaps the ASCII hyphen in front of a figure for a true minus: "-199 to -110" is "−199 to −110". */
+export function typographicMinus(label: string): string {
+  return label.replace(/(^|[\s(])-(?=[$\d.])/g, "$1−");
+}
+
+/** A run of results in neutral words: "3 wins", "1 loss", "None". */
+export function formatStreak(kind: string, length: number): string {
+  if (length <= 0 || (kind !== "win" && kind !== "loss")) return "None";
+  if (kind === "win") return `${length} ${length === 1 ? "win" : "wins"}`;
+  return `${length} ${length === 1 ? "loss" : "losses"}`;
+}
+
+/** Width of an inline bar: `count` as a share of `total`, clamped to 0..1. Display only. */
+export function shareOf(count: number, total: number): number {
+  if (!Number.isFinite(count) || !Number.isFinite(total) || total <= 0) return 0;
+  return Math.max(0, Math.min(1, count / total));
+}
+
+/** An absolute timestamp for logs and admin tables: "Nov 16, 2:14 PM ET". */
+export function formatDateTime(iso: string, timeZone = "America/New_York"): string {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone, timeZoneName: "short" }).format(new Date(iso));
+}

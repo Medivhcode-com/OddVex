@@ -46,6 +46,19 @@ BANNED_PHRASES = (
     "place your bet",
     "bet on",
     "smash",
+    # Added with the community notifications: no praise for results, no encouragement
+    # to keep going, nothing that reads a run of results as a sign of what comes next.
+    "hot streak",
+    "on fire",
+    "keep it going",
+    "you're due",
+    "youre due",
+    "congrat",
+    "well done",
+    "nice pick",
+    "great pick",
+    "winning streak",
+    "on a roll",
 )
 #: Words that would make a notification a prediction or a nudge.
 BANNED_WORDS = ("probability", "chance", "likely", "odds-on", "should", "must", "now", "quick")
@@ -137,6 +150,31 @@ def rendered() -> list[NotificationDraft]:
             threshold=Decimal("500"),
         )
     )
+    # Community.
+    drafts.append(templates.new_follower(follower_id="u1", handle="sample_sam"))
+    drafts.append(
+        templates.pick_comment(
+            comment_id="c1",
+            pick_id="p1",
+            handle="sample_sam",
+            selection="Harbor City Tides -3.5 spread",
+        )
+    )
+    drafts += [
+        templates.pick_graded(
+            pick_id="p1",
+            selection=selection,
+            event_label="Ironvale Anvils at Harbor City Tides",
+            result=result,
+            home_score=101,
+            away_score=99,
+        )
+        for selection, result in (
+            ("Harbor City Tides moneyline", "won"),
+            ("Ironvale Anvils +3.5 spread", "lost"),
+            ("Over 200 in Ironvale Anvils at Harbor City Tides", "push"),
+        )
+    ]
     return drafts
 
 
@@ -267,5 +305,7 @@ def test_wins_and_losses_get_the_same_plain_wording() -> None:
 def test_links_point_at_app_routes() -> None:
     for draft in rendered():
         assert re.fullmatch(
-            r"/app/(games/[\w-]+(\?market=(moneyline|spread|total))?|tracker)", draft.href
+            r"/app/(games/[\w-]+(\?market=(moneyline|spread|total))?|tracker"
+            r"|community/picks/[\w-]+|community/profiles/[a-z0-9_]+)",
+            draft.href,
         )

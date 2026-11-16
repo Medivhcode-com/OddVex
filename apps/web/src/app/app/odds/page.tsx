@@ -6,6 +6,7 @@ import { AutoRefresh } from "@/components/app/auto-refresh";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState, Panel, Segmented } from "@/components/ui/primitives";
 import { api, withQuery } from "@/lib/api";
+import { flagOn, getFlags } from "@/lib/flags";
 import { formatLine, formatPercent } from "@/lib/format";
 import { getLeagues, MARKETS, pick } from "@/lib/leagues";
 import type { EventSummary, OddsComparison } from "@/lib/types";
@@ -26,6 +27,7 @@ export default async function OddsPage({ searchParams }: { searchParams: Promise
       api<OddsComparison>(`/v1/events/${encodeURIComponent(event.id)}/odds`, { query: { market } }).catch(() => null),
     ),
   );
+  const valueScreen = flagOn(await getFlags(), "value_screen");
   const href = (next: { league?: string; market?: string }) =>
     withQuery("/app/odds", { league: next.league ?? league, market: next.market ?? market });
 
@@ -36,6 +38,14 @@ export default async function OddsPage({ searchParams }: { searchParams: Promise
         <Segmented label="League" current={league} options={leagues.map((l) => ({ value: l.key, label: l.name, href: href({ league: l.key }) }))} />
         <Segmented label="Market" current={market} options={MARKETS.map((m) => ({ value: m.value, label: m.label, href: href({ market: m.value }) }))} />
       </div>
+
+      {valueScreen ? (
+        <p className="mb-4 text-sm text-muted">
+          <Link href={withQuery("/app/value", { league, market })} className="inline-flex min-h-11 items-center text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink">
+            Compare the best prices with the consensus of the other books
+          </Link>
+        </p>
+      ) : null}
 
       {shown.length === 0 ? (
         <Panel>

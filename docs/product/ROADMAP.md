@@ -53,6 +53,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 
 ## M2 — Real Data & Production Foundations (planned)
 
+**Status as of 2026-11-16:** built without crossing a gate, on synthetic data: watchlist persistence, auto-settlement, line movement, account deletion and export, audit log, mobile sign-in and account settings (mobile unverified on a device). In progress: email verification and password reset that write to an outbox table and send nothing. Not built: hedge and arbitrage calculators, waitlist, analytics. Gated and not started: licensed data provider and historical odds from a real feed (G-01; provider choice deferred), production infrastructure (G-02, G-03; Vercel, Neon and Resend are stated preferences, not approvals; plan in `infrastructure/DEPLOYMENT_PLAN.md`), real email (G-06), counsel review (G-10; packet in `docs/compliance/COUNSEL_REVIEW_PACKET.md`), closed beta. No exit criterion below is met. See `BUILD_STATUS.md`.
+
 **Scope:** licensed provider integration (DATA-03), historical odds store (DATA-05), line movement (ODDS-07), auto-settlement (TRKR-06), favorites/watchlists persistence (GAME-05, PROP-07, HOME-04), email verification/reset (AUTH-04), account deletion/export (AUTH-06), admin audit log + basic data health (ADMN-07/04), production infrastructure (PLAT-03), analytics (PLAT-04), waitlist (MKT-04), mobile auth (MOB-02), hedge/arb calculators (INTL-07), closed web beta.
 
 **Exit criteria**
@@ -67,6 +69,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 
 ## M3 — Engagement & Mobile Parity (planned)
 
+**Status as of 2026-11-16:** built without crossing a gate: alerts engine and in-app notifications with per-type preferences (evaluated when the app is opened or by script; no background worker), weekly staking reminder (a reminder, not a limit), mobile screens for props, calculators, parlay research and tracker (never run on a device). In progress: feature flags. Not built: MFA, alt lines, injuries and lineups, quiet hours. Gated and not started: push and email delivery (G-02, G-06), real sync vendor (G-01), outbound sportsbook links (G-10, G-11; no decision), VoiceOver and TalkBack pass (needs device testing).
+
 **Scope:** alerts engine and push/email notifications (INTL-11, NOTF-01/02, ODDS-12, PROP-08, GAME-08), mobile parity for props/tools/parlay/tracker (PROP-09, INTL-12, PRLY-07, TRKR-11), real sync vendor (SYNC-05/07), alt lines/markets (ODDS-10), injuries/lineups (GAME-07), feature flags (ADMN-06), MFA (AUTH-05), RG tools (SET-03, TRKR-10), outbound sportsbook links if approved (ODDS-09).
 
 **Exit criteria**
@@ -77,6 +81,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 - [ ] Decision recorded on affiliate/outbound links after counsel's state-by-state review.
 
 ## M4 — Premium & Advanced Intelligence (planned)
+
+**Status as of 2026-11-16:** in progress without crossing a gate, on synthetic data: entitlements without billing (both plans identical, gating off), a market discrepancy (value) screen, advanced tracker analytics. Their wording has not had the claims review this milestone calls for (G-14). Gated and not started: pricing and billing (G-07, G-11), LLM-backed assistant (G-01), projections and backtesting, quantified correlation.
 
 **Scope:** entitlements and billing (PREM-01…07), LLM-backed assistant with eval suite (AI-07/08/09/11/12, ADMN-09), projections and backtesting (PROP-06, INTL-10), market discrepancy screen (INTL-09), quantified correlation (PRLY-06), advanced tracker analytics (TRKR-13).
 
@@ -89,6 +95,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 
 ## M5 — Community & Admin Console (planned)
 
+**Status as of 2026-11-16:** built: a read-only admin overview page. In progress: admin user management, and a community module behind a flag that is off by default. Gated: turning community on for anyone (G-10; no guidelines, moderation policy, reporting flow or staffing exist).
+
 **Scope:** COMM-01…08, ADMN-02/03/05/08.
 
 **Exit criteria**
@@ -99,6 +107,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 - [ ] Leaderboards decision made after RG review.
 
 ## M6 — Store Submission & Public Launch (planned)
+
+**Status as of 2026-11-16:** documentation prepared, nothing executed: `docs/marketing/STORE_SUBMISSION_PREP.md`, `docs/product/GO_NO_GO_TEMPLATE.md`, `docs/product/SUPPORT_READINESS.md`, `infrastructure/ROLLBACK_PLAN.md`, `infrastructure/RUNBOOK.md`, `docs/compliance/THREAT_MODEL.md`. Gated and not started: store accounts and submission (G-04), launch marketing (G-05), production (G-03), penetration test (G-02). The mobile app has never run on a device and no rollback has been rehearsed.
 
 **Scope:** App Store and Google Play submission (MOB-03), launch marketing (LAUNCH_PLAN_DRAFT), production hardening, support readiness.
 

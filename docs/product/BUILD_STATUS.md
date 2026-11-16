@@ -7,12 +7,12 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 
 | Area | Check | Result |
 |---|---|---|
-| API | `pytest` in `services/api` (SQLite) | 754 passed, 1 skipped (PostgreSQL-only concurrency test) |
-| API | Same suite on PostgreSQL 16 | 757 passed (run locally by the backend build; also a CI job) |
+| API | `pytest` in `services/api` (SQLite) | 1,209 passed, 1 skipped (PostgreSQL-only concurrency test) |
+| API | Same suite on PostgreSQL 16 | 1,214 passed (run locally by the backend build; also a CI job) |
 | API | `ruff check`, `ruff format --check`, OpenAPI export `--check` | Clean |
-| Web | Playwright end to end, real API + production build, desktop and phone viewports, including automated WCAG A/AA checks in both themes | 171 passed |
-| Web | ESLint, `tsc --noEmit`, Vitest | Clean, 12 unit tests passed |
-| Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 256 tests passed |
+| Web | Playwright end to end, real API + production build, desktop and phone viewports, including automated WCAG A/AA checks in both themes | 325 passed |
+| Web | ESLint, `tsc --noEmit`, Vitest | Clean, 50 unit tests passed |
+| Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 470 tests passed |
 | Mobile | `expo export` for iOS and Android (JS bundle only) | Bundled |
 
 ## Built
@@ -57,6 +57,29 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 Limits: alerts are evaluated when the user opens the app or when `scripts/evaluate_alerts.py` runs. There is no
 background worker, and nothing is delivered by push or email, both of which need Founder approval.
 
+## Added from milestones 4 to 6 (code only; nothing deployed, purchased or published)
+
+- **Value screen:** where the best open price beats the no-vig consensus of the other books, with the method and a
+  caveat that this is not proof of an edge. Web and mobile.
+- **Tracker analytics:** results by odds band, weekday and month, streaks described neutrally, closing line value
+  and stake distribution, with a caution when the sample is small. Web and mobile.
+- **Feature flags and plans:** flags drive navigation on web and mobile. Plans exist (free, premium) and can be set
+  by an admin, but there is no billing and nothing is gated: both plans get the same features.
+- **Admin console (web):** users (search, suspend with a reason, set plan), flags, audit log, email outbox.
+- **Email flows without sending:** verification and password reset write to an outbox table. No email leaves the
+  system. The flag is off by default in production.
+- **Community (off by default):** opt-in profiles, structured picks graded from final scores, follows, a feed,
+  comments, likes, blocks, reports, automatic content rules and a moderation queue. The leaderboard has a second
+  flag, also off. Web and mobile; moderation is web only.
+- **Security hardening:** content security policy and HSTS on the web app, visitor address and request id forwarded
+  to the API, server-side logout (ends every session for the account), per-account login throttling, a security
+  regression suite, and a dependency audit in CI.
+- **Launch documents:** deployment plan (not executed), runbook, rollback plan, threat model, counsel review packet,
+  store submission prep, go/no-go template, support playbook and decision log.
+
+Before the community flags are turned on anywhere real: legal review of user-generated content, a responsible
+gambling review of the leaderboard, and staffed moderation. The content rules are blunt and do not replace people.
+
 ## Milestone 2 items that need Founder approval and are not started
 
 Licensed data provider, production infrastructure, counsel review of legal pages and age gating, closed beta, real
@@ -72,8 +95,7 @@ email (verification, password reset), historical odds storage against a real fee
 
 ## Not built
 
-Real data provider, push and email notifications, a background worker for alerts, community, premium billing and entitlements, admin actions
-(user management, moderation, feature flags), LLM-backed assistant, model projections and backtesting, password reset by email, refresh tokens, production
+Real data provider, push and email delivery, a background worker for alerts and pick grading, premium billing, LLM-backed assistant, model projections and backtesting, refresh tokens, multi-factor sign-in, production
 infrastructure, store submission, analytics instrumentation, error monitoring.
 
 ## Known gaps inside what is built

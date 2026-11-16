@@ -25,13 +25,18 @@ from .bets import service
 from .bets.schemas import BetCreate, BetLegIn, BetSettleRequest, LegResultIn
 from .board import Board
 from .cache import InMemoryTTLCache
+from .community.seed import seed_demo_community
 from .config import Settings, get_settings
 from .db import AlertRule, Bet, User
 from .errors import ApiError
+from .flags import service as flags_service
 from .providers import Event, SportsDataProvider
 
 DEMO_EMAIL = "demo@oddvex.test"
 DEMO_DISPLAY_NAME = "Demo Bettor"
+#: Created by the seed only when ``ODDVEX_ADMIN_EMAILS`` lists it. There is no default admin.
+DEMO_ADMIN_EMAIL = "admin@oddvex.test"
+DEMO_ADMIN_DISPLAY_NAME = "Demo Admin"
 SEED_PROVIDER = "demo-seed"
 DEMO_BET_COUNT = 40
 #: Extra pending bets with structured legs on events that are already final, so
@@ -305,6 +310,34 @@ def seed_demo_alerts(
     return len(rules)
 
 
+def seed_demo_admin(db: Session, password: str, now: datetime, settings: Settings | None) -> bool:
+    """Make sure ``admin@oddvex.test`` exists as an administrator, but only when the
+    operator listed that address in ``ODDVEX_ADMIN_EMAILS``. Returns whether it is there.
+
+    Without that setting nothing is created: the seed never invents an administrator.
+    An existing account keeps its password and is promoted, as it would be at login.
+    """
+    if settings is None or DEMO_ADMIN_EMAIL not in settings.admin_email_set:
+        return False
+    admin = db.scalar(select(User).where(User.email == DEMO_ADMIN_EMAIL))
+    if admin is None:
+        admin = User(
+            email=DEMO_ADMIN_EMAIL,
+            password_hash=hash_password(password),
+            display_name=DEMO_ADMIN_DISPLAY_NAME,
+            role="admin",
+            age_confirmed_at=now,
+            email_verified_at=now,
+        )
+        db.add(admin)
+    else:
+        admin.role = "admin"
+        if admin.email_verified_at is None:
+            admin.email_verified_at = now
+    db.flush()
+    return True
+
+
 def seed_demo(
     db: Session,
     password: str,
@@ -312,6 +345,7 @@ def seed_demo(
     seed: int = DEMO_SEED,
     provider: SportsDataProvider | None = None,
     settings: Settings | None = None,
+    with_community: bool = False,
 ) -> int:
     """Create the demo user and any missing demo bets. Returns the number of bets created.
 
@@ -319,7 +353,15 @@ def seed_demo(
     creates nothing new. An existing demo user's password is left untouched.
     With a ``provider``, ``DEMO_GRADEABLE_COUNT`` pending bets on already final
     events are added as well (see :func:`_gradeable_bets`), and so are a few alert rules
-    with the notifications they produce (see :func:`seed_demo_alerts`).
+    with the notifications they produce (see :func:`seed_demo_alerts`). The demo user's
+    email counts as verified. With ``settings`` whose ``ODDVEX_ADMIN_EMAILS`` lists
+    ``admin@oddvex.test``, that administrator is created too (:func:`seed_demo_admin`).
+
+    With a ``provider`` and the ``community`` flag on in this database, fictional
+    community profiles with picks, comments, follows and likes are added and the demo
+    user gets the public profile ``demo_bettor`` (:mod:`oddvex_api.community.seed`).
+    ``with_community`` first turns the ``community`` and ``community_leaderboard`` flags
+    on in this database, which makes the community visible to everyone using it.
     """
     user = db.scalar(select(User).where(User.email == DEMO_EMAIL))
     if user is None:
@@ -332,6 +374,9 @@ def seed_demo(
         )
         db.add(user)
         db.flush()
+    if user.email_verified_at is None:
+        user.email_verified_at = now
+    seed_demo_admin(db, password, now, settings)
     existing = set(
         db.scalars(
             select(Bet.external_bet_id).where(
@@ -402,5 +447,12 @@ def seed_demo(
             created += 1
         db.flush()
         seed_demo_alerts(db, user, provider, now, settings)
+        resolved = settings or get_settings()
+        if with_community:
+            for key in ("community", "community_leaderboard"):
+                flags_service.set_flag(db, key, True, resolved)
+            db.flush()
+        if flags_service.is_enabled(db, "community", resolved):
+            seed_demo_community(db, user, user.password_hash, provider, now, resolved)
     db.commit()
     return created

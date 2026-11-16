@@ -155,6 +155,27 @@ jobs:
         if: failure()
         run: docker logs api; docker logs web
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JavaScript dependencies (fails on high or critical)
+        run: pnpm audit --prod --audit-level high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Python dependencies (fails on any known vulnerability)
+        run: |
+          python -m venv /tmp/api-venv
+          /tmp/api-venv/bin/pip install ./services/api
+          pip install pip-audit
+          pip-audit --path "$(/tmp/api-venv/bin/python -c 'import site; print(site.getsitepackages()[0])')"
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

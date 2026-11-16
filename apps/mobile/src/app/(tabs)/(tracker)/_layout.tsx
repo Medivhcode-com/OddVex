@@ -10,6 +10,7 @@ export default function TrackerLayout() {
     <Stack screenOptions={options}>
       <Stack.Screen name="tracker" options={{ title: 'Bet tracker' }} />
       <Stack.Screen name="log-bet" options={{ title: 'Log a bet' }} />
+      <Stack.Screen name="analytics" options={{ title: 'Analytics' }} />
     </Stack>
   );
 }

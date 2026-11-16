@@ -5,8 +5,28 @@ import type {
   AlertState,
   AssistantReply,
   AuthResponse,
+  BlockEntry,
+  BlockState,
+  CommentPage,
+  CommunityPick,
+  CommunityGuidelines,
+  CommunityProfile,
+  FeedScope,
+  FollowState,
+  Leaderboard,
+  LeaderboardWindow,
+  LikeState,
+  MyCommunityProfile,
+  PickComment,
+  PickCreate,
+  PickPage,
+  PickStatus,
+  ProfileUpsert,
+  Report,
+  ReportCreate,
   AutoSettle,
   Bet,
+  BetAnalytics,
   BetCreate,
   BetSettle,
   BetSummary,
@@ -14,12 +34,16 @@ import type {
   Book,
   ClvResult,
   ConvertResult,
+  EmailVerification,
+  Entitlements,
   EventDetail,
   EventStatus,
   EventSummary,
   EvResult,
+  Flags,
   League,
   Market,
+  Message,
   Meta,
   Notification,
   NotificationList,
@@ -29,6 +53,8 @@ import type {
   OddsComparison,
   ParlayRequest,
   ParlayResult,
+  PasswordResetConfirm,
+  PasswordResetRequest,
   PropAnalysis,
   PropBoardRow,
   PropSplit,
@@ -39,6 +65,7 @@ import type {
   SyncProvider,
   SyncRun,
   User,
+  ValueScreen,
   WatchItem,
   WatchKind,
 } from '@/api/types';
@@ -47,12 +74,16 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:800
 
 const TIMEOUT_MS = 8000;
 
-/** The API answered, but with an error. `code` and `message` come from its `{error:{code,message}}` envelope. */
+/**
+ * The API answered, but with an error. `code`, `message` and the optional `details` come from its
+ * `{error:{code,message,details}}` envelope.
+ */
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -82,7 +113,7 @@ export function withQuery(path: string, query?: Query): string {
 // The bearer token lives in memory here and in SecureStore (see src/session/store.ts). The session provider
 // is the only caller of these two setters.
 let authToken: string | null = null;
-let unauthorizedHandler: (() => void) | null = null;
+let unauthorizedHandler: ((error: ApiError) => void) | null = null;
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
@@ -92,24 +123,29 @@ export function getAuthToken(): string | null {
   return authToken;
 }
 
-/** Called when the API rejects the token the app holds (401 on a request that sent it). */
-export function setUnauthorizedHandler(handler: (() => void) | null): void {
+/**
+ * Called when the API rejects the token the app holds (401 on a request that sent it). The error says why:
+ * an expired or replaced token, or `account_suspended`.
+ */
+export function setUnauthorizedHandler(handler: ((error: ApiError) => void) | null): void {
   unauthorizedHandler = handler;
 }
 
 async function parseError(response: Response): Promise<ApiError> {
   let code = 'http_error';
   let message = `Request failed (${response.status}).`;
+  let details: unknown;
   try {
     const body = await response.json();
     if (body?.error) {
       code = body.error.code ?? code;
       message = body.error.message ?? message;
+      details = body.error.details ?? undefined;
     }
   } catch {
     // Not JSON. Keep the generic message.
   }
-  return new ApiError(response.status, code, message);
+  return new ApiError(response.status, code, message, details);
 }
 
 type RequestOptions = {
@@ -122,6 +158,8 @@ type RequestOptions = {
    * `optional`: sends the token when there is one (the assistant answers more when it knows who is asking).
    */
   auth?: 'none' | 'required' | 'optional';
+  /** A 401 to this request is not reported to the unauthorized handler. Only log out uses it. */
+  quietUnauthorized?: boolean;
 };
 
 /**
@@ -163,7 +201,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (!response.ok) {
     const error = await parseError(response);
     // Only a rejected token ends the session, and only if it is still the one in use.
-    if (response.status === 401 && token && token === authToken) unauthorizedHandler?.();
+    if (response.status === 401 && token && token === authToken && !options.quietUnauthorized) unauthorizedHandler?.(error);
     throw error;
   }
   if (response.status === 204) return undefined as T;
@@ -234,6 +272,31 @@ export function register(input: { email: string; password: string; display_name:
   return apiRequest<AuthResponse>('/v1/auth/register', { body: { ...input, age_confirmed: true } });
 }
 
+/**
+ * Ends every session of the account, on every device: each token issued before this call is rejected from
+ * then on. There are no per-device sessions to end one at a time. The caller clears the stored token whether
+ * or not this succeeds, so a rejected token here is not treated as a surprise sign-out.
+ */
+export function logout(): Promise<void> {
+  return apiRequest<void>('/v1/auth/logout', { method: 'POST', auth: 'required', quietUnauthorized: true });
+}
+
+/** Every known feature flag and whether it is on. Public. */
+export async function getFlags(signal?: AbortSignal): Promise<Flags> {
+  return (await apiGet<{ flags: Flags }>('/v1/flags', { signal })).flags;
+}
+
+/** Best price against the consensus of the other books. Behind the `value_screen` flag. */
+export function getValueScreen(
+  filters: { league?: string | null; market?: Market | null; minEdge?: number | null } = {},
+  signal?: AbortSignal,
+): Promise<ValueScreen> {
+  return apiGet<ValueScreen>('/v1/value', {
+    query: { league: filters.league, market: filters.market, min_edge: filters.minEdge || undefined },
+    signal,
+  });
+}
+
 export function getMe(signal?: AbortSignal): Promise<User> {
   return apiRequest<User>('/v1/me', { auth: 'required', signal });
 }
@@ -250,6 +313,35 @@ export function deleteAccount(): Promise<void> {
   return apiRequest<void>('/v1/me', { method: 'DELETE', auth: 'required' });
 }
 
+/** The plan and what it includes. `preview` is true while plans are not enforced. There is no purchase route. */
+export function getEntitlements(signal?: AbortSignal): Promise<Entitlements> {
+  return apiRequest<Entitlements>('/v1/me/entitlements', { auth: 'required', signal });
+}
+
+// Email flows, behind the `email_flows` flag. The API queues the message in an outbox; in this preview no
+// email is actually sent.
+
+export function requestEmailVerification(): Promise<Message> {
+  return apiRequest<Message>('/v1/auth/verify-email/request', { method: 'POST', auth: 'required', body: {} });
+}
+
+/** No sign-in needed: the token from the link identifies the account. It works once. */
+export function confirmEmailVerification(token: string): Promise<EmailVerification> {
+  return apiRequest<EmailVerification>('/v1/auth/verify-email/confirm', { body: { token } });
+}
+
+/** Always answers the same way, whether or not an account exists for the address. */
+export function requestPasswordReset(email: string): Promise<Message> {
+  const body: PasswordResetRequest = { email };
+  return apiRequest<Message>('/v1/auth/password-reset/request', { body });
+}
+
+/** Signs out every earlier session and returns no token: the user logs in again with the new password. */
+export function confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+  const body: PasswordResetConfirm = { token, new_password: newPassword };
+  return apiRequest<void>('/v1/auth/password-reset/confirm', { body });
+}
+
 // Bet tracker
 
 export function getBets(signal?: AbortSignal): Promise<Bet[]> {
@@ -258,6 +350,11 @@ export function getBets(signal?: AbortSignal): Promise<Bet[]> {
 
 export function getBetSummary(signal?: AbortSignal): Promise<BetSummary> {
   return apiRequest<BetSummary>('/v1/bets/summary', { auth: 'required', signal });
+}
+
+/** Breakdowns of the user's settled bets. Behind the `tracker_analytics` flag. */
+export function getBetAnalytics(signal?: AbortSignal): Promise<BetAnalytics> {
+  return apiRequest<BetAnalytics>('/v1/bets/analytics', { auth: 'required', signal });
 }
 
 export function createBet(bet: BetCreate): Promise<Bet> {
@@ -434,11 +531,137 @@ export function setStakeReminder(weeklyStakeThreshold: number | null): Promise<S
   });
 }
 
+// Community. Behind the `community` flag; the leaderboard also needs `community_leaderboard`. Every route
+// except the guidelines needs a signed-in user. Other people are identified by handle only.
+
+const PAGE = 20;
+
+/** The rules, as the API words them. The one source of truth: no client hard-codes them. */
+export function getCommunityGuidelines(signal?: AbortSignal): Promise<CommunityGuidelines> {
+  return apiGet<CommunityGuidelines>('/v1/community/guidelines', { signal });
+}
+
+/** The caller's own profile, or null when they have not created one yet (the API answers 404 `not_found`). */
+export async function getMyCommunityProfile(signal?: AbortSignal): Promise<MyCommunityProfile | null> {
+  try {
+    return await apiRequest<MyCommunityProfile>('/v1/community/profile', { auth: 'required', signal });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404 && error.code === 'not_found') return null;
+    throw error;
+  }
+}
+
+/** Creates the profile (201) or updates it (200). */
+export function saveCommunityProfile(profile: ProfileUpsert): Promise<MyCommunityProfile> {
+  return apiRequest<MyCommunityProfile>('/v1/community/profile', { method: 'PUT', auth: 'required', body: profile });
+}
+
+export function getCommunityProfile(handle: string, signal?: AbortSignal): Promise<CommunityProfile> {
+  return apiRequest<CommunityProfile>(`/v1/community/profiles/${id(handle)}`, { auth: 'required', signal });
+}
+
+/** Picks newest first, by time only. `before` is the previous page's `next_before`. */
+export function getCommunityFeed(scope: FeedScope, before?: string | null, signal?: AbortSignal): Promise<PickPage> {
+  return apiRequest<PickPage>('/v1/community/feed', { auth: 'required', query: { scope, before, limit: PAGE }, signal });
+}
+
+export function getCommunityPicks(
+  filters: { handle?: string | null; eventId?: string | null; league?: string | null; status?: PickStatus | null; before?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<PickPage> {
+  return apiRequest<PickPage>('/v1/community/picks', {
+    auth: 'required',
+    query: { handle: filters.handle, event_id: filters.eventId, league: filters.league, status: filters.status, before: filters.before, limit: PAGE },
+    signal,
+  });
+}
+
+export function getCommunityPick(pickId: string, signal?: AbortSignal): Promise<CommunityPick> {
+  return apiRequest<CommunityPick>(`/v1/community/picks/${id(pickId)}`, { auth: 'required', signal });
+}
+
+/** A structured selection only. The server records the price and the time; there is no stake or rating to send. */
+export function createCommunityPick(pick: PickCreate): Promise<CommunityPick> {
+  return apiRequest<CommunityPick>('/v1/community/picks', { auth: 'required', body: pick });
+}
+
+/** Only the author, and only while the game is still upcoming (`409 pick_locked` afterwards). */
+export function deleteCommunityPick(pickId: string): Promise<void> {
+  return apiRequest<void>(`/v1/community/picks/${id(pickId)}`, { method: 'DELETE', auth: 'required' });
+}
+
+export function likeCommunityPick(pickId: string): Promise<LikeState> {
+  return apiRequest<LikeState>(`/v1/community/picks/${id(pickId)}/like`, { method: 'PUT', auth: 'required' });
+}
+
+export function unlikeCommunityPick(pickId: string): Promise<LikeState> {
+  return apiRequest<LikeState>(`/v1/community/picks/${id(pickId)}/like`, { method: 'DELETE', auth: 'required' });
+}
+
+export function getPickComments(pickId: string, before?: string | null, signal?: AbortSignal): Promise<CommentPage> {
+  return apiRequest<CommentPage>(`/v1/community/picks/${id(pickId)}/comments`, { auth: 'required', query: { before, limit: PAGE }, signal });
+}
+
+export function createPickComment(pickId: string, body: string): Promise<PickComment> {
+  return apiRequest<PickComment>(`/v1/community/picks/${id(pickId)}/comments`, { auth: 'required', body: { body } });
+}
+
+export function deletePickComment(commentId: string): Promise<void> {
+  return apiRequest<void>(`/v1/community/comments/${id(commentId)}`, { method: 'DELETE', auth: 'required' });
+}
+
+export function followProfile(handle: string): Promise<FollowState> {
+  return apiRequest<FollowState>(`/v1/community/follows/${id(handle)}`, { method: 'POST', auth: 'required' });
+}
+
+export function unfollowProfile(handle: string): Promise<void> {
+  return apiRequest<void>(`/v1/community/follows/${id(handle)}`, { method: 'DELETE', auth: 'required' });
+}
+
+/** Removes the follow in both directions and hides each of the two from the other. The blocked person is not told. */
+export function blockProfile(handle: string): Promise<BlockState> {
+  return apiRequest<BlockState>(`/v1/community/blocks/${id(handle)}`, { method: 'PUT', auth: 'required' });
+}
+
+export function unblockProfile(handle: string): Promise<void> {
+  return apiRequest<void>(`/v1/community/blocks/${id(handle)}`, { method: 'DELETE', auth: 'required' });
+}
+
+export async function getBlockedProfiles(signal?: AbortSignal): Promise<BlockEntry[]> {
+  return (await apiRequest<{ items: BlockEntry[] }>('/v1/community/blocks', { auth: 'required', signal })).items;
+}
+
+/** `target_id` is the pick id, the comment id or, for a profile, its handle. */
+export function reportCommunityContent(report: ReportCreate): Promise<Report> {
+  return apiRequest<Report>('/v1/community/reports', { auth: 'required', body: report });
+}
+
+/** Behind the second flag, `community_leaderboard`. Ranked by the API; nothing is sorted or computed here. */
+export function getLeaderboard(
+  filters: { league?: string | null; window?: LeaderboardWindow } = {},
+  signal?: AbortSignal,
+): Promise<Leaderboard> {
+  return apiRequest<Leaderboard>('/v1/community/leaderboard', { auth: 'required', query: { league: filters.league, window: filters.window }, signal });
+}
+
+export const FEATURE_UNAVAILABLE = "This feature isn't available right now.";
+
+/** A route behind a feature flag that is off answers 404 `feature_disabled`. */
+export function isFeatureDisabled(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && error.code === 'feature_disabled';
+}
+
+/** 401 on any call that carried the token, or 403 on log in with the right password. */
+export function isAccountSuspended(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'account_suspended';
+}
+
 /** One sentence for an inline error, with the web app's wording for the two cases that need their own. */
 export function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiUnavailableError) return "OddVex can't reach its data service right now. Try again in a moment.";
   if (error instanceof ApiError) {
     if (error.status === 429) return 'Too many attempts. Wait a minute, then try again.';
+    if (isFeatureDisabled(error)) return FEATURE_UNAVAILABLE;
     return error.message || fallback;
   }
   return fallback;

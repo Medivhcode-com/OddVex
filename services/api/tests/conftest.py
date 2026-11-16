@@ -105,3 +105,37 @@ def headers(client: TestClient) -> dict[str, str]:
 @pytest.fixture
 def other_headers(client: TestClient) -> dict[str, str]:
     return auth_headers(client, "grace@example.test")
+
+
+ADMIN_EMAIL = "boss@example.test"
+
+
+@pytest.fixture
+def admin_client(make_app: AppFactory) -> Iterator[TestClient]:
+    """A client on an app where ``ADMIN_EMAIL`` registers as an administrator."""
+    with TestClient(make_app(admin_emails=ADMIN_EMAIL)) as test_client:
+        yield test_client
+
+
+def verify_email(client: TestClient, email: str) -> None:
+    """Confirm ``email`` with the link from the development outbox."""
+    latest = client.get(
+        "/v1/dev/email-outbox/latest", params={"to": email, "template": "verify_email"}
+    )
+    assert latest.status_code == 200, latest.text
+    confirmed = client.post("/v1/auth/verify-email/confirm", json={"token": latest.json()["token"]})
+    assert confirmed.status_code == 200, confirmed.text
+
+
+def admin_headers(client: TestClient, email: str = ADMIN_EMAIL) -> dict[str, str]:
+    """Register a listed address and confirm it: with ``email_flows`` on (the default
+    outside production) the admin role is only granted to a confirmed address."""
+    account = register(client, email)
+    if account["user"]["role"] != "admin":  # already one when ``email_flows`` is off
+        verify_email(client, email)
+    return {"Authorization": f"Bearer {account['access_token']}"}
+
+
+def set_flag(client: TestClient, admin: dict[str, str], key: str, enabled: bool) -> None:
+    response = client.put(f"/v1/admin/flags/{key}", json={"enabled": enabled}, headers=admin)
+    assert response.status_code == 200, response.text

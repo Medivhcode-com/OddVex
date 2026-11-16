@@ -263,3 +263,80 @@ class BetSummaryOut(BaseModel):
         description="Cumulative profit by settlement date (UTC), oldest first."
     )
     note: str
+
+
+# ------------------------------------------------------------------ analytics
+class AnalyticsRowOut(BaseModel):
+    key: str
+    label: str
+    bets: int = Field(description="Settled bets in this group.")
+    staked: float = Field(description="Staked on them, void bets excluded.")
+    profit: float
+    roi: float | None = Field(default=None, description="profit / staked, as a fraction.")
+    win_rate: float | None = Field(
+        default=None,
+        description="wins / (wins + losses), as a fraction. Pushes and voids are left out.",
+    )
+
+
+class CurrentStreakOut(BaseModel):
+    kind: Literal["win", "loss", "none"] = Field(
+        description="none: no settled bet with a profit or loss yet."
+    )
+    length: int
+
+
+class ClvBucketOut(BaseModel):
+    key: str
+    label: str
+    count: int
+
+
+class ClvAnalyticsOut(BaseModel):
+    sample: int = Field(description="Settled bets with a closing price on every leg.")
+    average: float | None = Field(default=None, description="Mean CLV, as a fraction.")
+    share_beating_close: float | None = Field(
+        default=None, description="Share of the sample with a CLV above 0, as a fraction."
+    )
+    buckets: list[ClvBucketOut]
+
+
+class StakeBucketOut(BaseModel):
+    key: str
+    label: str
+    bets: int
+    staked: float
+
+
+class BetAnalyticsOut(BaseModel):
+    settled_count: int
+    by_odds_band: list[AnalyticsRowOut] = Field(
+        description="By the bet's American price, shortest prices first. Always five rows."
+    )
+    by_weekday: list[AnalyticsRowOut] = Field(
+        description="By the UTC weekday the bet was placed, Monday first. Always seven rows."
+    )
+    by_month: list[AnalyticsRowOut] = Field(
+        description="By the UTC month the bet was settled (key `YYYY-MM`), oldest first."
+    )
+    longest_win_streak: int
+    longest_loss_streak: int
+    current_streak: CurrentStreakOut
+    streak_note: str | None = Field(
+        default=None,
+        description=(
+            "How to read the streak numbers: they describe past results only. Optional for "
+            "older clients."
+        ),
+    )
+    average_stake: float | None = None
+    average_odds: PriceOut | None = Field(
+        default=None, description="Mean of the bets' decimal odds, in every format."
+    )
+    clv: ClvAnalyticsOut
+    stake_distribution: list[StakeBucketOut]
+    sample_note: str | None = Field(
+        default=None,
+        description="Set when fewer than 30 bets are settled: results this small are mostly noise.",
+    )
+    note: str

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View, type DimensionValue } from 'react-native';
 
-import { ApiError, ApiUnavailableError } from '@/api/client';
+import { ApiError, ApiUnavailableError, FEATURE_UNAVAILABLE, isFeatureDisabled } from '@/api/client';
 import { Num, Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
+import { useFlags } from '@/providers/flags';
 import { fontSize, radius, space, touchTarget } from '@/theme';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -117,8 +118,31 @@ export function errorCopy(error: unknown): { title: string; body: string } {
   };
 }
 
-/** What happened, in plain words, plus a retry. */
+/**
+ * Shown when a call behind a feature flag answers 404 `feature_disabled`. Plain on purpose: there is nothing
+ * to retry. It also re-reads the flags, so the entry points to the feature disappear.
+ */
+export function FeatureUnavailable() {
+  const { reload } = useFlags();
+  useEffect(() => reload(), [reload]);
+  return (
+    <Panel>
+      <View accessibilityRole="alert" style={styles.message}>
+        <Txt variant="heading" style={styles.center}>
+          {FEATURE_UNAVAILABLE}
+        </Txt>
+      </View>
+    </Panel>
+  );
+}
+
+/** What happened, in plain words, plus a retry. A switched-off feature gets its own plain state. */
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (isFeatureDisabled(error)) return <FeatureUnavailable />;
+  return <LoadError error={error} onRetry={onRetry} />;
+}
+
+function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const copy = errorCopy(error);
   return (
     <Panel>

@@ -8,12 +8,16 @@ import { Screen } from '@/components/screen';
 import { Button, Notice, Panel, PanelHeading, SkeletonCards } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useResource } from '@/hooks/use-resource';
+import { useFlag } from '@/providers/flags';
+import { ValueEntry } from '@/components/value-entry';
 import { space } from '@/theme';
 
 export function ToolsScreen() {
   const router = useRouter();
+  const valueScreen = useFlag('value_screen');
   return (
     <Screen>
+      {valueScreen ? <ValueEntry /> : null}
       <Txt variant="secondary" tone="muted">
         Each calculator shows its working. Enter odds as American (−110), decimal (1.91) or fractional (10/11).
       </Txt>

@@ -19,6 +19,11 @@ const KIND_LABEL: Record<Notification["kind"], string> = {
   bet_settled: "Settled bet",
   sync_finished: "Sync",
   stake_reminder: "Staking reminder",
+  // Community kinds: nothing creates them while the community flag is off. Their links open
+  // /app/community/profiles/{handle} and /app/community/picks/{id}.
+  new_follower: "New follower",
+  pick_comment: "Comment on your pick",
+  pick_graded: "Graded pick",
 };
 
 function useAction() {
@@ -41,7 +46,11 @@ function useAction() {
 }
 
 /** Notifications are shown exactly as the API wrote them. The copy rules live with the engine. */
-export function NotificationList({ items, unread }: { items: Notification[]; unread: number }) {
+/**
+ * `community` is the feature flag. While it is off the community pages do not exist, so a
+ * community notification left over from when it was on keeps its text but loses its link.
+ */
+export function NotificationList({ items, unread, community = false }: { items: Notification[]; unread: number; community?: boolean }) {
   const { busy, error, run } = useAction();
   if (items.length === 0) {
     return (
@@ -62,6 +71,7 @@ export function NotificationList({ items, unread }: { items: Notification[]; unr
       <ul>
         {items.map((item) => {
           const isUnread = !item.read_at;
+          const href = item.href && (community || !item.href.startsWith("/app/community")) ? item.href : null;
           return (
             <li key={item.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-t border-line px-4 py-3.5 first:border-t-0 sm:px-5">
               <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
@@ -78,9 +88,9 @@ export function NotificationList({ items, unread }: { items: Notification[]; unr
                 </p>
               </div>
               <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0">
-                {item.href ? (
+                {href ? (
                   <Link
-                    href={item.href}
+                    href={href}
                     onClick={() => {
                       if (isUnread) void clientApi(`/v1/notifications/${item.id}/read`, { method: "POST", body: {} }).catch(() => {});
                     }}

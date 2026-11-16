@@ -4,6 +4,8 @@ export class ClientApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    /** The API's `error.details`, when it sent any (for example the content rule that matched). */
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -26,8 +28,8 @@ export async function clientApi<T>(path: string, options: { method?: string; bod
     payload = await response.json();
   } catch {}
   if (!response.ok) {
-    const error = (payload as { error?: { code?: string; message?: string } } | null)?.error;
-    throw new ClientApiError(response.status, error?.code ?? "http_error", error?.message ?? `Request failed (${response.status}).`);
+    const error = (payload as { error?: { code?: string; message?: string; details?: unknown } } | null)?.error;
+    throw new ClientApiError(response.status, error?.code ?? "http_error", error?.message ?? `Request failed (${response.status}).`, error?.details);
   }
   return payload as T;
 }

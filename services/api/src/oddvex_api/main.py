@@ -19,10 +19,16 @@ from .assistant import router as assistant_router
 from .auth import router as auth_router
 from .bets import router as bets_router
 from .cache import InMemoryTTLCache
+from .community import admin_router as community_admin_router
+from .community import router as community_router
 from .config import Settings, get_settings
 from .db import Base, make_engine, make_session_factory
+from .entitlements import router as entitlements_router
 from .errors import ErrorResponse, install_error_handlers
+from .flags import router as flags_router
 from .logging_config import configure_logging
+from .mailer import router as mailer_router
+from .mailer.sender import make_sender
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from .notifications import router as notifications_router
 from .providers import SportsDataProvider, SyntheticProvider
@@ -70,7 +76,33 @@ TAGS = [
     },
     {"name": "sync", "description": "Sportsbook account import. Mock provider only."},
     {"name": "assistant", "description": "Rule-based assistant. No language model."},
-    {"name": "admin", "description": "Administrator overview."},
+    {
+        "name": "value",
+        "description": (
+            "Market discrepancies: best price against the no-vig consensus of the other "
+            "sportsbooks (synthetic). A comparison of prices, not a prediction."
+        ),
+    },
+    {
+        "name": "community",
+        "description": (
+            "Research discussion behind the `community` flag (off by default): opt-in "
+            "profiles, structured picks graded from final scores, comments, follows, "
+            "likes, blocks and reports. No money, no stakes, no paid picks, no links and "
+            "no direct messages."
+        ),
+    },
+    {
+        "name": "admin",
+        "description": (
+            "Administrator routes: overview, users, feature flags, audit log, email outbox "
+            "and community moderation. Every change is audited."
+        ),
+    },
+    {
+        "name": "dev",
+        "description": "Development helpers. Every route here answers 404 in production.",
+    },
 ]
 
 
@@ -161,6 +193,15 @@ def create_app(
     app.state.rate_limiter = SlidingWindowRateLimiter(settings.rate_limit_window_seconds)
     app.state.sync_registry = sync_registry or default_registry()
     app.state.alert_throttle = EvaluationThrottle()
+    #: Per-account counters (failed logins per email, emails per address); see ratelimit.py.
+    app.state.account_limiter = SlidingWindowRateLimiter(settings.account_limit_window_seconds)
+    #: Community: picks per user per day; comments, reports and follows per user per hour;
+    #: and when pending picks were last checked against final scores.
+    app.state.community_day_limiter = SlidingWindowRateLimiter(86_400)
+    app.state.community_hour_limiter = SlidingWindowRateLimiter(3_600)
+    app.state.community_grade_throttle = EvaluationThrottle()
+    #: Raises at startup for ODDVEX_EMAIL_PROVIDER=resend: real email is not connected.
+    app.state.email_sender = make_sender(settings)
 
     # Added first = innermost, so a 413 still gets the request id, security and CORS headers.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
@@ -189,6 +230,11 @@ def create_app(
     app.include_router(sync_router.router, prefix="/v1")
     app.include_router(assistant_router.router, prefix="/v1")
     app.include_router(admin.router, prefix="/v1")
+    app.include_router(flags_router.router, prefix="/v1")
+    app.include_router(entitlements_router.router, prefix="/v1")
+    app.include_router(mailer_router.router, prefix="/v1")
+    app.include_router(community_router.router, prefix="/v1")
+    app.include_router(community_admin_router.router, prefix="/v1")
 
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
     return app

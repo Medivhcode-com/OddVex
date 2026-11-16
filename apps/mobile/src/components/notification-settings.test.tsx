@@ -6,10 +6,22 @@ import type { NotificationPreferences } from '@/api/types';
 import { NotificationPreferencesForm, StakeReminderForm, StakeReminderNotice } from '@/components/notification-settings';
 import { errorResponse, installFetch, serveRoutes } from '@/test/api';
 import { reminderExceeded, reminderOff } from '@/test/fixtures';
+import { WithFlags } from '@/test/flags';
 import { fakeSession, WithSession } from '@/test/session';
 
 const allOn: NotificationPreferences = {
-  in_app: { price_alert: true, line_move: true, game_start: true, game_final: true, bet_settled: true, sync_finished: true, stake_reminder: true },
+  in_app: {
+    price_alert: true,
+    line_move: true,
+    game_start: true,
+    game_final: true,
+    bet_settled: true,
+    sync_finished: true,
+    stake_reminder: true,
+    new_follower: true,
+    pick_comment: true,
+    pick_graded: true,
+  },
 };
 const PREFS = '/v1/me/notification-preferences';
 const REMINDER = '/v1/me/stake-reminder';
@@ -38,6 +50,38 @@ describe('NotificationPreferencesForm', () => {
     expect(screen.getByRole('switch', { name: 'Sync results' })).not.toBeChecked();
     await fireEvent.press(screen.getByRole('button', { name: 'Open notifications' }));
     expect(router.push).toHaveBeenCalledWith('/notifications');
+  });
+
+  it('has no community switches while the community flag is off', async () => {
+    await show(<NotificationPreferencesForm userId="usr_1" />, { [`GET ${PREFS}`]: allOn });
+
+    expect(await screen.findByRole('switch', { name: 'Price alerts' })).toBeOnTheScreen();
+    expect(screen.getAllByRole('switch')).toHaveLength(7);
+    for (const label of ['New followers', 'Comments on your picks', 'Graded picks']) expect(screen.queryByRole('switch', { name: label })).toBeNull();
+  });
+
+  it('adds the three community switches while the flag is on, and sends only the one that changed', async () => {
+    const { sent } = await show(
+      <WithFlags flags={{ community: true }}>
+        <NotificationPreferencesForm userId="usr_1" />
+      </WithFlags>,
+      {
+        // `null` is how the schema types a kind an older API might leave out: it means the default, on.
+        [`GET ${PREFS}`]: { in_app: { ...allOn.in_app, new_follower: null, pick_graded: false } },
+        [`PUT ${PREFS}`]: { in_app: { ...allOn.in_app, pick_comment: false, pick_graded: false } },
+      },
+    );
+
+    expect(await screen.findByRole('switch', { name: 'New followers' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Comments on your picks' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Graded picks' })).not.toBeChecked();
+    expect(screen.getAllByRole('switch')).toHaveLength(10);
+
+    await fireEvent.press(screen.getByRole('switch', { name: 'Comments on your picks' }));
+    await waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent()[1]).toMatchObject({ method: 'PUT', path: PREFS });
+    expect(sent()[1].body).toEqual({ in_app: { pick_comment: false } });
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Comments on your picks' })).not.toBeChecked());
   });
 
   it('sends only the kind that was switched', async () => {

@@ -1,26 +1,33 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChangePasswordForm, ExportDataButton } from "@/components/app/account-forms";
+import { ResendVerification } from "@/components/app/auth-forms";
 import { DeleteAccountForm } from "@/components/app/delete-account";
 import { NotificationPreferences, StakeReminderForm } from "@/components/app/notification-settings";
 import { api } from "@/lib/api";
 import type { Schemas } from "@oddvex/types";
 import { OddsFormatToggle } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
-import { ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
+import { Badge, Button, ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
+import { titleCase } from "@/lib/format";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { logoutEverywhereAction } from "@/lib/auth-actions";
+import { flagOn, getFlags } from "@/lib/flags";
 import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await currentUser();
-  const [prefs, reminder] = user
+  const [prefs, reminder, entitlements] = user
     ? await Promise.all([
         api<Schemas["NotificationPreferencesOut"]>("/v1/me/notification-preferences", { auth: true }).catch(() => null),
         api<Schemas["StakeReminderOut"]>("/v1/me/stake-reminder", { auth: true }).catch(() => null),
+        api<Schemas["EntitlementsOut"]>("/v1/me/entitlements", { auth: true }).catch(() => null),
       ])
-    : [null, null];
+    : [null, null, null];
+  const community = flagOn(await getFlags(), "community");
+  const plan = entitlements?.plan ?? user?.plan ?? null;
   return (
     <>
       <PageHeader title="Settings" />
@@ -39,16 +46,34 @@ export default async function SettingsPage() {
           </div>
         </Panel>
 
-        <Panel>
-          <PanelHeader title="Account" />
+        <Panel aria-labelledby="settings-account">
+          <PanelHeader id="settings-account" title="Account" />
           <div className="p-4 sm:p-5">
             {user ? (
-              <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
-                <dt className="text-muted">Name</dt>
-                <dd>{user.display_name}</dd>
-                <dt className="text-muted">Email</dt>
-                <dd className="break-all">{user.email}</dd>
-              </dl>
+              <div className="space-y-4">
+                <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+                  <dt className="text-muted">Name</dt>
+                  <dd>{user.display_name}</dd>
+                  <dt className="text-muted">Email</dt>
+                  <dd className="min-w-0">
+                    <span className="break-all">{user.email}</span>
+                    <span className="mt-1 block">
+                      {user.email_verified ? <Badge tone="accent">Email verified</Badge> : <Badge tone="warn">Email not verified</Badge>}
+                    </span>
+                  </dd>
+                  <dt className="text-muted">Plan</dt>
+                  <dd>
+                    <span>{plan ? titleCase(plan) : "Not available right now"}</span>
+                    {entitlements?.preview ? <span className="mt-1 block text-muted">Preview: every feature is included</span> : null}
+                  </dd>
+                </dl>
+                {user.email_verified ? null : (
+                  <div className="space-y-2 border-t border-line pt-4">
+                    <p className="text-sm text-muted">Confirming shows the address is yours. Nothing in OddVex is locked until you do.</p>
+                    <ResendVerification />
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <p className="text-muted">You are not logged in.</p>
@@ -63,7 +88,7 @@ export default async function SettingsPage() {
         {prefs ? (
           <Panel aria-labelledby="settings-notifications">
             <PanelHeader id="settings-notifications" title="Notifications" description="Choose what OddVex tells you about." />
-            <NotificationPreferences initial={prefs.in_app} />
+            <NotificationPreferences initial={prefs.in_app} community={community} />
           </Panel>
         ) : null}
 
@@ -91,6 +116,15 @@ export default async function SettingsPage() {
                 <ChangePasswordForm />
               </div>
             </Panel>
+            <Panel aria-labelledby="settings-sessions">
+              <PanelHeader id="settings-sessions" title="Sessions" description="Ends every session of this account, on this device and any other. You then log in again." />
+              <form action={logoutEverywhereAction} className="space-y-3 p-4 sm:p-5">
+                <Button type="submit" variant="secondary">
+                  Log out of all devices
+                </Button>
+                <p className="text-sm text-muted">OddVex does not keep separate sessions per device yet, so the Log out button at the top of the page does the same.</p>
+              </form>
+            </Panel>
             <Panel>
               <PanelHeader title="Your data" description="A JSON file with your account details, bets, watchlist, sync history and security log." />
               <div className="p-4 sm:p-5">
@@ -102,7 +136,10 @@ export default async function SettingsPage() {
 
         {user ? (
           <Panel>
-            <PanelHeader title="Delete account" description="Removes your account, every bet you logged and any sync connections. This can't be undone." />
+            <PanelHeader
+              title="Delete account"
+              description={`Removes your account, every bet you logged${community ? ", any sync connections and everything you posted in the community, graded picks included" : " and any sync connections"}. This can't be undone.`}
+            />
             <div className="p-4 sm:p-5">
               <DeleteAccountForm />
             </div>

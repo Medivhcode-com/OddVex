@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { ProfitChart } from "@/components/ui/charts";
 import { Badge, ButtonLink, EmptyState, Panel, PanelHeader, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
+import { flagOn, getFlags } from "@/lib/flags";
 import { formatDay, formatMoney, formatPercent, formatSignedPercent, titleCase } from "@/lib/format";
 import { getLeagues, leagueLabel } from "@/lib/leagues";
 import { currentUser } from "@/lib/session";
@@ -141,6 +142,7 @@ export default async function TrackerPage() {
   }
 
   const reminder = await api<Schemas["StakeReminderOut"]>("/v1/me/stake-reminder", { auth: true }).catch(() => null);
+  const analytics = flagOn(await getFlags(), "tracker_analytics");
   const [summary, bets, leagues, books, syncProviders, syncConnections] = await Promise.all([
     api<BetSummary>("/v1/bets/summary", { auth: true }),
     api<Bet[]>("/v1/bets", { auth: true }),
@@ -156,7 +158,17 @@ export default async function TrackerPage() {
 
   return (
     <>
-      <PageHeader title="Bet tracker" description="Results you enter yourself are self-reported. Past results don't predict future ones." />
+      <PageHeader
+        title="Bet tracker"
+        description="Results you enter yourself are self-reported. Past results don't predict future ones."
+        actions={
+          analytics ? (
+            <ButtonLink href="/app/tracker/analytics" variant="secondary">
+              Analytics
+            </ButtonLink>
+          ) : undefined
+        }
+      />
       <div className="space-y-5">
         {reminder ? <StakeReminderNotice reminder={reminder} /> : null}
         <Panel aria-labelledby="perf-heading">

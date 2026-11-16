@@ -8,6 +8,7 @@ from sqlalchemy import select
 from ..alerts import service as alerts_service
 from ..auth.schemas import UserOut
 from ..bets import service as bets_service
+from ..community import service as community_service
 from ..db import (
     AlertRule,
     AuditLog,
@@ -18,7 +19,7 @@ from ..db import (
     WatchlistItem,
     utcnow,
 )
-from ..deps import BoardDep, CurrentUserDep, DbDep, write_audit
+from ..deps import BoardDep, DataRightsUserDep, DbDep, write_audit
 from ..errors import AUTH_ERROR_RESPONSES
 from ..notifications import service as notifications_service
 from ..sync import service as sync_service
@@ -36,16 +37,24 @@ router = APIRouter(tags=["auth"])
     description=(
         "One JSON document with your profile, bets, watchlist, alert rules, notifications, "
         "notification preferences, staking reminder, sync connections, import runs and "
-        "your own audit entries. It never contains the password hash. The export "
-        "itself is recorded in the audit log."
+        "your own audit entries, plus your community data (profile, picks, comments, who "
+        "you follow, likes, blocks and reports you made). It never contains the password "
+        "hash. The export itself is recorded in the audit log. A suspended account can "
+        "still call this route."
     ),
     responses=AUTH_ERROR_RESPONSES,
 )
 def export_my_data(
-    user: CurrentUserDep, db: DbDep, board: BoardDep, request: Request
+    user: DataRightsUserDep, db: DbDep, board: BoardDep, request: Request
 ) -> AccountExportOut:
     write_audit(
-        db, request, "account.export", user_id=user.id, entity_type="user", entity_id=user.id
+        db,
+        request,
+        "account.export",
+        user_id=user.id,
+        entity_type="user",
+        entity_id=user.id,
+        details={"account_status": "suspended"} if user.status == "suspended" else None,
     )
     db.commit()
 
@@ -111,4 +120,5 @@ def export_my_data(
         notifications=[notifications_service.notification_out(row) for row in notifications],
         notification_preferences=notifications_service.preferences_out(db, user.id),
         stake_reminder=notifications_service.stake_reminder_out(db, user.id, board.now),
+        community=community_service.export_out(db, user.id, board.provider.data_mode),
     )

@@ -39,6 +39,22 @@ class Settings(BaseSettings):
     rate_limit_assistant_per_minute: int = 20
     rate_limit_window_seconds: int = 60
 
+    #: Per-account limits. They are keyed on the email address (or user id), not the IP,
+    #: and share one window. Disabled together with ``rate_limit_enabled``.
+    account_limit_window_seconds: int = Field(default=900, ge=1)
+    #: Failed logins for one email inside the window before further attempts get 429.
+    login_max_failures: int = Field(default=8, ge=1)
+    #: Verification or password-reset emails one address can request inside the window.
+    email_requests_per_window: int = Field(default=3, ge=1)
+
+    #: ``outbox`` writes emails to the ``email_outbox`` table and sends nothing.
+    #: ``resend`` is a stub that refuses to start: real email needs Founder approval.
+    email_provider: Literal["outbox", "resend"] = "outbox"
+    #: Base URL of the web app, used for the links in emails.
+    web_base_url: str = "http://localhost:3000"
+    email_verification_ttl_hours: int = Field(default=24, ge=1)
+    password_reset_ttl_minutes: int = Field(default=60, ge=1)
+
     auto_seed_demo: bool = False
     demo_password: str = DEV_DEMO_PASSWORD
 
@@ -47,6 +63,15 @@ class Settings(BaseSettings):
     #: Minimum seconds between two lazy alert evaluations for one user (triggered by the
     #: notification read routes). 0 evaluates on every request.
     alert_eval_min_seconds: int = Field(default=30, ge=0)
+
+    #: Community limits per user (in process memory, off with ``rate_limit_enabled``).
+    community_picks_per_day: int = Field(default=20, ge=1)
+    community_comments_per_hour: int = Field(default=30, ge=1)
+    community_reports_per_hour: int = Field(default=10, ge=1)
+    community_follows_per_hour: int = Field(default=60, ge=1)
+    #: Minimum seconds between two lazy grading passes over pending community picks
+    #: (triggered by the community read routes). 0 grades on every read.
+    community_grade_min_seconds: int = Field(default=15, ge=0)
 
     #: Largest request body accepted, in bytes. Larger requests get 413.
     max_body_bytes: int = Field(default=64 * 1024, ge=1024)

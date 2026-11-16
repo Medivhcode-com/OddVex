@@ -61,6 +61,23 @@ TEMPLATES: dict[str, dict[str, str]] = {
             "1-800-GAMBLER."
         ),
     },
+    # Community. Facts only: who did what, and how a pick was graded. No comment text, no
+    # praise, no nudge to post or to bet.
+    "new_follower": {
+        "title": "New follower",
+        "body": "@{handle} follows your community profile.",
+    },
+    "pick_comment": {
+        "title": "New comment on your pick",
+        "body": "@{handle} commented on your pick: {selection}.",
+    },
+    "pick_graded": {
+        "title": "Pick graded: {result}",
+        "body": (
+            "Your pick, {selection}, was graded as {result}. "
+            "Final score: {event_label}, {away_score} to {home_score}."
+        ),
+    },
 }
 
 _RESULT_WORDS = {
@@ -366,5 +383,73 @@ def stake_reminder(
             "week_start": week_start.isoformat(),
             "staked_this_week": float(staked),
             "weekly_stake_threshold": float(threshold),
+        },
+    )
+
+
+# ------------------------------------------------------------------ community
+def pick_href(pick_id: str) -> str:
+    return f"/app/community/picks/{pick_id}"
+
+
+def profile_href(handle: str) -> str:
+    return f"/app/community/profiles/{handle}"
+
+
+def new_follower(*, follower_id: str, handle: str) -> NotificationDraft:
+    template = TEMPLATES["new_follower"]
+    return NotificationDraft(
+        kind="new_follower",
+        title=template["title"],
+        body=template["body"].format(handle=handle),
+        href=profile_href(handle),
+        # One per follower, ever: following again after unfollowing does not notify twice.
+        dedupe_key=f"new_follower:{follower_id}",
+        data={"handle": handle},
+    )
+
+
+def pick_comment(
+    *, comment_id: str, pick_id: str, handle: str, selection: str
+) -> NotificationDraft:
+    template = TEMPLATES["pick_comment"]
+    return NotificationDraft(
+        kind="pick_comment",
+        title=template["title"],
+        body=template["body"].format(handle=handle, selection=selection),
+        href=pick_href(pick_id),
+        dedupe_key=f"pick_comment:{comment_id}",
+        data={"pick_id": pick_id, "comment_id": comment_id, "handle": handle},
+    )
+
+
+def pick_graded(
+    *,
+    pick_id: str,
+    selection: str,
+    event_label: str,
+    result: str,
+    home_score: int,
+    away_score: int,
+) -> NotificationDraft:
+    values = {
+        "selection": selection,
+        "event_label": event_label,
+        "result": _RESULT_WORDS.get(result, result),
+        "home_score": home_score,
+        "away_score": away_score,
+    }
+    template = TEMPLATES["pick_graded"]
+    return NotificationDraft(
+        kind="pick_graded",
+        title=template["title"].format(**values),
+        body=template["body"].format(**values),
+        href=pick_href(pick_id),
+        dedupe_key=f"pick_graded:{pick_id}",
+        data={
+            "pick_id": pick_id,
+            "result": result,
+            "home_score": home_score,
+            "away_score": away_score,
         },
     )

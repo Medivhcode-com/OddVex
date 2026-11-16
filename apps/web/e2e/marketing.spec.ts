@@ -1,8 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const PAGES = [
   "/", "/features", "/odds-comparison", "/player-props", "/bet-tracking", "/ai", "/pricing", "/about", "/blog",
   "/blog/removing-the-vig", "/contact", "/help", "/privacy", "/terms", "/responsible-gambling", "/methodology", "/download",
+  "/forgot-password", "/reset-password", "/verify-email",
 ];
 
 test.describe("marketing site", () => {
@@ -27,6 +28,21 @@ test.describe("marketing site", () => {
     await expect(page.getByText("OddVex never takes a wager", { exact: false })).toBeVisible();
   });
 
+  test("features and methodology describe the value screen and tracker analytics without overclaiming", async ({ page }) => {
+    await page.goto("/features");
+    for (const name of ["Value screen", "Tracker analytics"]) {
+      const item = page.getByRole("listitem").filter({ has: page.getByRole("heading", { name, exact: true }) });
+      await expect(item.getByText("In the preview")).toBeVisible();
+    }
+    await page.goto("/methodology");
+    await expect(page.getByRole("heading", { name: "Edge vs consensus" })).toBeVisible();
+    const text = (await page.locator("main").innerText()).toLowerCase();
+    expect(text).toContain("edge       = consensus × decimal_best − 1");
+    expect(text).toContain("not proof of an edge");
+    expect(text).toContain("can be wrong");
+    for (const banned of ["risk-free", "guaranteed", "free money", "sure thing", "best bet"]) expect(text).not.toContain(banned);
+  });
+
   test("sample board marks the best price and switches odds format", async ({ page }) => {
     await page.goto("/");
     const board = page.getByRole("table", { name: /sample moneyline/i });
@@ -48,6 +64,43 @@ test.describe("marketing site", () => {
     const response = await page.goto("/no-such-page");
     expect(response?.status()).toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toContainText("off the board");
+  });
+
+  test("privacy policy describes what is stored and what deletion keeps", async ({ page }) => {
+    await page.goto("/privacy");
+    const main = page.locator("main");
+    await expect(main.getByText("Preview draft")).toBeVisible();
+    for (const text of ["Watchlist:", "Alerts and notifications:", "Weekly staking reminder:", "Security log:", "ov_session", "ov_odds"]) {
+      await expect(main.getByText(text, { exact: false }).first()).toBeVisible();
+    }
+    await expect(main.getByText("The retention period is to be confirmed before launch.", { exact: false })).toBeVisible();
+  });
+
+  test("responsible gambling keeps the helpline first and marks only the commitments as draft", async ({ page }) => {
+    await page.goto("/responsible-gambling");
+    const main = page.locator("main");
+    await expect(main.getByRole("link", { name: "1-800-GAMBLER" })).toHaveAttribute("href", "tel:18004262537");
+    const order = await main.evaluate((el) => {
+      const text = el.textContent ?? "";
+      return [text.indexOf("Get help now"), text.indexOf("What OddVex commits to"), text.indexOf("Preview draft")];
+    });
+    expect(order[0]).toBeGreaterThan(-1);
+    expect(order[1]).toBeGreaterThan(order[0]);
+    expect(order[2]).toBeGreaterThan(order[1]);
+    await expect(main.getByText("Preview draft")).toHaveCount(1);
+  });
+
+  test("help center covers alerts, the staking reminder, following and settling, in the page and in JSON-LD", async ({ page }) => {
+    await page.goto("/help");
+    await page.getByText("How do alerts work?").click();
+    await expect(page.getByText("nothing is sent by push or email", { exact: false })).toBeVisible();
+    await page.getByText("What is the weekly staking reminder?").click();
+    await expect(page.getByText("It is a reminder, not a limit", { exact: false })).toBeVisible();
+    const faq = JSON.parse((await page.locator('script[type="application/ld+json"]').textContent()) ?? "{}");
+    const questions = faq.mainEntity.map((entry: { name: string }) => entry.name);
+    for (const question of ["How do alerts work?", "What is the weekly staking reminder?", "How do I follow a team, player or game?", "How does settling from final scores work?"]) {
+      expect(questions).toContain(question);
+    }
   });
 
   test("robots and sitemap exist and keep the app out of the index", async ({ request }) => {

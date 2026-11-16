@@ -3,8 +3,8 @@ export function jsonResponse(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
-export function errorResponse(status: number, code: string, message: string) {
-  return jsonResponse({ error: { code, message } }, status);
+export function errorResponse(status: number, code: string, message: string, details?: unknown) {
+  return jsonResponse({ error: details === undefined ? { code, message } : { code, message, details } }, status);
 }
 
 export type SentRequest = { method: string; path: string; headers: Record<string, string>; body: unknown };

@@ -54,6 +54,25 @@ no_vig_i  = implied_i / sum(implied_i)`}</Formula>
           Example: +150 with a 45% chance of winning gives 0.45 × 1.5 − 0.55 = +0.125, or +12.5%. The result is only as
           good as the probability <em>p</em> you supply. A positive number is not evidence that an edge exists.
         </p>
+        <h2 id="edge-vs-consensus">Edge vs consensus</h2>
+        <p>
+          The value screen takes one outcome at a time. It finds the best price among books that are open, not stale
+          and on the same line, then averages the no-vig probability of that outcome across the <em>other</em> books.
+          The book with the best price is left out, because its own long price would pull the average towards the
+          price being tested. At least two other books are required, or nothing is shown for that outcome.
+        </p>
+        <Formula>{`consensus  = mean of no_vig(outcome) over the other books
+edge       = consensus × decimal_best − 1
+break-even = 1 / decimal_best`}</Formula>
+        <p>
+          Example: book A offers 2.10, and books B and C have no-vig probabilities of 48.72% and 50.00% for the same
+          outcome. The consensus is 49.36%, the break-even at 2.10 is 47.62%, and the edge is 0.49359 × 2.10 − 1 =
+          +3.65%. That figure is the expected return per $1 staked <em>if the consensus were the true probability</em>.
+          It often is not: the consensus is an average of a few books and can be wrong, the book with the best price
+          may simply be slow to move, limits and availability differ by sportsbook, and prices change. A price above
+          the consensus is not proof of an edge, and it is not a prediction. On the synthetic data in this preview
+          every book is the same model plus a margin and noise, so no row reflects a real edge.
+        </p>
         <h2>Closing line value</h2>
         <Formula>{`CLV = decimal_taken / decimal_closing − 1`}</Formula>
         <p>Positive means you took a better price than the market closed at.</p>

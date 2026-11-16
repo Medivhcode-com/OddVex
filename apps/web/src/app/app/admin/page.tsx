@@ -1,34 +1,21 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import Link from "next/link";
 import type { Schemas } from "@oddvex/types";
-import { PageHeader } from "@/components/app/page-header";
 import { Badge, EmptyState, Panel, PanelHeader, Stat } from "@/components/ui/primitives";
-import { api, ApiError } from "@/lib/api";
+import { adminGet, requireAdmin } from "@/lib/admin";
 import { formatAge, titleCase } from "@/lib/format";
-import { currentUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Admin" };
 
-/**
- * Read-only operations overview for staff. Access is decided by the API from the account's role;
- * everyone else gets a 404 so the page's existence is not advertised.
- */
+/** Read-only overview of the service: counts, the data provider and the latest audit entries. */
 export default async function AdminPage() {
-  const user = await currentUser();
-  if (!user || user.role !== "admin") notFound();
-  let overview: Schemas["AdminOverviewOut"];
-  try {
-    overview = await api<Schemas["AdminOverviewOut"]>("/v1/admin/overview", { auth: true });
-  } catch (error) {
-    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) notFound();
-    throw error;
-  }
+  await requireAdmin();
+  const overview = await adminGet<Schemas["AdminOverviewOut"]>("/v1/admin/overview");
   const health = overview.provider_health;
   const healthy = health.status === "ok";
 
   return (
     <>
-      <PageHeader title="Admin" description="A read-only view of the service. Every sensitive action by any account is written to the audit log below." />
       <div className="space-y-5">
         <Panel aria-labelledby="admin-service">
           <PanelHeader id="admin-service" title="Service" description={`Version ${overview.version}, ${overview.environment} environment`} />
@@ -50,7 +37,16 @@ export default async function AdminPage() {
         </Panel>
 
         <Panel aria-labelledby="admin-audit">
-          <PanelHeader id="admin-audit" title="Recent audit log" description="Newest first. Account identifiers are internal IDs, not emails." />
+          <PanelHeader
+            id="admin-audit"
+            title="Recent audit log"
+            description="Newest first. Account identifiers are internal IDs, not emails."
+            action={
+              <Link href="/app/admin/audit" className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+                Full audit log
+              </Link>
+            }
+          />
           {overview.recent_audit.length === 0 ? (
             <EmptyState title="No audited actions yet">Sign-ins, bet settlements, deletions and exports appear here.</EmptyState>
           ) : (

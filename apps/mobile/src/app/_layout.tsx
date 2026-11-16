@@ -10,6 +10,7 @@ import { useColorScheme } from 'react-native';
 
 import { useTheme } from '@/hooks/use-theme';
 import { MonoFontContext } from '@/providers/fonts';
+import { FlagsProvider } from '@/providers/flags';
 import { MetaProvider } from '@/providers/meta';
 import { OddsFormatProvider } from '@/providers/odds-format';
 import { SessionProvider } from '@/providers/session';
@@ -52,11 +53,17 @@ export default function RootLayout() {
             <StatusBar style={light ? 'dark' : 'light'} />
             <SessionProvider>
               {/* Log in and sign up sit above the tabs as modals, so they can open from any screen and close back to it. */}
-              <Stack screenOptions={stackOptions}>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="login" options={{ title: 'Log in', presentation: 'modal' }} />
-                <Stack.Screen name="signup" options={{ title: 'Create account', presentation: 'modal' }} />
-              </Stack>
+              <FlagsProvider>
+                <Stack screenOptions={stackOptions}>
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="login" options={{ title: 'Log in', presentation: 'modal' }} />
+                  <Stack.Screen name="signup" options={{ title: 'Create account', presentation: 'modal' }} />
+                  <Stack.Screen name="forgot-password" options={{ title: 'Reset your password', presentation: 'modal' }} />
+                  {/* Opened by a link (oddvex://verify-email?token=..., oddvex://reset-password?token=...). */}
+                  <Stack.Screen name="verify-email" options={{ title: 'Confirm your email address', presentation: 'modal' }} />
+                  <Stack.Screen name="reset-password" options={{ title: 'Set a new password', presentation: 'modal' }} />
+                </Stack>
+              </FlagsProvider>
             </SessionProvider>
           </OddsFormatProvider>
         </MetaProvider>

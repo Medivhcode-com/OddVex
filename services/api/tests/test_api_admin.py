@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from .conftest import AppFactory, auth_headers
+from .conftest import AppFactory, admin_headers, auth_headers, verify_email
 
 
 def test_admin_overview_requires_the_admin_role(make_app: AppFactory) -> None:
@@ -13,7 +13,7 @@ def test_admin_overview_requires_the_admin_role(make_app: AppFactory) -> None:
         assert forbidden.status_code == 403
         assert forbidden.json()["error"]["code"] == "forbidden"
 
-        admin = auth_headers(client, "boss@example.test")
+        admin = admin_headers(client, "boss@example.test")
         bet = client.post(
             "/v1/bets",
             json={
@@ -80,6 +80,8 @@ def test_role_claim_in_a_token_is_not_trusted(make_app: AppFactory) -> None:
 def test_existing_user_is_promoted_on_login_when_listed(make_app: AppFactory, tmp_path) -> None:  # type: ignore[no-untyped-def]
     with TestClient(make_app()) as client:
         auth_headers(client, "boss@example.test")
+        # The role is only granted to a confirmed address while ``email_flows`` is on.
+        verify_email(client, "boss@example.test")
     with TestClient(make_app(admin_emails="boss@example.test")) as client:
         login = client.post(
             "/v1/auth/login",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSignedPercent, formatAge, formatAmerican, formatDecimal, formatLine, formatMoney, formatPercent, formatPrice, titleCase } from "./format";
+import { formatDateTime, formatStreak, shareOf, typographicMinus, formatSignedPercent, formatAge, formatAmerican, formatDecimal, formatLine, formatMoney, formatPercent, formatPrice, titleCase } from "./format";
 
 describe("formatAmerican", () => {
   it("signs positive prices and uses a true minus for negatives", () => {
@@ -81,5 +81,52 @@ describe("formatAge", () => {
 describe("titleCase", () => {
   it("turns keys into labels", () => {
     expect(titleCase("passing_yards")).toBe("Passing Yards");
+  });
+});
+
+describe("typographicMinus", () => {
+  it("replaces a leading hyphen on figures with a true minus", () => {
+    expect(typographicMinus("-199 to -110")).toBe("−199 to −110");
+    expect(typographicMinus("Below -5%")).toBe("Below −5%");
+    expect(typographicMinus("-200 or shorter")).toBe("−200 or shorter");
+  });
+  it("leaves ranges, words and positive figures alone", () => {
+    expect(typographicMinus("$10 to $24.99")).toBe("$10 to $24.99");
+    expect(typographicMinus("+101 to +200")).toBe("+101 to +200");
+    expect(typographicMinus("Same-game parlay")).toBe("Same-game parlay");
+    expect(typographicMinus("2026-09")).toBe("2026-09");
+  });
+});
+
+describe("formatStreak", () => {
+  it("describes a run without judging it", () => {
+    expect(formatStreak("win", 3)).toBe("3 wins");
+    expect(formatStreak("win", 1)).toBe("1 win");
+    expect(formatStreak("loss", 1)).toBe("1 loss");
+    expect(formatStreak("loss", 4)).toBe("4 losses");
+  });
+  it("says none when there is no run", () => {
+    expect(formatStreak("none", 0)).toBe("None");
+    expect(formatStreak("win", 0)).toBe("None");
+    expect(formatStreak("something_new", 2)).toBe("None");
+  });
+});
+
+describe("shareOf", () => {
+  it("is a clamped share for bar widths", () => {
+    expect(shareOf(3, 12)).toBe(0.25);
+    expect(shareOf(0, 12)).toBe(0);
+    expect(shareOf(20, 12)).toBe(1);
+    expect(shareOf(-1, 12)).toBe(0);
+  });
+  it("is zero when there is nothing to divide by", () => {
+    expect(shareOf(3, 0)).toBe(0);
+    expect(shareOf(Number.NaN, 5)).toBe(0);
+  });
+});
+
+describe("formatDateTime", () => {
+  it("shows the day, the time and the zone", () => {
+    expect(formatDateTime("2026-11-16T19:14:24Z")).toBe("Nov 16, 2:14 PM EST");
   });
 });

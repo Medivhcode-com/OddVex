@@ -17,8 +17,14 @@ const LABELS: [keyof Prefs, string][] = [
   ["sync_finished", "Sync results"],
   ["stake_reminder", "Weekly staking reminder"],
 ];
+/** Shown only while the `community` feature flag is on: with it off, nothing can create these. */
+const COMMUNITY_LABELS: [keyof Prefs, string][] = [
+  ["new_follower", "New followers"],
+  ["pick_comment", "Comments on your picks"],
+  ["pick_graded", "Graded picks"],
+];
 
-export function NotificationPreferences({ initial }: { initial: Prefs }) {
+export function NotificationPreferences({ initial, community = false }: { initial: Prefs; community?: boolean }) {
   const [prefs, setPrefs] = useState(initial);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,11 +43,11 @@ export function NotificationPreferences({ initial }: { initial: Prefs }) {
   return (
     <div className="space-y-3 p-4 sm:p-5">
       <ul className="divide-y divide-line">
-        {LABELS.map(([key, label]) => (
+        {(community ? [...LABELS, ...COMMUNITY_LABELS] : LABELS).map(([key, label]) => (
           <li key={key}>
             <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 py-1.5">
               <span>{label}</span>
-              <input type="checkbox" role="switch" checked={prefs[key]} onChange={() => toggle(key)} className="size-5 accent-[var(--ov-accent)]" />
+              <input type="checkbox" role="switch" checked={prefs[key] ?? false} onChange={() => toggle(key)} className="size-5 accent-[var(--ov-accent)]" />
             </label>
           </li>
         ))}

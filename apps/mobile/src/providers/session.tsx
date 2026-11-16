@@ -5,7 +5,7 @@ import * as api from '@/api/client';
 import type { AuthResponse, User } from '@/api/types';
 import { clearSession, loadSession, saveSession } from '@/session/store';
 
-type Topic = 'bets' | 'watchlist' | 'alerts' | 'notifications' | 'reminder';
+type Topic = 'bets' | 'watchlist' | 'alerts' | 'notifications' | 'reminder' | 'community';
 
 export type SessionValue = {
   /** `loading` only while the saved session is being read at launch. */
@@ -13,18 +13,31 @@ export type SessionValue = {
   user: User | null;
   logIn: (email: string, password: string) => Promise<void>;
   createAccount: (input: { email: string; password: string; display_name: string }) => Promise<void>;
-  logOut: () => Promise<void>;
+  /**
+   * Asks the API to end every session of the account (`POST /v1/auth/logout`), then clears the token from
+   * memory and SecureStore. The local clear happens whatever the API answers, including no answer at all.
+   * `local: true` skips the API call: used after a password reset, which has already ended every session of
+   * the account the link was for.
+   */
+  logOut: (options?: { local?: boolean }) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
+  /** Reads `GET /v1/me` again, after something outside this provider changed the user (a confirmed email). */
+  refreshUser: () => Promise<void>;
   /**
-   * Counters that go up when the user's bets, watchlist, alert rules, notifications or staking reminder change,
-   * so every screen showing them reloads.
+   * True after the API said the account is suspended (401 on a call, or 403 on log in). The session on this
+   * device has been cleared; the log in screen explains. Cleared by the next successful log in.
+   */
+  suspended: boolean;
+  /**
+   * Counters that go up when the user's bets, watchlist, alert rules, notifications, staking reminder or
+   * community profile, follows and blocks change, so every screen showing them reloads.
    */
   revision: Record<Topic, number>;
   changed: (topic: Topic) => void;
 };
 
-export const NO_CHANGES: Record<Topic, number> = { bets: 0, watchlist: 0, alerts: 0, notifications: 0, reminder: 0 };
+export const NO_CHANGES: Record<Topic, number> = { bets: 0, watchlist: 0, alerts: 0, notifications: 0, reminder: 0, community: 0 };
 
 const signedOut: SessionValue = {
   status: 'signedOut',
@@ -34,6 +47,8 @@ const signedOut: SessionValue = {
   logOut: async () => {},
   changePassword: async () => {},
   deleteAccount: async () => {},
+  refreshUser: async () => {},
+  suspended: false,
   revision: NO_CHANGES,
   changed: () => {},
 };
@@ -46,14 +61,16 @@ export const SessionContext = createContext<SessionValue>(signedOut);
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ status: SessionValue['status']; user: User | null }>({ status: 'loading', user: null });
+  const [suspended, setSuspended] = useState(false);
   const [revision, setRevision] = useState<Record<Topic, number>>(NO_CHANGES);
   // Bumped whenever the session changes, so a slow launch-time check cannot overwrite a newer log in or log out.
   const epoch = useRef(0);
 
-  const end = useCallback(async () => {
+  const end = useCallback(async (reason?: 'suspended') => {
     epoch.current += 1;
     api.setAuthToken(null);
     setState({ status: 'signedOut', user: null });
+    setSuspended(reason === 'suspended');
     await clearSession();
   }, []);
 
@@ -61,6 +78,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     epoch.current += 1;
     api.setAuthToken(auth.access_token);
     setState({ status: 'signedIn', user: auth.user });
+    setSuspended(false);
     try {
       await saveSession(auth);
     } catch {
@@ -69,8 +87,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    api.setUnauthorizedHandler(() => {
-      void end();
+    api.setUnauthorizedHandler((error) => {
+      void end(api.isAccountSuspended(error) ? 'suspended' : undefined);
       router.push('/login');
     });
     return () => api.setUnauthorizedHandler(null);
@@ -102,16 +120,39 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       ...state,
       revision,
       changed: (topic) => setRevision((current) => ({ ...current, [topic]: current[topic] + 1 })),
-      logIn: async (email, password) => begin(await api.login(email, password)),
+      suspended,
+      logIn: async (email, password) => {
+        try {
+          await begin(await api.login(email, password));
+        } catch (error) {
+          // 403 `account_suspended`: nothing of this account stays on the device.
+          if (api.isAccountSuspended(error)) await end('suspended');
+          throw error;
+        }
+      },
       createAccount: async (input) => begin(await api.register(input)),
-      logOut: end,
+      logOut: async (options) => {
+        if (!options?.local) {
+          try {
+            await api.logout();
+          } catch {
+            // Offline, timed out or already rejected. The device is signed out either way.
+          }
+        }
+        await end();
+      },
+      refreshUser: async () => {
+        const started = epoch.current;
+        const user = await api.getMe();
+        if (epoch.current === started) setState({ status: 'signedIn', user });
+      },
       changePassword: async (currentPassword, newPassword) => begin(await api.changePassword(currentPassword, newPassword)),
       deleteAccount: async () => {
         await api.deleteAccount();
         await end();
       },
     }),
-    [state, revision, begin, end],
+    [state, suspended, revision, begin, end],
   );
 
   return <SessionContext value={value}>{children}</SessionContext>;

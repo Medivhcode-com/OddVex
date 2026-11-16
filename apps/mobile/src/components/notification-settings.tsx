@@ -9,6 +9,7 @@ import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useStakeReminder } from '@/hooks/use-notifications';
 import { useResource } from '@/hooks/use-resource';
+import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
 import { space } from '@/theme';
 import { formatMoney } from '@/utils/format';
@@ -25,6 +26,12 @@ const SWITCHES: readonly { kind: NotificationKind; label: string }[] = [
   { kind: 'sync_finished', label: 'Sync results' },
   { kind: 'stake_reminder', label: 'Weekly staking reminder' },
 ];
+/** Only offered while the `community` flag is on: the API creates these kinds only then. */
+const COMMUNITY_SWITCHES: readonly { kind: NotificationKind; label: string }[] = [
+  { kind: 'new_follower', label: 'New followers' },
+  { kind: 'pick_comment', label: 'Comments on your picks' },
+  { kind: 'pick_graded', label: 'Graded picks' },
+];
 
 /** One switch per kind of notification. A change sends only that kind; the API leaves the others alone. */
 export function NotificationPreferencesForm({ userId }: { userId: string }) {
@@ -34,6 +41,11 @@ export function NotificationPreferencesForm({ userId }: { userId: string }) {
   const [pending, setPending] = useState<NotificationKind | null>(null);
   const [error, setError] = useState<string | null>(null);
   const preferences = saved ?? loaded.data;
+  const community = useFlag('community');
+  const switches = community ? [...SWITCHES, ...COMMUNITY_SWITCHES] : SWITCHES;
+  // The three community kinds are typed as nullable for older clients. The API always sends them; a missing
+  // value means the default, which is on.
+  const isOn = (kind: NotificationKind) => preferences?.in_app[kind] !== false;
 
   async function toggle(kind: NotificationKind, value: boolean) {
     if (pending) return;
@@ -52,12 +64,12 @@ export function NotificationPreferencesForm({ userId }: { userId: string }) {
     <View style={styles.block}>
       {preferences ? (
         <View>
-          {SWITCHES.map(({ kind, label }) => (
+          {switches.map(({ kind, label }) => (
             // While a change is being saved the switch already shows the new position.
             <SwitchRow
               key={kind}
               label={label}
-              value={pending === kind ? !preferences.in_app[kind] : preferences.in_app[kind]}
+              value={pending === kind ? !isOn(kind) : isOn(kind)}
               onChange={(value) => void toggle(kind, value)}
             />
           ))}

@@ -15,6 +15,10 @@ NotificationKind = Literal[
     "bet_settled",
     "sync_finished",
     "stake_reminder",
+    # Community (added later; only created while the `community` flag is on).
+    "new_follower",
+    "pick_comment",
+    "pick_graded",
 ]
 NOTIFICATION_KINDS: tuple[str, ...] = get_args(NotificationKind)
 
@@ -35,7 +39,7 @@ class NotificationOut(BaseModel):
         default_factory=dict,
         description=(
             "Small object for deep links; the keys depend on `kind` (`event_id`, `alert_id`, "
-            "`market`, `price_american`, `line`, `bet_id`, `run_id`, ...)."
+            "`market`, `price_american`, `line`, `bet_id`, `run_id`, `pick_id`, `handle`, ...)."
         ),
     )
     created_at: datetime
@@ -69,6 +73,10 @@ class InAppPreferencesOut(BaseModel):
     bet_settled: bool = True
     sync_finished: bool = True
     stake_reminder: bool = True
+    # Community kinds, added later. Always sent; typed as optional for older clients.
+    new_follower: bool | None = True
+    pick_comment: bool | None = True
+    pick_graded: bool | None = True
 
 
 class NotificationPreferencesOut(BaseModel):
@@ -92,6 +100,9 @@ class InAppPreferencesIn(BaseModel):
     bet_settled: bool | None = None
     sync_finished: bool | None = None
     stake_reminder: bool | None = None
+    new_follower: bool | None = None
+    pick_comment: bool | None = None
+    pick_graded: bool | None = None
 
 
 class NotificationPreferencesUpdate(BaseModel):

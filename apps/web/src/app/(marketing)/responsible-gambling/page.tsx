@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageIntro, Prose } from "@/components/marketing/chrome";
+import { DraftBanner } from "@/components/marketing/draft-banner";
 
 export const metadata: Metadata = {
   title: "Responsible gambling",
@@ -34,10 +35,18 @@ export default function Page() {
           <li>Sportsbooks and state regulators offer self-exclusion programs. Your state gaming regulator&rsquo;s website explains how to enroll.</li>
         </ul>
         <h2>What OddVex commits to</h2>
+      </Prose>
+      {/* Only the commitments are draft text. The helpline information above is not hedged. */}
+      <DraftBanner className="mt-4">
+        These commitments describe how the preview works today. They have not yet been reviewed by legal counsel and
+        will be replaced by a final version before public launch.
+      </DraftBanner>
+      <Prose>
         <ul>
           <li>OddVex is for adults 21 and over and is not directed at anyone younger.</li>
           <li>We don&rsquo;t promise wins, call anything a lock or describe any bet as risk-free.</li>
           <li>The tracker shows your losses as plainly as your wins.</li>
+          <li>You can set a weekly staking reminder in Settings. It is a reminder, not a limit: OddVex cannot stop a bet at a sportsbook.</li>
           <li>Better information does not remove risk. Most bettors lose money over time.</li>
         </ul>
       </Prose>

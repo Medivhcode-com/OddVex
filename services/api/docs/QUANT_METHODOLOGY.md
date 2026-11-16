@@ -225,3 +225,66 @@ variants; a real provider would need a per-league statement of which score a mar
 Limitation: sportsbook house rules differ (dead heats, reduced-juice pushes, parlay
 reductions). OddVex records what the user or the import source reports and applies the
 standard rules above; the sportsbook's own settlement is authoritative.
+
+## Best price against the consensus of the other books (value screen)
+
+`quant.value.best_price_vs_consensus`, used by `GET /v1/value`.
+
+For one outcome of one market, take the comparable quotes: books that are open, not stale and
+on the same line (for spread and total every line is its own group; a longer price on another
+line is a different bet, not a discrepancy).
+
+1. **Best book** `b*`: the highest decimal price for the outcome. The first book wins a tie.
+2. **Consensus without the best book**: the mean, over every *other* book `b`, of that book's
+   multiplicative no-vig probability of the outcome,
+   `p = (1 / (n - 1)) * sum_{b != b*} fair_b(outcome)`.
+   The best book is left out because its own long price lowers its own fair probability, so
+   including it would pull the consensus towards the price being tested.
+3. At least **2 other books** are required. With fewer, nothing is reported for the outcome.
+4. **Edge** = `quant.ev.expected_value(p, best price).ev_per_unit = p * decimal - 1`, the
+   expected profit per 1 unit staked *if `p` were the true probability*.
+   `breakeven_probability = 1 / decimal`.
+
+Worked example, outcome 1 of a two-way market:
+
+| Book | Outcome 1 | Outcome 2 | No-vig probability of outcome 1 |
+| --- | --- | --- | --- |
+| A | 2.10 | 1.80 | 6/13 = 0.461538 (not used: A has the best price) |
+| B | 2.00 | 1.90 | 19/39 = 0.487179 |
+| C | 1.95 | 1.95 | 1/2 = 0.500000 |
+
+Consensus = (19/39 + 1/2) / 2 = 77/156 = 0.493590. Edge = 77/156 x 2.10 - 1 = 0.036538.
+Breakeven = 1 / 2.10 = 0.476190. With A included the consensus would have been
+113/234 = 0.482906.
+
+Limitations, which the API states in `caveat`: a price above the consensus is **not proof of
+an edge**. The consensus is an average of a few books and can be wrong; the best book may
+simply be the slow or the sharp one; limits and availability differ by sportsbook; prices
+move. It compares prices and is not a prediction. On the synthetic data every book is the
+same model plus a margin and noise, so no row reflects a real edge.
+
+## Tracker analytics
+
+`quant.tracker` (pure helpers) and `bets.analytics` (grouping), used by
+`GET /v1/bets/analytics`. Settled bets only. Money sums, ROI and CLV are the same functions the
+summary uses.
+
+- **Odds band**: by the bet's price as a whole-number American price (even money is +100):
+  -200 or shorter; -199 to -110; -109 to +100; +101 to +200; longer than +200. A parlay is
+  banded by its combined price.
+- **Win rate** = wins / (wins + losses), where a win is a settled bet with positive profit
+  and a loss one with negative profit. Pushes and voids (zero profit) are in neither.
+- **Staked** excludes void bets, as in the summary. **Average stake** and **average odds**
+  (arithmetic mean of decimal odds, not stake-weighted) also leave void bets out.
+- **Weekday** is the UTC weekday the bet was placed; **month** is the UTC month it was
+  settled, matching the summary's timeline.
+- **Streaks**: bets in settlement order. A zero-profit bet neither extends nor ends a run.
+  `current_streak` is the run the most recent decided bet belongs to.
+- **CLV**: bets with a closing price on every leg. `share_beating_close` is the share with CLV
+  above 0. Buckets are below -5%, -5% to -2%, -2% to 0%, 0% to 2%, 2% to 5%, 5% or more; a
+  bucket includes its lower bound.
+- **Stake distribution**: under 10, 10 to 24.99, 25 to 49.99, 50 to 99.99, 100 or more.
+
+Limitation: these describe a history; they do not estimate skill or future results. With
+fewer than 30 settled bets the API says so in `sample_note`: a win rate or ROI from a sample
+that small is mostly noise, and even a few hundred bets leave wide uncertainty.

@@ -13,6 +13,7 @@ import { Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
 import { useStakeReminder } from '@/hooks/use-notifications';
 import { useResource } from '@/hooks/use-resource';
+import { useFlag } from '@/providers/flags';
 import { openLogin, useSession } from '@/providers/session';
 import { leagueLabel } from '@/screens/games';
 import { space } from '@/theme';
@@ -73,6 +74,7 @@ function SignedIn({ userId }: { userId: string }) {
   const router = useRouter();
   const now = useNow();
   const { revision, changed } = useSession();
+  const analyticsOn = useFlag('tracker_analytics');
   const summary = useResource(`bet-summary:${userId}`, getBetSummary, revision.bets);
   const bets = useResource(`bets:${userId}`, getBets, revision.bets);
   const leagues = useResource('leagues', getLeagues);
@@ -131,6 +133,15 @@ function SignedIn({ userId }: { userId: string }) {
                   <Stat label="Closing line value" value={formatSignedPercent(totals.avg_clv)} hint="Average, where a closing price was recorded" />
                   <Stat label="Open bets" value={String(totals.pending_count)} hint={`${formatMoney(totals.pending_exposure)} at risk`} />
                 </StatGrid>
+              </View>
+            </Panel>
+          ) : null}
+
+          {analyticsOn ? (
+            <Panel>
+              <View style={styles.block}>
+                <PanelHeading title="Analytics" description="Your settled bets by odds, weekday and month, with runs, stake sizes and closing line value." />
+                <Button label="Open analytics" variant="secondary" onPress={() => router.push('/analytics')} />
               </View>
             </Panel>
           ) : null}

@@ -119,7 +119,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
             )
         if path.startswith(
-            ("/v1/auth", "/v1/me", "/v1/bets", "/v1/sync", "/v1/admin", "/v1/watchlist")
+            ("/v1/auth", "/v1/me", "/v1/bets", "/v1/sync", "/v1/admin", "/v1/watchlist", "/v1/dev")
         ):
             response.headers.setdefault("Cache-Control", "no-store")
         if self._production:

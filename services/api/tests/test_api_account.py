@@ -78,6 +78,8 @@ def test_export_contains_everything_of_mine_and_nothing_else(client: TestClient,
         "notifications",
         "notification_preferences",
         "stake_reminder",
+        # Added with the community; older clients ignore it.
+        "community",
     }
     assert body["format_version"] == 1
     assert body["user"] == ada["user"]
@@ -88,7 +90,10 @@ def test_export_contains_everything_of_mine_and_nothing_else(client: TestClient,
         "role",
         "age_confirmed_at",
         "created_at",
+        "plan",
+        "email_verified",
     }
+    assert body["user"]["plan"] == "free" and body["user"]["email_verified"] is False
 
     # Bets: the two manual ones plus what the mock import brought in, in full BetOut form.
     listed = client.get("/v1/bets", headers=ada_headers).json()

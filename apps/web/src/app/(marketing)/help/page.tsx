@@ -16,7 +16,11 @@ const FAQ: [string, string][] = [
   ["Why does a hit rate show a range?", "Because a small sample can't pin down a true rate. The range is a 95% Wilson interval. A wider range means less evidence."],
   ["Why won't the parlay tool show a probability for some parlays?", "Legs from the same game are correlated, so multiplying their probabilities gives a wrong answer. OddVex shows the combined price and warns you instead."],
   ["How do I enter fractional or decimal odds?", "Pick the format next to the odds field when logging a bet or using a calculator. OddVex converts and stores the price exactly."],
-  ["How do I delete my data?", "Settings, then Delete account. Your account, bets and any sync connections are removed immediately."],
+  ["How do alerts work?", "Open a game and choose Set an alert to watch a price, a line, the start or the final score. Alerts are checked when you open OddVex; nothing is sent by push or email. An alert that has fired shows up under Alerts inside OddVex."],
+  ["What is the weekly staking reminder?", "A weekly amount you choose in Settings. If the stakes you log in a week reach it, OddVex tells you once. It is a reminder, not a limit: OddVex does not stop you logging bets and cannot stop a bet at a sportsbook."],
+  ["How do I follow a team, player or game?", "Use the Follow button on a game or a player's props page. What you follow is saved to your account as a watchlist and appears on your home screen. Unfollow at any time to remove it."],
+  ["How does settling from final scores work?", "A bet logged from a game screen is tied to that game. Once the game is final, choose Settle from final scores in the tracker and OddVex grades those bets from the score. Bets you typed in by hand, or that the score cannot decide, stay open for you to settle yourself."],
+  ["How do I delete my data?", "Settings, then Delete account. Your account, bets, watchlist, alerts, notifications and sync connections are removed immediately. Security log entries, which hold an internal account ID and IP address, are kept; the retention period is to be confirmed before launch."],
   ["Who can use OddVex?", "Adults 21 and over. You confirm this when you create an account."],
 ];
 

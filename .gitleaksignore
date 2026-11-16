@@ -1,3 +1,7 @@
 # False positive: an empty `ODDVEX_JWT_SECRET=` placeholder in an example file. The scanner read the
 # next line's variable name as the value. No secret was committed.
 b95a85945e4558f3370d69939eed0f62472683f8:services/api/.env.example:generic-api-key:13
+
+# False positives: a made-up reset token in a mobile unit test fixture. Replaced with a plainly fake value since.
+37f30e979f796b434fd49dffbb671dc419940e01:apps/mobile/src/api/client.test.ts:generic-api-key:376
+37f30e979f796b434fd49dffbb671dc419940e01:apps/mobile/src/api/client.test.ts:generic-api-key:378

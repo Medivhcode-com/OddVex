@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import text
 
 from .. import __version__
 from ..board import SYNTHETIC_NOTICE
 from ..deps import BoardDep, ProviderDep
-from ..errors import ERROR_RESPONSES, NOT_FOUND_RESPONSE, ApiError, not_found
+from ..errors import ERROR_RESPONSES, NOT_FOUND_RESPONSE, ApiError, ErrorResponse, not_found
+from ..flags.service import require_flag
 from ..providers import Event, Player
 from .schemas import (
     EventDetailOut,
@@ -30,18 +33,39 @@ from .schemas import (
     PropSplit,
     PropWindow,
     SportsbookOut,
+    ValueScreenOut,
 )
+
+logger = logging.getLogger("oddvex.health")
 
 health_router = APIRouter(tags=["meta"])
 router = APIRouter()
 
 
 @health_router.get(
-    "/health", response_model=HealthOut, operation_id="get_health", summary="Liveness check"
+    "/health",
+    response_model=HealthOut,
+    operation_id="get_health",
+    summary="Liveness check",
+    description=(
+        "Always answers 200 while the process is up. `database` is the result of a cheap "
+        "`SELECT 1`; when it fails, `status` is `degraded`."
+    ),
 )
-def get_health(provider: ProviderDep) -> HealthOut:
+def get_health(provider: ProviderDep, request: Request) -> HealthOut:
+    database: Literal["ok", "error"] = "ok"
+    try:
+        with request.app.state.session_factory() as session:
+            session.execute(text("SELECT 1"))
+    except Exception:  # the health check must answer whatever the database does
+        database = "error"
+        logger.warning("health_database_check_failed", exc_info=True)
     return HealthOut(
-        status="ok", version=__version__, data_mode="synthetic", server_time=provider.now()
+        status="ok" if database == "ok" else "degraded",
+        version=__version__,
+        data_mode=provider.data_mode,  # type: ignore[arg-type]
+        server_time=provider.now(),
+        database=database,
     )
 
 
@@ -54,7 +78,7 @@ def get_health(provider: ProviderDep) -> HealthOut:
 )
 def get_meta(provider: ProviderDep) -> MetaOut:
     return MetaOut(
-        data_mode="synthetic",
+        data_mode=provider.data_mode,  # type: ignore[arg-type]
         provider=provider.name,
         version=__version__,
         server_time=provider.now(),
@@ -257,3 +281,36 @@ def list_props(
     market: Annotated[str | None, Query(max_length=40)] = None,
 ) -> list[PropBoardRowOut]:
     return board.props_board(league, market)
+
+
+# --------------------------------------------------------------- value screen
+@router.get(
+    "/value",
+    response_model=ValueScreenOut,
+    operation_id="list_value",
+    tags=["value"],
+    summary="Market discrepancies: best price against the consensus of the other books",
+    description=(
+        "Outcomes of live and upcoming events whose best open, non-stale price is longer "
+        "than the no-vig consensus of the other open, non-stale sportsbooks at the same "
+        "line. The sportsbook with the best price is excluded from its own consensus and "
+        "at least 2 other sportsbooks are required, otherwise the outcome is skipped. "
+        "Sorted by `edge`, largest first. A price above the consensus is not proof of an "
+        "edge and this is not a prediction; read `caveat`. Behind the `value_screen` flag."
+    ),
+    dependencies=[Depends(require_flag("value_screen"))],
+    responses={
+        404: {"model": ErrorResponse, "description": "The feature is switched off"},
+        **ERROR_RESPONSES,
+    },
+)
+def list_value(
+    board: BoardDep,
+    league: Annotated[LeagueKey | None, Query()] = None,
+    market: Annotated[EventMarket | None, Query()] = None,
+    min_edge: Annotated[
+        float, Query(ge=0, le=10, description="Smallest edge to include, as a fraction.")
+    ] = 0.0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> ValueScreenOut:
+    return board.value_screen(league, market, min_edge, limit)

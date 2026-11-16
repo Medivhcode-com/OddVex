@@ -10,6 +10,7 @@ export default function ToolsLayout() {
     <Stack screenOptions={options}>
       <Stack.Screen name="tools" options={{ title: 'Calculators' }} />
       <Stack.Screen name="parlay" options={{ title: 'Parlay research' }} />
+      <Stack.Screen name="value" options={{ title: 'Value screen' }} />
     </Stack>
   );
 }
