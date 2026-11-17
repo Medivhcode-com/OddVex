@@ -9,3 +9,10 @@ preview.oddvex.com {
 	}
 	reverse_proxy host.docker.internal:3410
 }
+
+# The mobile app calls the API directly and signs in with its own token, so this hostname has
+# no password prompt. It serves the same data as the preview site.
+api-preview.oddvex.com {
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy host.docker.internal:3411
+}

@@ -17,7 +17,8 @@ preview. **Nothing here has been run on the server yet.**
 
 ## Steps
 
-1. DNS: add an `A` record `preview` → `179.236.240.236` (and `AAAA` → `2a02:4780:95:965d::1`).
+1. DNS: add `A` records `preview` and `api-preview` → `179.236.240.236` (and `AAAA` → `2a02:4780:95:965d::1`).
+   `api-preview` is for the mobile test build; it has no password prompt because the app signs in with its own token.
 2. On the server: clone the repository to `/opt/oddvex/app`, create `/opt/oddvex/.env` from `.env.example`.
 3. Start: `docker compose -p oddvex --env-file /opt/oddvex/.env -f infrastructure/hostinger/compose.yaml up -d --build`.
    The API applies database migrations when it starts.

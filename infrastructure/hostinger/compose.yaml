@@ -2,7 +2,8 @@
 #
 # Nothing here publishes a public port. The web container listens on 127.0.0.1:${ODDVEX_WEB_PORT}
 # only; the server's existing reverse proxy (Caddy) forwards preview.oddvex.com to it, adds HTTPS
-# and asks for a password. The API and the database are reachable only inside this project.
+# and asks for a password. The API listens on 127.0.0.1:${ODDVEX_API_PORT} for the mobile app's
+# hostname. The database is reachable only inside this project.
 #
 # Run from the repository root on the server:
 #   docker compose -p oddvex --env-file /opt/oddvex/.env -f infrastructure/hostinger/compose.yaml up -d --build
@@ -33,11 +34,13 @@ services:
       ODDVEX_CORS_ORIGINS: ${ODDVEX_PUBLIC_URL:?set ODDVEX_PUBLIC_URL}
       ODDVEX_WEB_BASE_URL: ${ODDVEX_PUBLIC_URL}
       ODDVEX_ADMIN_EMAILS: ${ODDVEX_ADMIN_EMAILS:-}
-      # Only the web container talks to the API, so every request has the same address.
-      # Per-account limits still apply; the per-address limit is left off behind the web app.
-      ODDVEX_TRUST_PROXY: "false"
+      # The shared reverse proxy is the only thing that can reach the published port, so its
+      # forwarded client address is trusted for rate limiting.
+      ODDVEX_TRUST_PROXY: "true"
     depends_on:
       db: { condition: service_healthy }
+    # For the mobile app, which talks to the API directly (api-preview.oddvex.com).
+    ports: ["127.0.0.1:${ODDVEX_API_PORT:-3411}:8000"]
     mem_limit: 768m
 
   web:
