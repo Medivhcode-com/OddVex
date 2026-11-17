@@ -97,7 +97,10 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
           <div className="space-y-1.5 border-t border-line px-4 py-3 text-xs text-muted sm:px-5">
             <p className="max-w-prose">{board.method}</p>
             <p>
-              As of <time dateTime={board.as_of}>{formatDateTime(board.as_of)}</time>. Synthetic data: teams, games and sportsbooks are fictional.
+              As of <time dateTime={board.as_of}>{formatDateTime(board.as_of)}</time>.{" "}
+              {board.data_mode === "replay"
+                ? "Replay of past games: sportsbooks and prices are simulated."
+                : "Synthetic data: teams, games and sportsbooks are fictional."}
             </p>
           </div>
         </Panel>

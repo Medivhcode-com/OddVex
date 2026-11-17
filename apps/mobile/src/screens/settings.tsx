@@ -17,7 +17,7 @@ import { Screen } from '@/components/screen';
 import { Button, Panel, PanelHeading } from '@/components/states';
 import { Num, Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
-import { isSynthetic, useMeta } from '@/providers/meta';
+import { isReplay, isSynthetic, useMeta } from '@/providers/meta';
 import { useOddsFormat } from '@/providers/odds-format';
 import { openLogin, useSession } from '@/providers/session';
 import { fontSize, space } from '@/theme';
@@ -61,6 +61,25 @@ function DataSource() {
         {meta.data.notice ? (
           <Txt variant="secondary" tone="muted">
             {meta.data.notice}
+          </Txt>
+        ) : null}
+      </View>
+    );
+  }
+  if (isReplay(meta.data)) {
+    return (
+      <View style={[styles.synthetic, { backgroundColor: theme.warnSoft, borderLeftColor: theme.warn }]}>
+        <Txt variant="secondary" tone="warn" weight="semibold">
+          Replay of past games — sportsbooks and prices are simulated
+        </Txt>
+        {meta.data.notice ? (
+          <Txt variant="secondary" tone="muted">
+            {meta.data.notice}
+          </Txt>
+        ) : null}
+        {meta.data.attribution ? (
+          <Txt variant="secondary" tone="muted">
+            {meta.data.attribution}
           </Txt>
         ) : null}
       </View>

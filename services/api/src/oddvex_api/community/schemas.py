@@ -245,7 +245,7 @@ class PickOut(BaseModel):
         description="Other than `visible` only on your own pick, after moderators hid it."
     )
     moderation_note: str | None = None
-    data_mode: DataMode = Field(description="The events and prices are synthetic in this build.")
+    data_mode: DataMode = Field(description="Reported by the active data provider.")
 
 
 class PickPageOut(BaseModel):

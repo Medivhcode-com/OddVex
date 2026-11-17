@@ -40,6 +40,7 @@ session. Nothing has been inferred.
 | D-012 | 2026-11-16 | Decision under D-007 | A dependency audit runs in CI and fails on high or critical JavaScript advisories and any known Python vulnerability | — | Build session | `.github/workflows/ci.yml` job `audit` | Four moderate JavaScript advisories in build tooling were below the threshold when added |
 | D-013 | 2026-11-16 | Decision under D-007 | If the web app's page-hash file for the content security policy is missing in production, it falls back to a looser policy and logs an error instead of breaking pages | — | Build session | `apps/web` proxy | Reversible: can be changed to fail closed |
 | D-014 | 2026-11-16 | Instruction | Pull requests #10 (milestones 4 to 6, code only) and #11 (founder action receipts) merged to `main` | — | Founder (#11 by direct instruction; #10 under D-007) | Merge commits `01bd485` and `2bf4d88` | #10 merged by the build session after all eight CI jobs passed, without independent review |
+| D-015 | 2026-11-16 | Approval | Build a replay of real past NFL games (2024 season) for internal preview, showing real team and player names | G-12 (partly) | Founder, in the build session ("Work starts", in reply to the question whether to build the replay with real names) | `services/api/src/oddvex_api/providers/replay.py`; `data/external/README.md` | Internal preview only. The replay refuses to start when `ODDVEX_ENV=production`, the dataset is not committed, and no logos are used. It does not cover showing real names to the public, in screenshots, in store listings or in marketing: G-12 stays closed for those, pending counsel. Sportsbooks stay fictional and all per-book prices and prop lines are simulated |
 
 Standing facts as of 2026-11-16, recorded so that nobody assumes otherwise:
 
@@ -56,7 +57,7 @@ Standing facts as of 2026-11-16, recorded so that nobody assumes otherwise:
 | G-09 Production credentials | None exist |
 | G-10 Legal decisions | None made. Legal pages are unreviewed drafts. No counsel engaged |
 | G-11 Anything real-money | Nothing built |
-| G-12 Real names, logos or likeness | Not opened. Fixtures are fictional |
+| G-12 Real names, logos or likeness | Opened for internal replay preview only (D-015). Not opened for anything public. Fixtures stay fictional |
 | G-13 New personal data categories or sub-processors | None added. No sub-processor engaged |
 | G-14 Public accuracy or performance claims | None made |
 

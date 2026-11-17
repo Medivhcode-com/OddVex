@@ -89,6 +89,7 @@ export default async function ValuePage({ searchParams }: { searchParams: Promis
         <Notice tone="warn" title="Read this first">
           {screen.caveat}
           {screen.data_mode === "synthetic" ? " This preview runs on synthetic data: every book is the same model plus a margin and noise, so no row here reflects a real edge." : null}
+          {screen.data_mode === "replay" ? " This preview replays past games: every book is simulated around one recorded closing line, so no row here reflects a real edge." : null}
         </Notice>
         <Notice tone="second" title="How it is calculated">
           {screen.method} <Link href="/methodology#edge-vs-consensus">Formula and a worked example</Link>

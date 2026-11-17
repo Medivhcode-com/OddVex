@@ -3692,7 +3692,10 @@
             ]
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -3809,7 +3812,10 @@
             "$ref": "#/components/schemas/ConsensusOut"
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -4285,8 +4291,11 @@
       "HealthOut": {
         "properties": {
           "data_mode": {
-            "const": "synthetic",
             "description": "Reported by the active data provider.",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -4625,7 +4634,10 @@
             "type": "string"
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -4868,7 +4880,10 @@
             "type": "string"
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -5070,9 +5085,24 @@
       },
       "MetaOut": {
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Credit line required by the licence of the underlying data, if any.",
+            "title": "Attribution"
+          },
           "data_mode": {
-            "const": "synthetic",
-            "description": "Reported by the active data provider. All sports data is synthetic in this build.",
+            "description": "Reported by the active data provider. `synthetic`: everything is generated. `replay`: real past games shifted in time, with simulated sportsbook prices.",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -5913,8 +5943,11 @@
             "type": "integer"
           },
           "data_mode": {
-            "const": "synthetic",
-            "description": "The events and prices are synthetic in this build.",
+            "description": "Reported by the active data provider.",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -6137,7 +6170,10 @@
             "type": "string"
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -6298,7 +6334,10 @@
             "title": "Consensus Line"
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -7692,7 +7731,10 @@
             "type": "string"
           },
           "data_mode": {
-            "const": "synthetic",
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
             "title": "Data Mode",
             "type": "string"
           },
@@ -7888,7 +7930,7 @@
     }
   },
   "info": {
-    "description": "OddVex is a sports-betting **intelligence** API: odds comparison, player-prop research,\nbetting math and bet tracking. It never accepts, places or facilitates wagers.\n\n**All sports data served by this build is synthetic.** Teams, players, sportsbooks, prices\nand statistics are fictional and generated deterministically. Responses carry\n`data_mode: \"synthetic\"`.\n\nConventions: JSON, snake_case, ISO-8601 UTC timestamps, string ids. Probabilities, holds, ROI\nand CLV are fractions (0.05 = 5%) unless the field name ends in `_percent`. Errors use the\nenvelope `{\"error\": {\"code\", \"message\", \"details\"?}}`.\n",
+    "description": "OddVex is a sports-betting **intelligence** API: odds comparison, player-prop research,\nbetting math and bet tracking. It never accepts, places or facilitates wagers.\n\n**By default all sports data served by this build is synthetic.** Teams, players,\nsportsbooks, prices and statistics are fictional and generated deterministically, and\nresponses carry `data_mode: \"synthetic\"`. An internal preview mode, `data_mode: \"replay\"`,\nserves real past games shifted in time; its sportsbooks, prices and prop lines are simulated.\n\nConventions: JSON, snake_case, ISO-8601 UTC timestamps, string ids. Probabilities, holds, ROI\nand CLV are fractions (0.05 = 5%) unless the field name ends in `_percent`. Errors use the\nenvelope `{\"error\": {\"code\", \"message\", \"details\"?}}`.\n",
     "title": "OddVex API",
     "version": "0.1.0"
   },

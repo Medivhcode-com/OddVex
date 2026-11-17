@@ -232,7 +232,7 @@ class Board:
             available_markets=event.markets,  # type: ignore[arg-type]
             players=players,
             as_of=self.now,
-            data_mode="synthetic",
+            data_mode=self.provider.data_mode,  # type: ignore[arg-type]
         )
 
     # ------------------------------------------------------------------- odds
@@ -360,7 +360,7 @@ class Board:
             event=self.event_summary(event),
             market=market,  # type: ignore[arg-type]
             as_of=self.now,
-            data_mode="synthetic",
+            data_mode=self.provider.data_mode,  # type: ignore[arg-type]
             stale_after_seconds=self.stale_after_seconds(event.status),
             books=books,
             consensus=ConsensusOut(
@@ -396,7 +396,7 @@ class Board:
             rows=[row for row in rows if row.edge >= min_edge][:limit],
             min_edge=min_edge,
             as_of=self.now,
-            data_mode="synthetic",
+            data_mode=self.provider.data_mode,  # type: ignore[arg-type]
             method=VALUE_METHOD,
             caveat=VALUE_CAVEAT,
         )
@@ -472,7 +472,7 @@ class Board:
             event=self.event_summary(event),
             market=market,  # type: ignore[arg-type]
             as_of=self.now,
-            data_mode="synthetic",
+            data_mode=self.provider.data_mode,  # type: ignore[arg-type]
             series=series,
         )
 
@@ -504,7 +504,7 @@ class Board:
             next_event=self.event_summary(event) if event else None,
             opponent=opponent,
             as_of=self.now,
-            data_mode="synthetic",
+            data_mode=self.provider.data_mode,  # type: ignore[arg-type]
         )
 
     def _game_log(self, player_id: str) -> list[GameLogEntry]:
@@ -648,7 +648,7 @@ class Board:
             ),
             caveat=HIT_RATE_CAVEAT,
             as_of=self.now,
-            data_mode="synthetic",
+            data_mode=self.provider.data_mode,  # type: ignore[arg-type]
         )
 
     def props_board(self, league: str | None, market: str | None) -> list[PropBoardRowOut]:
@@ -672,6 +672,9 @@ class Board:
             log = self._game_log(player.id)
             for prop_market in markets:
                 market_offers = [o for o in offers if o.market == prop_market]
+                if not market_offers:
+                    # No sportsbook lists this player for this game (replay: did not play).
+                    continue
                 _, line, best_over, best_under = self._prop_offers(market_offers, event.status)
                 l10_rate: float | None = None
                 over_count = sample = 0

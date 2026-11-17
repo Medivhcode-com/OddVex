@@ -11,6 +11,7 @@ Read `PROJECT_CONSTITUTION.md` first. It is binding. This file is the practical 
 | `services/api` | The backend, a modular monolith | Python 3.13, FastAPI, SQLAlchemy 2, Alembic |
 | `packages/types` | TypeScript types generated from the API's OpenAPI schema | openapi-typescript |
 | `data/fixtures` | Synthetic sample data used by contract tests | JSON |
+| `data/external` | Third-party open data for the internal replay preview. Raw files are never committed (real names) | CSV, Parquet, JSON |
 | `docs/` | Architecture, product, design, research, compliance, marketing | Markdown |
 
 Top-level `services/odds`, `services/ai`, `services/notifications` and `apps/admin` from the original plan do not

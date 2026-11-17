@@ -41,7 +41,7 @@ from oddvex_api.db import (
     make_session_factory,
 )
 from oddvex_api.flags import service as flags
-from oddvex_api.providers import SyntheticProvider
+from oddvex_api.main import build_provider
 from oddvex_api.seed import DEMO_ADMIN_EMAIL, DEMO_EMAIL, seed_demo
 
 
@@ -56,7 +56,7 @@ def main(argv: list[str]) -> int:
     with make_session_factory(engine)() as session:
         now = datetime.now(UTC)
         # Same seed as the app, so the gradeable demo bets point at events the API serves.
-        provider = SyntheticProvider(seed=settings.synthetic_seed, clock=lambda: now)
+        provider = build_provider(settings, clock=lambda: now)
         created = seed_demo(
             session,
             settings.demo_password,

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI
@@ -31,7 +32,8 @@ from .mailer import router as mailer_router
 from .mailer.sender import make_sender
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from .notifications import router as notifications_router
-from .providers import SportsDataProvider, SyntheticProvider
+from .providers import ReplayProvider, SportsDataProvider, SyntheticProvider
+from .providers.replay import load_replay_dataset
 from .ratelimit import SlidingWindowRateLimiter
 from .sync import SyncRegistry, default_registry
 from .sync import router as sync_router
@@ -43,9 +45,10 @@ DESCRIPTION = """\
 OddVex is a sports-betting **intelligence** API: odds comparison, player-prop research,
 betting math and bet tracking. It never accepts, places or facilitates wagers.
 
-**All sports data served by this build is synthetic.** Teams, players, sportsbooks, prices
-and statistics are fictional and generated deterministically. Responses carry
-`data_mode: "synthetic"`.
+**By default all sports data served by this build is synthetic.** Teams, players,
+sportsbooks, prices and statistics are fictional and generated deterministically, and
+responses carry `data_mode: "synthetic"`. An internal preview mode, `data_mode: "replay"`,
+serves real past games shifted in time; its sportsbooks, prices and prop lines are simulated.
 
 Conventions: JSON, snake_case, ISO-8601 UTC timestamps, string ids. Probabilities, holds, ROI
 and CLV are fractions (0.05 = 5%) unless the field name ends in `_percent`. Errors use the
@@ -145,6 +148,20 @@ def _custom_openapi(app: FastAPI) -> dict[str, Any]:
     return schema
 
 
+def build_provider(
+    settings: Settings, clock: Callable[[], datetime] | None = None
+) -> SportsDataProvider:
+    """The data provider selected by ``ODDVEX_DATA_PROVIDER`` (synthetic unless set)."""
+    if settings.data_provider == "replay":
+        return ReplayProvider(
+            load_replay_dataset(settings.replay_data_path),
+            shift_days=settings.replay_shift_days,
+            clock=clock,
+            seed=settings.synthetic_seed,
+        )
+    return SyntheticProvider(seed=settings.synthetic_seed, clock=clock)
+
+
 def create_app(
     settings: Settings | None = None,
     provider: SportsDataProvider | None = None,
@@ -188,7 +205,7 @@ def create_app(
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
-    app.state.provider = provider or SyntheticProvider(seed=settings.synthetic_seed)
+    app.state.provider = provider or build_provider(settings)
     app.state.cache = InMemoryTTLCache()
     app.state.rate_limiter = SlidingWindowRateLimiter(settings.rate_limit_window_seconds)
     app.state.sync_registry = sync_registry or default_registry()
