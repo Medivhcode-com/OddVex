@@ -21,7 +21,8 @@ import sys
 from oddvex_api.community.service import grade_due_picks
 from oddvex_api.config import Settings, get_settings
 from oddvex_api.db import make_engine, make_session_factory
-from oddvex_api.providers import SportsDataProvider, SyntheticProvider
+from oddvex_api.main import build_provider
+from oddvex_api.providers import SportsDataProvider
 
 #: Stops a run that keeps finding work, which would mean grading is not making progress.
 MAX_PASSES = 200
@@ -31,7 +32,7 @@ def run(
     settings: Settings, provider: SportsDataProvider | None = None, dry_run: bool = False
 ) -> dict[str, int]:
     """Grade until a pass grades nothing new. Each pass is one transaction."""
-    provider = provider or SyntheticProvider(seed=settings.synthetic_seed)
+    provider = provider or build_provider(settings)
     engine = make_engine(settings.database_url)
     totals = {"passes": 0, "checked": 0, "graded": 0, "voided": 0}
     try:

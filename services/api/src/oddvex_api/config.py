@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     log_level: str = "INFO"
 
+    #: ``synthetic`` generates everything. ``replay`` serves a real past season shifted in
+    #: time (real team and player names, internal previews only) and needs ``replay_data_path``.
+    data_provider: Literal["synthetic", "replay"] = "synthetic"
+    #: Dataset written by ``scripts/build_replay_data.py``. Never committed.
+    replay_data_path: str = ""
+    #: Days every replayed game is moved forward. Must be a multiple of 7.
+    replay_shift_days: int = Field(default=728, ge=0)
+
     synthetic_seed: int = 20260101
     stale_live_seconds: int = 120
     stale_pregame_seconds: int = 900
@@ -97,8 +105,18 @@ class Settings(BaseSettings):
 
     def validate_for_startup(self) -> None:
         """Refuse insecure configuration in production."""
+        if self.data_provider == "replay" and not self.replay_data_path:
+            raise RuntimeError(
+                "ODDVEX_REPLAY_DATA_PATH must point to a replay dataset when "
+                "ODDVEX_DATA_PROVIDER=replay"
+            )
         if not self.is_production:
             return
+        if self.data_provider == "replay":
+            raise RuntimeError(
+                "ODDVEX_DATA_PROVIDER=replay is for internal previews only and is refused when "
+                "ODDVEX_ENV=production: it shows real team and player names with simulated prices"
+            )
         if self.jwt_secret == DEV_JWT_SECRET:
             raise RuntimeError(
                 "ODDVEX_JWT_SECRET must be set to a strong secret when ODDVEX_ENV=production"

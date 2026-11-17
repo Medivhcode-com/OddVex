@@ -25,3 +25,8 @@ export function useMeta(): Resource<Meta> {
 export function isSynthetic(meta: Meta | undefined): boolean {
   return meta?.data_mode === 'synthetic';
 }
+
+/** Real past games shifted in time, with simulated sportsbooks and prices. */
+export function isReplay(meta: Meta | undefined): boolean {
+  return meta?.data_mode === 'replay';
+}

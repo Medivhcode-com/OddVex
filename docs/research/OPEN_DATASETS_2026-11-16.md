@@ -233,6 +233,10 @@ provisional choice and the unsent licence question.
 
 ## 7. How to add a replay provider (no code)
 
+> Update, same day: the Founder approved an internal replay (decision D-015) and an NFL replay provider now exists
+> in `services/api/src/oddvex_api/providers/replay.py`. It shifts game times instead of using a replay clock. The
+> notes below are kept as written. See `data/external/README.md` for how to run it.
+
 A replay provider would be a third implementation of `SportsDataProvider` that reads files from `data/external/`
 (or a private bucket) instead of generating data. Suggested shape:
 

@@ -15,7 +15,7 @@ EventMarket = Literal["moneyline", "spread", "total"]
 BookStatus = Literal["open", "suspended", "unavailable"]
 PropWindow = Literal["5", "10", "20", "season"]
 PropSplit = Literal["all", "home", "away", "vs_opponent"]
-DataMode = Literal["synthetic"]
+DataMode = Literal["synthetic", "replay"]
 
 
 class HealthOut(BaseModel):
@@ -34,13 +34,18 @@ class HealthOut(BaseModel):
 class MetaOut(BaseModel):
     data_mode: DataMode = Field(
         description=(
-            "Reported by the active data provider. All sports data is synthetic in this build."
+            "Reported by the active data provider. `synthetic`: everything is generated. `replay`: "
+            "real past games shifted in time, with simulated sportsbook prices."
         )
     )
     provider: str
     version: str
     server_time: datetime
     notice: str = Field(description="Plain-language statement about the data shown.")
+    attribution: str | None = Field(
+        default=None,
+        description="Credit line required by the licence of the underlying data, if any.",
+    )
 
 
 class LeagueOut(BaseModel):

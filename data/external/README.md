@@ -3,9 +3,34 @@
 Small samples of openly published sports data, fetched on **2026-11-16** for licence and format evaluation only.
 See `docs/research/OPEN_DATASETS_2026-11-16.md` for the full evaluation and `LICENSES.md` here for licence links.
 
-> **These files contain REAL team and player names. They must not be shown in the product, in demos shown outside
-> the team, in screenshots or in marketing until the Founder opens gate G-12 (real names) and counsel has reviewed
-> the licences below.** The running product stays on synthetic data (`data_mode: "synthetic"`).
+> **These files contain REAL team and player names.** On 2026-11-16 the Founder approved using them for an
+> **internal replay preview only** (decision D-015). They must still not be shown outside the team, in public
+> screenshots, in store listings or in marketing until gate G-12 is opened for that and counsel has reviewed the
+> licences below. The product default stays synthetic data (`data_mode: "synthetic"`).
+
+## Replay preview (internal)
+
+The API can replay the 2024 NFL season against today's clock (`data_mode: "replay"`). Real: teams, players,
+schedule, final scores, player statistics, one consensus closing line per game. Simulated: the sportsbooks (still
+fictional), every per-book price, the price movement and every player prop line. Games in progress show no score,
+because the source has no in-play data. The API refuses to start in this mode when `ODDVEX_ENV=production`.
+
+```bash
+# from services/api, once: fetch the two nflverse files listed below, then build the dataset
+uv pip install -e ".[dev,replay]"
+python scripts/build_replay_data.py \
+  --schedule ../../data/external/nflverse/schedules_games.csv \
+  --stats ../../data/external/nflverse/stats_player_week_2024.parquet \
+  --season 2024 --out ../../data/external/replay/nfl_2024.json
+
+# run the API on the replay
+ODDVEX_DATA_PROVIDER=replay ODDVEX_REPLAY_DATA_PATH=../../data/external/replay/nfl_2024.json \
+  uvicorn oddvex_api.main:app --port 8000
+```
+
+Every game is moved forward by `ODDVEX_REPLAY_SHIFT_DAYS` (default 728, exactly 104 weeks, so weekdays match).
+With the default, the 2024 season plays out from September 2026 to February 2027; outside that period the board is
+empty. The demo account's 40 seeded history bets keep their fictional team names in this mode.
 
 - Nothing in this directory is committed: `.gitignore` ignores everything except `README.md`, `LICENSES.md` and itself.
 - Every file was fetched with plain `curl` through the session proxy from a public GitHub URL. No login, API key,
@@ -28,7 +53,8 @@ See `docs/research/OPEN_DATASETS_2026-11-16.md` for the full evaluation and `LIC
 | `openfootball/en.1_2024-25.json` | 110,141 | https://raw.githubusercontent.com/openfootball/football.json/master/2024-25/en.1.json | Public domain dedication (README) | None required; credit "openfootball" as courtesy | Usable now |
 | `international_results/results.csv` | 3,764,347 | https://raw.githubusercontent.com/martj42/international_results/master/results.csv | CC0 1.0 | None required | Usable now |
 
-Total: 10 files, 13,451,475 bytes. Each source directory is under 5 MB.
+Total: 10 files, 13,451,475 bytes. Each source directory is under 5 MB. `replay/nfl_2024.json` (about 0.5 MB) is
+derived from the two nflverse files by `services/api/scripts/build_replay_data.py` and is also not committed.
 
 ## What each file is
 
@@ -36,8 +62,8 @@ Total: 10 files, 13,451,475 bytes. Each source directory is under 5 MB.
   `spread_line` / `total_line` (1999 onward) plus `home_moneyline`, `away_moneyline`, spread and total prices
   (2006 onward). **Single consensus line, no sportsbook named.** The origin of the betting columns is not documented
   in the files read this session.
-- `nflverse/stats_player_week_2024.parquet` — player-week statistics, 2024 season (not opened here: no Parquet reader
-  is installed; only the `PAR1` magic bytes were checked).
+- `nflverse/stats_player_week_2024.parquet` — player-week statistics, 2024 season (18,983 rows; read with `pyarrow`
+  by the replay builder).
 - `sportsdataverse/*.parquet` — NBA and NHL 2024 season schedules and player box scores (same caveat: magic bytes only).
 - `retrosheet/teams-2023.csv` — MLB team game-by-game batting/pitching/fielding lines, 2023 (4,944 rows).
   The matching player file `playing-2023.csv` is larger than 5 MB and was deliberately not saved.

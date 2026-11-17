@@ -1,4 +1,4 @@
-"""Sports data providers. Only the deterministic synthetic provider exists today."""
+"""Sports data providers: the deterministic synthetic one and a replay of a past season."""
 
 from .base import (
     EVENT_MARKETS,
@@ -17,6 +17,7 @@ from .base import (
     SportsDataProvider,
     Team,
 )
+from .replay import ReplayProvider
 from .synthetic import SyntheticProvider
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "Player",
     "PropOffer",
     "ProviderHealth",
+    "ReplayProvider",
     "Score",
     "SportsDataProvider",
     "Sportsbook",

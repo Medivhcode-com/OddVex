@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .quant import describe_price, parse_odds
 
-DataMode = Literal["synthetic"]
+DataMode = Literal["synthetic", "replay"]
 
 
 class PriceOut(BaseModel):

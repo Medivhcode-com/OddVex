@@ -29,6 +29,12 @@ DISCLAIMER = (
     "available at 1-800-GAMBLER (US)."
 )
 
+REPLAY_DISCLAIMER = (
+    "OddVex gives information and math, not betting advice or predictions. The games shown "
+    "are a replay of past results; sportsbook prices and prop lines are simulated. For adults "
+    "21+. If gambling is causing problems, help is available at 1-800-GAMBLER (US)."
+)
+
 _BET_SUMMARY_RE = re.compile(
     r"\b(my (bets?|roi|record|profit|results?|clv|tracker|performance|bankroll|history)"
     r"|how am i doing|bet summary)\b"
@@ -106,7 +112,9 @@ class Assistant:
             data=result.facts if result.has_data else None,
             sources=result.sources,
             suggestions=result.suggestions,
-            disclaimer=DISCLAIMER,
+            disclaimer=DISCLAIMER
+            if self.board.provider.data_mode == "synthetic"
+            else REPLAY_DISCLAIMER,
         )
 
     def route(self, message: str) -> ToolResult:
@@ -155,7 +163,11 @@ class Assistant:
             return full
         return [p for p in players if _word_in(p.name.lower().split()[-1], text)]
 
-    def _source(self, label: str, data_mode: str = "synthetic") -> AssistantSourceOut:
+    def _source(self, label: str, data_mode: str | None = None) -> AssistantSourceOut:
+        """A source line, prefixed with the provider's data mode unless a mode is given."""
+        if data_mode is None:
+            data_mode = self.board.provider.data_mode
+            label = f"{data_mode.capitalize()} {label}"
         return AssistantSourceOut(label=label, as_of=self.board.now, data_mode=data_mode)
 
     # ------------------------------------------------------------------ tools
@@ -216,7 +228,7 @@ class Assistant:
         return ToolResult(
             "compare_odds",
             facts,
-            sources=[self._source(f"Synthetic odds feed: {market}, {event.id}")],
+            sources=[self._source(f"odds feed: {market}, {event.id}")],
             suggestions=[
                 _suggest("Open this game", f"/app/games/{event.id}"),
                 _suggest("Browse the odds board", "/app/odds"),
@@ -285,7 +297,7 @@ class Assistant:
         return ToolResult(
             "line_movement",
             facts,
-            sources=[self._source(f"Synthetic line history: moneyline, {event.id}")],
+            sources=[self._source(f"line history: moneyline, {event.id}")],
             suggestions=suggestions,
         )
 
@@ -343,7 +355,7 @@ class Assistant:
         return ToolResult(
             "player_trend",
             facts,
-            sources=[self._source(f"Synthetic game log and prop lines: {player.id}, {market}")],
+            sources=[self._source(f"game log and prop lines: {player.id}, {market}")],
             suggestions=[
                 _suggest(f"Open {player.name}'s props", f"/app/props/{player.id}"),
                 _suggest("Browse player props", "/app/props"),
@@ -448,7 +460,11 @@ class Assistant:
     def help(self) -> ToolResult:
         return ToolResult(
             "help",
-            {},
+            {
+                "data_note": "all sports data here is synthetic sample data"
+                if self.board.provider.data_mode == "synthetic"
+                else "the games here are a replay of past results with simulated prices"
+            },
             suggestions=[
                 _suggest("Odds board", "/app/odds"),
                 _suggest("Player props", "/app/props"),

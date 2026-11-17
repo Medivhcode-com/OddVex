@@ -107,6 +107,14 @@ email (verification, password reset), historical odds storage against a real fee
 - Accessibility has automated checks only. No screen reader or keyboard-only walkthrough has been done.
 - Competitor and provider research relied on search extracts, not direct page visits. Re-check every price.
 
+## Replay preview (internal only, decision D-015)
+
+`ODDVEX_DATA_PROVIDER=replay` serves the real 2024 NFL season shifted 104 weeks forward: real teams, players, results,
+player statistics and one recorded closing line per game; fictional sportsbooks with simulated prices and prop lines.
+It is labelled "Replay" in the web and mobile apps, shows the nflverse credit line, never reveals a result before the
+shifted game ends, and refuses to start in production. NFL only. See `data/external/README.md` for how to run it.
+The dataset is not committed, so CI tests the provider on a fictional fixture.
+
 ## Not built
 
 Real data provider, push and email delivery, a background worker for alerts and pick grading, premium billing, LLM-backed assistant, model projections and backtesting, refresh tokens, multi-factor sign-in, production

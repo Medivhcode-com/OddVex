@@ -3102,9 +3102,9 @@ export interface components {
             best_moneyline?: components["schemas"]["BestMoneylineOut"] | null;
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /** Has Draw */
             has_draw: boolean;
             home_team: components["schemas"]["TeamRef"];
@@ -3153,9 +3153,9 @@ export interface components {
             consensus: components["schemas"]["ConsensusOut"];
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             event: components["schemas"]["EventSummaryOut"];
             /** Holds */
             holds: components["schemas"]["BookHoldOut"][];
@@ -3342,9 +3342,9 @@ export interface components {
             /**
              * Data Mode
              * @description Reported by the active data provider.
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /**
              * Database
              * @description Result of a `SELECT 1` against the database. Optional for older clients.
@@ -3503,9 +3503,9 @@ export interface components {
             caveat: string;
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /** Items */
             items: components["schemas"]["LeaderboardRowOut"][];
             /** League */
@@ -3598,9 +3598,9 @@ export interface components {
             as_of: string;
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             event: components["schemas"]["EventSummaryOut"];
             /**
              * Market
@@ -3692,11 +3692,16 @@ export interface components {
         /** MetaOut */
         MetaOut: {
             /**
-             * Data Mode
-             * @description Reported by the active data provider. All sports data is synthetic in this build.
-             * @constant
+             * Attribution
+             * @description Credit line required by the licence of the underlying data, if any.
              */
-            data_mode: "synthetic";
+            attribution?: string | null;
+            /**
+             * Data Mode
+             * @description Reported by the active data provider. `synthetic`: everything is generated. `replay`: real past games shifted in time, with simulated sportsbook prices.
+             * @enum {string}
+             */
+            data_mode: "synthetic" | "replay";
             /**
              * Notice
              * @description Plain-language statement about the data shown.
@@ -4035,10 +4040,10 @@ export interface components {
             comment_count: number;
             /**
              * Data Mode
-             * @description The events and prices are synthetic in this build.
-             * @constant
+             * @description Reported by the active data provider.
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /** Event Id */
             event_id: string;
             /** Event Label */
@@ -4130,9 +4135,9 @@ export interface components {
             as_of: string;
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /** Id */
             id: string;
             /** Jersey Number */
@@ -4187,9 +4192,9 @@ export interface components {
             consensus_line?: number | null;
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /** Game Log */
             game_log: components["schemas"]["GameLogEntryOut"][];
             hit_rate: components["schemas"]["HitRateOut"];
@@ -4820,9 +4825,9 @@ export interface components {
             caveat: string;
             /**
              * Data Mode
-             * @constant
+             * @enum {string}
              */
-            data_mode: "synthetic";
+            data_mode: "synthetic" | "replay";
             /**
              * Method
              * @description How the numbers are computed.

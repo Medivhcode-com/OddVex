@@ -23,14 +23,15 @@ from oddvex_api.board import Board
 from oddvex_api.cache import InMemoryTTLCache
 from oddvex_api.config import Settings, get_settings
 from oddvex_api.db import AlertRule, User, make_engine, make_session_factory
-from oddvex_api.providers import SportsDataProvider, SyntheticProvider
+from oddvex_api.main import build_provider
+from oddvex_api.providers import SportsDataProvider
 
 
 def run(
     settings: Settings, provider: SportsDataProvider | None = None, dry_run: bool = False
 ) -> dict[str, int]:
     """Evaluate every user with active rules. Each user is one transaction."""
-    provider = provider or SyntheticProvider(seed=settings.synthetic_seed)
+    provider = provider or build_provider(settings)
     engine = make_engine(settings.database_url)
     totals = {"users": 0, "evaluated": 0, "fired": 0, "expired": 0, "failed": 0}
     try:

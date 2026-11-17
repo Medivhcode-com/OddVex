@@ -185,12 +185,13 @@ class TemplateExplainer:
         )
 
     def _help(self, f: dict[str, Any]) -> str:
+        data_note = f.get("data_note", "all sports data here is synthetic sample data")
         return (
             'I can: find the best current price for a team ("best odds for <team>"), show a '
             'player\'s recent results against a prop line ("<player> points last 10"), describe '
             "line movement for a team's game, explain expected value and no-vig math, and "
             "summarise your tracked bets when you're logged in. I answer from OddVex data and "
-            "calculators only, and all sports data here is synthetic sample data."
+            f"calculators only, and {data_note}."
         )
 
     def _fallback(self, f: dict[str, Any]) -> str:

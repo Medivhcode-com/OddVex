@@ -321,8 +321,8 @@ cd services/api
 - Output: `N user(s), N rule(s) evaluated, N fired, N expired, N failed.`
 - Exit status 1 if any user failed. Each failing user is named on standard error with the exception type.
 - Idempotent. Safe while the API is serving. One transaction per user, so one failure does not stop the rest.
-- Uses `DATABASE_URL` and `ODDVEX_SYNTHETIC_SEED` from the environment. It builds its own `SyntheticProvider`. When a
-  real provider exists the script must be given it, or it will evaluate against synthetic data.
+- Uses `DATABASE_URL`, `ODDVEX_DATA_PROVIDER` and `ODDVEX_SYNTHETIC_SEED` from the environment, and builds the same
+  provider as the API would (`build_provider`). Run it with the same environment as the API.
 - Delivers in-app notifications only.
 - Nothing runs it on a schedule. See `DEPLOYMENT_PLAN.md` section 9.
 

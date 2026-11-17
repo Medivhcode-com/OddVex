@@ -82,7 +82,8 @@ def get_meta(provider: ProviderDep) -> MetaOut:
         provider=provider.name,
         version=__version__,
         server_time=provider.now(),
-        notice=SYNTHETIC_NOTICE,
+        notice=getattr(provider, "notice", SYNTHETIC_NOTICE),
+        attribution=getattr(provider, "attribution", None),
     )
 
 

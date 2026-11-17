@@ -56,6 +56,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <Badge tone="second">Synthetic data</Badge>
               </span>
             ) : null}
+            {meta?.data_mode === "replay" ? (
+              <span className="hidden sm:inline">
+                <Badge tone="warn">Replay of past games</Badge>
+              </span>
+            ) : null}
             <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-2">
               <OddsFormatToggle />
               <div className="hidden md:block">
@@ -97,6 +102,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <p className="border-b border-line bg-second-soft px-4 py-1.5 text-xs text-muted sm:hidden">
               Synthetic data. Teams, players and books are fictional.
             </p>
+          ) : null}
+          {meta?.data_mode === "replay" ? (
+            <div className="border-b border-line bg-warn-soft px-4 py-2 text-xs leading-relaxed text-muted sm:px-6" data-testid="replay-notice">
+              <p className="max-w-prose">
+                <span className="font-semibold text-ink">Replay of past games, not live.</span> Results and player
+                statistics are real history moved forward in time. The sportsbooks are fictional and every price and
+                prop line is simulated.
+              </p>
+              {meta.attribution ? (
+                <details className="mt-1 max-w-prose">
+                  <summary className="cursor-pointer underline underline-offset-2">Data credit</summary>
+                  <p className="mt-1">{meta.attribution}</p>
+                </details>
+              ) : null}
+            </div>
           ) : null}
 
           <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-12">
