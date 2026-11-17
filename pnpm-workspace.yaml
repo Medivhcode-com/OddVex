@@ -4,3 +4,11 @@ packages:
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+# Audit exceptions. Each entry needs a reason and is removed as soon as a fixed version exists.
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS (reported 2026-11-17). Every published version is affected and no fix
+    # exists yet. It reaches us only through the Expo command-line tool, which matches file
+    # patterns from our own configuration at build time, never input from users. Not shipped
+    # in the web or mobile app at run time. Re-check: remove this line when picomatch > 4.0.7.
+    - GHSA-fc5q-39xc-vjpf
