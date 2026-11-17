@@ -49,3 +49,8 @@ The Founder has stated a **preference** for Vercel, Neon and Resend. A preferenc
 - No vendor feature is stated as fact unless the repository proves it. Everything else is marked
   "to confirm with vendor docs".
 - No costs, dates or service levels. Where one is needed it says "To be decided" and names who decides.
+
+## Hostinger VPS preview
+
+The Founder chose the Hostinger VPS for hosting (decision D-016). See `hostinger/README.md`. `DEPLOYMENT_PLAN.md`
+(Vercel + Neon) is kept for reference and is not the current plan.

@@ -1,0 +1,18 @@
+# Add to the server's existing Caddyfile (the Caddy that already owns ports 80 and 443).
+# Create the password hash with:  caddy hash-password
+# `host.docker.internal` must resolve inside the Caddy container; if it does not, use the
+# address of the Docker bridge (often 172.17.0.1) and publish the web port on that address.
+preview.oddvex.com {
+	header X-Robots-Tag "noindex, nofollow"
+	basic_auth {
+		oddvex {$ODDVEX_PREVIEW_PASSWORD_HASH}
+	}
+	reverse_proxy host.docker.internal:3410
+}
+
+# The mobile app calls the API directly and signs in with its own token, so this hostname has
+# no password prompt. It serves the same data as the preview site.
+api-preview.oddvex.com {
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy host.docker.internal:3411
+}

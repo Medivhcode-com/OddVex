@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#090D16",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.oddvex.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +19,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.oddvex.app"
     },
     "plugins": [
       "expo-router",
@@ -36,6 +38,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "owner": "medivhcode"
   }
 }
