@@ -1,12 +1,12 @@
 # OddVex on the shared Hostinger VPS: private preview.
 #
-# Nothing here publishes a public port. The web container listens on 127.0.0.1:${ODDVEX_WEB_PORT}
-# only; the server's existing reverse proxy (Caddy) forwards preview.oddvex.com to it, adds HTTPS
-# and asks for a password. The API listens on 127.0.0.1:${ODDVEX_API_PORT} for the mobile app's
-# hostname. The database is reachable only inside this project.
+# Nothing here publishes a port. Like the other projects on this server, the web and API
+# containers join the shared reverse proxy's network (`medivh-automation_default`) under unique
+# names; that proxy (Caddy) adds HTTPS, and a password on the web hostname. The database is
+# reachable only inside this project.
 #
-# Run from the repository root on the server:
-#   docker compose -p oddvex --env-file /opt/oddvex/.env -f infrastructure/hostinger/compose.yaml up -d --build
+# Started by infrastructure/hostinger/ops.sh (ACTION=deploy), which runs:
+#   docker compose -p oddvex --env-file /opt/oddvex/.env -f infrastructure/hostinger/compose.yaml up -d
 name: oddvex
 
 services:
@@ -18,6 +18,8 @@ services:
       POSTGRES_PASSWORD: ${ODDVEX_DB_PASSWORD:?set ODDVEX_DB_PASSWORD}
       POSTGRES_DB: oddvex
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    networks:
+      default: { aliases: [oddvex-db] }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oddvex"]
       interval: 10s
@@ -26,21 +28,23 @@ services:
 
   api:
     build: ../../services/api
+    image: oddvex-api:${ODDVEX_RELEASE:-local}
     restart: unless-stopped
     environment:
       ODDVEX_ENV: production
-      DATABASE_URL: postgresql+psycopg://oddvex:${ODDVEX_DB_PASSWORD}@db:5432/oddvex
+      DATABASE_URL: postgresql+psycopg://oddvex:${ODDVEX_DB_PASSWORD}@oddvex-db:5432/oddvex
       ODDVEX_JWT_SECRET: ${ODDVEX_JWT_SECRET:?set ODDVEX_JWT_SECRET}
       ODDVEX_CORS_ORIGINS: ${ODDVEX_PUBLIC_URL:?set ODDVEX_PUBLIC_URL}
       ODDVEX_WEB_BASE_URL: ${ODDVEX_PUBLIC_URL}
       ODDVEX_ADMIN_EMAILS: ${ODDVEX_ADMIN_EMAILS:-}
-      # The shared reverse proxy is the only thing that can reach the published port, so its
+      # Direct traffic (the mobile app) arrives through the shared reverse proxy, so its
       # forwarded client address is trusted for rate limiting.
       ODDVEX_TRUST_PROXY: "true"
     depends_on:
       db: { condition: service_healthy }
-    # For the mobile app, which talks to the API directly (api-preview.oddvex.com).
-    ports: ["127.0.0.1:${ODDVEX_API_PORT:-3411}:8000"]
+    networks:
+      default: {}
+      edge: { aliases: [oddvex-api] }
     mem_limit: 768m
 
   web:
@@ -50,13 +54,21 @@ services:
       args:
         NEXT_PUBLIC_SITE_URL: ${ODDVEX_PUBLIC_URL}
         NEXT_PUBLIC_CONTACT_EMAIL: ${ODDVEX_CONTACT_EMAIL:-}
+    image: oddvex-web:${ODDVEX_RELEASE:-local}
     restart: unless-stopped
     environment:
-      ODDVEX_API_URL: http://api:8000
+      ODDVEX_API_URL: http://oddvex-api:8000
     depends_on:
       api: { condition: service_healthy }
-    ports: ["127.0.0.1:${ODDVEX_WEB_PORT:-3410}:3000"]
+    networks:
+      default: {}
+      edge: { aliases: [oddvex-web] }
     mem_limit: 512m
+
+networks:
+  edge:
+    external: true
+    name: ${ODDVEX_EDGE_NETWORK:-medivh-automation_default}
 
 volumes:
   pgdata:
