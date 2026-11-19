@@ -19,7 +19,13 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
     description=(
         "Deterministic keyword routing to internal data tools with templated answers. No "
         "language model is connected and the assistant never produces a number that a tool "
-        "did not compute. Authentication is optional; the bet summary intent needs it."
+        "did not compute. Authentication is optional; the bet summary intent needs it.\n\n"
+        "Before any routing, each message is checked against fixed patterns for crisis or "
+        "self-harm language, for distress about gambling and for a user who says they are "
+        "under 21. When one matches, the answer has intent `support`, carries help resources "
+        "and no betting data, and `support.case` says which reply it is. A request for a "
+        "certain winner gets a fixed answer with intent `fallback`. The patterns are rules "
+        "and will miss some messages."
     ),
     dependencies=[Depends(rate_limit("assistant"))],
     responses={

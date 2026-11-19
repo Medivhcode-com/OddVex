@@ -1,4 +1,8 @@
-"""Turning tool output into prose. Templates only: every number is copied from ``facts``."""
+"""Turning tool output into prose. Templates only: every number is copied from ``facts``.
+
+The responsible-gambling replies (``safeguards.py``) are fixed wording and do not come
+through an explainer.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,10 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class Explainer(Protocol):
-    """Phrases facts a tool produced. Implementations must not introduce new numbers."""
+    """Phrases facts a tool produced. Implementations must not introduce new numbers.
+
+    An explainer is never asked to phrase a responsible-gambling reply.
+    """
 
     def explain(self, intent: str, facts: dict[str, Any]) -> str: ...
 
