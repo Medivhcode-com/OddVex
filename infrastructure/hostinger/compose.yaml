@@ -1,12 +1,17 @@
 # OddVex on the shared Hostinger VPS: private preview.
 #
 # Nothing here publishes a port. Like the other projects on this server, the web and API
-# containers join the shared reverse proxy's network (`medivh-automation_default`) under unique
-# names; that proxy (Caddy) adds HTTPS, and a password on the web hostname. The database is
-# reachable only inside this project.
+# containers join the shared reverse proxy's network (`medivh-automation_default`); that proxy
+# (Caddy) adds HTTPS, and a password on the web hostname. The database is reachable only inside
+# this project.
 #
-# Started by infrastructure/hostinger/ops.sh (ACTION=deploy), which runs:
-#   docker compose -p oddvex --env-file /opt/oddvex/.env -f infrastructure/hostinger/compose.yaml up -d
+# Compose registers a service's name as a DNS name on every network the service joins. The two
+# services on the shared network are therefore called `oddvex-api` and `oddvex-web`: a generic
+# name such as `api` would also answer the other projects' lookups there.
+#
+# Started by infrastructure/hostinger/ops.sh (ACTION=deploy), which builds the two images with a
+# resource-limited builder, runs the `migrate` service once and then runs:
+#   docker compose -p oddvex --env-file /opt/oddvex/.env -f infrastructure/hostinger/compose.yaml up -d --no-build --remove-orphans --wait
 name: oddvex
 
 services:
@@ -26,10 +31,17 @@ services:
       retries: 10
     mem_limit: 512m
 
-  api:
-    build: ../../services/api
+  oddvex-api:
+    # ODDVEX_BUILD_ROOT is set only by a rollback that has to build an earlier commit again.
+    build: ${ODDVEX_BUILD_ROOT:-../..}/services/api
     image: oddvex-api:${ODDVEX_RELEASE:-local}
     restart: unless-stopped
+    # The image's own command applies migrations first. Here ops.sh applies them, once, before
+    # the containers are replaced, so an older image can be started again (rollback) even when
+    # the database already holds a newer revision. No access log from uvicorn: it would repeat
+    # every request with its full query string. The application writes its own request line
+    # (method, path, status, duration, client address) without the query string.
+    command: ["uvicorn", "oddvex_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     environment: &api-env
       ODDVEX_ENV: production
       DATABASE_URL: postgresql+psycopg://oddvex:${ODDVEX_DB_PASSWORD}@oddvex-db:5432/oddvex
@@ -40,12 +52,28 @@ services:
       # Direct traffic (the mobile app) arrives through the shared reverse proxy, so its
       # forwarded client address is trusted for rate limiting.
       ODDVEX_TRUST_PROXY: "true"
+      # Password hashing: how many run at once (each holds about 64 MiB; this container has
+      # 768 MB) and how long a sign-in waits for a slot. The values are the API's defaults.
+      ODDVEX_PASSWORD_HASH_CONCURRENCY: ${ODDVEX_PASSWORD_HASH_CONCURRENCY:-2}
+      ODDVEX_PASSWORD_HASH_WAIT_SECONDS: ${ODDVEX_PASSWORD_HASH_WAIT_SECONDS:-1.0}
     depends_on:
       db: { condition: service_healthy }
-    networks:
-      default: {}
-      edge: { aliases: [oddvex-api] }
+    networks: [default, edge]
     mem_limit: 768m
+
+  # Applies database migrations. It is not part of `up`: ops.sh runs it once per deploy
+  # (`compose run --rm migrate`) after the pre-deploy dump and before the containers are
+  # replaced. It joins only this project's network.
+  migrate:
+    image: oddvex-api:${ODDVEX_RELEASE:-local}
+    profiles: ["ops"]
+    restart: "no"
+    environment: *api-env
+    command: ["alembic", "upgrade", "head"]
+    healthcheck: { disable: true }
+    depends_on:
+      db: { condition: service_healthy }
+    mem_limit: 256m
 
   # Evaluates alert rules and grades community picks every two minutes, so an alert fires even
   # when nobody has the app open. Delivery is still in-app only. A failed pass is logged and the
@@ -65,49 +93,65 @@ services:
         done
     healthcheck: { disable: true }
     depends_on:
-      api: { condition: service_healthy }
+      oddvex-api: { condition: service_healthy }
     mem_limit: 256m
 
-  # One compressed dump of the database every day, kept for 14 days in /opt/oddvex/backups on
-  # the server. The dumps stay on the same disk: they protect against a bad change, not against
-  # losing the server.
+  # One compressed dump of the database every day in /opt/oddvex/backups on the server. Dumps
+  # older than KEEP_DAYS days are deleted only after a new dump has been written, is not empty
+  # and can be read back, so a run of failures never empties the directory. A failed dump is
+  # reported in this container's log and tried again after an hour. An unfinished file left by
+  # a pass that was stopped half way is removed at the start of the next one. The dumps stay on
+  # the same disk: they protect against a bad change, not against losing the server.
   backup:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       PGPASSWORD: ${ODDVEX_DB_PASSWORD}
+      KEEP_DAYS: ${ODDVEX_BACKUP_KEEP_DAYS:-14}
     volumes: ["/opt/oddvex/backups:/backups"]
     command:
       - sh
       - -c
       - |
         umask 077
+        fails=0
         while true; do
+          rm -f /backups/oddvex-*.dump.part
           f=/backups/oddvex-$$(date -u +%Y%m%dT%H%M%SZ).dump
-          if pg_dump -h oddvex-db -U oddvex -Fc -f "$$f.part" oddvex; then mv "$$f.part" "$$f"; echo "wrote $$f"; else rm -f "$$f.part"; echo "backup failed"; fi
-          find /backups -name 'oddvex-*.dump' -mtime +14 -delete
-          sleep 86400
+          if pg_dump -h oddvex-db -U oddvex -Fc -f "$$f.part" oddvex && [ -s "$$f.part" ] && pg_restore -l "$$f.part" > /dev/null; then
+            mv "$$f.part" "$$f"
+            echo "backup ok: wrote $$f ($$(wc -c < "$$f") bytes)"
+            find /backups -name 'oddvex-*.dump' -mtime +"$${KEEP_DAYS:-14}" -delete
+            fails=0
+            pause=86400
+          else
+            rm -f "$$f.part"
+            fails=$$((fails + 1))
+            echo "BACKUP FAILED at $$(date -u +%Y-%m-%dT%H:%M:%SZ) ($$fails in a row): no dump was written and no old dump was deleted. Newest dump: $$(ls -t /backups/oddvex-*.dump 2>/dev/null | head -n 1). Next try in one hour." >&2
+            pause=3600
+          fi
+          sleep "$$pause"
         done
     depends_on:
       db: { condition: service_healthy }
     mem_limit: 128m
 
-  web:
+  oddvex-web:
     build:
-      context: ../..
+      context: ${ODDVEX_BUILD_ROOT:-../..}
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_SITE_URL: ${ODDVEX_PUBLIC_URL}
+        # Compiled into the contact page when the image is built. ops.sh puts the address in
+        # /opt/oddvex/.env before it builds.
         NEXT_PUBLIC_CONTACT_EMAIL: ${ODDVEX_CONTACT_EMAIL:-}
     image: oddvex-web:${ODDVEX_RELEASE:-local}
     restart: unless-stopped
     environment:
       ODDVEX_API_URL: http://oddvex-api:8000
     depends_on:
-      api: { condition: service_healthy }
-    networks:
-      default: {}
-      edge: { aliases: [oddvex-web] }
+      oddvex-api: { condition: service_healthy }
+    networks: [default, edge]
     mem_limit: 512m
 
 networks:
