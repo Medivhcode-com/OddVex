@@ -15,6 +15,7 @@ const result: ParlayResult = {
   payout: 37.93,
   profit: 27.93,
   combined_probability: 0.2534,
+  probability_status: 'computed',
   probability_note: 'Combined probability multiplies the no-vig probabilities and assumes the legs are independent.',
   correlation_warnings: [],
   steps: ['2.18 x 1.74 = 3.7931'],
@@ -23,6 +24,7 @@ const result: ParlayResult = {
 const correlated: ParlayResult = {
   ...result,
   combined_probability: null,
+  probability_status: 'same_event_legs',
   correlation_warnings: ['Two legs come from the same game (IVF at HCG). Their outcomes are linked.'],
   probability_note: 'No combined probability is shown because the legs are correlated.',
 };
