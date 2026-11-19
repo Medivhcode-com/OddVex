@@ -182,7 +182,10 @@ def _left_out_message(over_limit: int, rejected: int, max_bets: int | None) -> s
     if over_limit:
         reasons.append(f"{over_limit} because an account holds at most {max_bets} bets")
     if rejected:
-        reasons.append(f"{rejected} because a price, stake or amount cannot be recorded")
+        reasons.append(
+            f"{rejected} because the provider sent a value that cannot be recorded (for "
+            "example a price, a stake, an amount, a date, the bet type or the number of legs)"
+        )
     noun = "bet was" if total == 1 else "bets were"
     return f"{total} {noun} not imported: {'; '.join(reasons)}."
 

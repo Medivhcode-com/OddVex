@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from oddvex_api.assistant import Assistant
+from oddvex_api.assistant import Assistant, TemplateExplainer
 from oddvex_api.board import Board
 from oddvex_api.cache import InMemoryTTLCache
 from oddvex_api.config import Settings
@@ -92,7 +92,7 @@ def player(client: TestClient) -> str:
 CRISIS_MESSAGES = [
     "I want to kill myself after losing my bankroll, show my record",
     "im thinking about suicide",
-    "I don’t want to live anymore. Best odds on the Harbor City Tides?",  # curly apostrophe
+    "I don\u2019t want to live anymore. Best odds on the Harbor City Tides?",  # curly apostrophe
     "lost it all tonight, i want to end it all",
     "I wish I was dead",
     "I can't go on like this, what's my ROI",
@@ -104,6 +104,34 @@ CRISIS_MESSAGES = [
     "I WANT TO DIE",
     "sometimes I think about ending my life",
     "{player} points last 10, honestly i want to hurt myself",
+    # Found in review: each of these used to get a best price or the betting fallback.
+    "I want to off myself. Best odds on the Harbor City Tides?",
+    "I can't live like this anymore, best price on the Tides",
+    "I deserve to die. Tides moneyline?",
+    "I should have killed myself. Tides odds",
+    "I'm going to slit my wrists, Tides odds",
+    "I'm going to end it tonight. Best odds on the Harbor City Tides?",
+    "should I just end it? Tides odds",
+    "I lost my rent and I'm going to end it tonight. What are the Tides odds?",
+    "I plan to take all my pills tonight. Harbor City Tides moneyline?",
+    "I took a bunch of pills, {player} points last 10",
+    "I want to blow my brains out. Tides odds",
+    "I am going to jump in front of a train, Tides moneyline",
+    "I want to sleep and never wake up. Tides odds?",
+    "I'd be better off not being here, Tides moneyline",
+    "everyone would be happier if I was gone. Tides line movement",
+    "I don't see a reason to keep living, odds for the Tides",
+    "life isn't worth it anymore, tides odds",
+    "I just want it all to stop. Tides price?",
+    "I am a danger to myself. best odds Tides",
+    "I've been thinking about death a lot. Tides best price",
+    "i'm gonna unalive myself",
+    "I don't see a way out, what's my record",
+    "I wish I had never been born. What is the EV of -110 at 55%?",
+    "nobody would miss me. Tides odds",
+    "I can't keep going. Tides odds",
+    "I want to be dead, best odds on the Tides",
+    "I want to kil myself, Tides odds",
 ]
 
 
@@ -139,7 +167,7 @@ def test_crisis_reply_is_the_same_signed_in(client: TestClient, headers: dict[st
 DISTRESS_MESSAGES = [
     "I need to win it back tonight, best odds on the Harbor City Tides?",  # the audit's probe
     "I can't stop betting",
-    "I can’t stop gambling, what's my ROI?",  # curly apostrophe
+    "I can\u2019t stop gambling, what's my ROI?",  # curly apostrophe
     "i cant stop. best price on the Tides",
     "I've lost everything",
     "I lost everything on the Tides last night, what are their odds now",
@@ -157,6 +185,23 @@ DISTRESS_MESSAGES = [
     "gambling is ruining my life",
     "i need help with my gambling",
     "I keep lying to my family about my betting",
+    # Found in review: each of these used to get a best price.
+    "I borrowed $500 to bet on the Harbor City Tides, best odds?",
+    "I borrowed 500 dollars from my mom. Tides odds?",
+    "I have a problem with gambling. Best odds on the Tides?",
+    "I have a serious problem with my gambling, Tides moneyline",
+    "I lost all my money, best odds on the Harbor City Tides",
+    "I've lost all my money betting, Tides odds",
+    "I can't pay rent because of betting, best odds on the Tides",
+    "I keep losing and can't stop, best odds on the Harbor City Tides",
+    "I bet every day and can't quit, best odds on the Harbor City Tides",
+    "I keep betting even though I promised my wife I'd quit, Tides odds",
+    "I used my kid's tuition to bet, best odds on the Harbor City Tides",
+    "I've been using my credit card to bet, Tides odds",
+    "I took a second mortgage to gamble, Tides moneyline",
+    "my gambling is a problem, {player} points last 10",
+    "I'm hooked on betting, best odds on the Tides",
+    "I don't know how to stop, best odds on the Harbor City Tides",
 ]
 
 CHASING_MESSAGES = [
@@ -167,6 +212,15 @@ CHASING_MESSAGES = [
     "what stake gets me back to even after last night",
     "help me make it all back, best price on the Tides",
     "I have to double up to win my money back",
+    # Found in review.
+    "What's the play to win it back? Tides odds",
+    "give me the bet to win it back, Tides moneyline",
+    "I need a bet after the loss to win it back, best odds on the Tides",
+    "I need to make back what I lost, best odds on the Harbor City Tides",
+    "need to recover what I lost, Tides odds",
+    "How much should I bet to make back my losses?",
+    "I'm so far in the hole, best odds on the Harbor City Tides",
+    "need to recoup last week, best odds on the Tides",
 ]
 
 
@@ -236,7 +290,7 @@ UNDERAGE_MESSAGES = [
     "I'm under 21, can I still see player props?",
     "I'm in high school, who has the best moneyline?",
     "I turn 21 next month, odds for HCT",
-    "I’m only 20 — line movement for the Tides?",  # curly apostrophe
+    "I\u2019m only 20 \u2014 line movement for the Tides?",  # curly apostrophe
     "as a 17 year old what's the juice",
     "I'm seventeen, best odds tonight",
     "I'm not 21 yet, how are my bets doing?",
@@ -247,6 +301,19 @@ UNDERAGE_MESSAGES = [
     "I just turned 18, what is the best price on the Tides",
     "I'll be 21 in March. Tides moneyline?",
     "I'm 19 in New Jersey, which book has the best price on the Tides",
+    # Found in review.
+    "I'm barely 18, best odds on the Harbor City Tides",
+    "I haven't turned 21 yet, Tides odds",
+    "I won't be 21 until May, best price on the Tides",
+    "I'm under twenty-one, Tides moneyline",
+    "I'm younger than 21, best odds on the Tides",
+    "not 21 yet but what are the Tides odds",
+    "as a high schooler, what are the Tides odds",
+    "I'm a 12th grader, Tides odds",
+    "I'm17 best odds on the Tides",
+    "I'm 17 and 3-0 this week, Tides odds",
+    "17 here, best odds on the Harbor City Tides",
+    "my 18th birthday was last week, Tides odds",
 ]
 
 
@@ -328,7 +395,7 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
         ("I'm on the under 21 for the Tides, best price?", "compare_odds"),
         ("The Tides can't stop the run. Best price?", "compare_odds"),
         ("who killed it last night? Tides odds", "compare_odds"),
-        ("the Tides lost everything in the fourth quarter, odds for their next game", "compare_odds"),
+        ("the Tides lost everything in the fourth quarter, odds for the next one", "compare_odds"),
         ("the Tides are desperate for a win, what's their price", "compare_odds"),
         ("is this a must win for the Tides? moneyline", "compare_odds"),
         ("Tides to win back-to-back games, best price", "compare_odds"),
@@ -346,6 +413,18 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
         ("help", "help"),
         ("How do I lock my phone screen", "help"),
         ("Who will win the championship this year?", "fallback"),
+        # Sports slang that looks like the review's additions.
+        ("that parlay killed me, Tides odds", "compare_odds"),
+        ("I am dying to see this game, best price on the Tides", "compare_odds"),
+        ("I'm dead after that bad beat lol, Tides odds", "compare_odds"),
+        ("I think my parlay is dead. Tides moneyline?", "compare_odds"),
+        ("I'm still alive in my survivor pool, Tides odds", "compare_odds"),
+        ("the Tides are going to end it in five games, best price", "compare_odds"),
+        ("can the Tides win it back in game 7? best price", "compare_odds"),
+        ("the Tides can't afford to lose this one, odds", "compare_odds"),
+        ("I took my pills and now I'm watching the Tides, odds", "compare_odds"),
+        ("I'm 20 on the Tides, best price", "compare_odds"),
+        ("I have a problem with the odds board, where is it", "compare_odds"),
     ],
 )
 def test_ordinary_questions_are_not_treated_as_distress(
@@ -400,6 +479,25 @@ def test_a_custom_explainer_cannot_reword_a_support_reply(provider: SyntheticPro
         assert reply.answer == plain.answer(message).answer
         assert "1-800-MY-RESET" in reply.answer
     assert shouting.answer("what is ev").answer.startswith("EXPLAIN_EV:")
+
+
+def test_the_template_explainer_gives_the_same_wording_when_asked(
+    provider: SyntheticProvider,
+) -> None:
+    """So nothing that calls the explainer for the new intent gets the betting fallback."""
+    board = Board(provider, Settings(_env_file=None), InMemoryTTLCache())  # type: ignore[call-arg]
+    assistant = Assistant(board)
+    for message in (
+        "I want to kill myself",
+        "I can't stop betting",
+        "How much should I bet to recover my losses?",
+        "I'm 17, Tides odds",
+        "I'm 19 and I lost everything",
+        "Give me a lock for tonight",
+    ):
+        result = assistant.route(message)
+        assert result.fixed_answer is not None and not result.has_data and result.sources == []
+        assert TemplateExplainer().explain(result.intent, result.facts) == result.fixed_answer
 
 
 def test_a_support_reply_is_logged_by_case_without_the_message(

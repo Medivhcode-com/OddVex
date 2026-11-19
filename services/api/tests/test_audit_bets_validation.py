@@ -629,6 +629,11 @@ def test_an_import_leaves_out_bets_that_cannot_be_stored(make_app: AppFactory) -
         assert left_out(run) == 14
         assert run["status"] == "succeeded"
         assert "14 bets were not imported" in run["error_message"]
+        # The reason names more than prices: a date, a type or a leg count is refused too.
+        assert (
+            "14 because the provider sent a value that cannot be recorded" in (run["error_message"])
+        )
+        assert "the number of legs" in run["error_message"]
         bets = client.get("/v1/bets", headers=headers).json()
         assert sorted(bet["external_bet_id"] for bet in bets) == ["good-1", "good-2"]
         every_read_works(client, headers)

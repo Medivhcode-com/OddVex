@@ -520,8 +520,8 @@ def test_crossing_the_threshold_creates_exactly_one_reminder_per_week(
     assert reminder["title"] == "Weekly staking reminder"
     assert reminder["body"] == (
         "You have staked $100.00 this week, at or above the $100.00 reminder you set. "
-        "This is a reminder, not a limit. Free, confidential help is available at "
-        "1-800-GAMBLER."
+        "This is a reminder, not a limit. Confidential help is available 24 hours a day, "
+        "every day: call 1-800-MY-RESET (1-800-697-3738) or text 800GAM."
     )
     assert reminder["href"] == "/app/tracker"
     assert reminder["data"] == {

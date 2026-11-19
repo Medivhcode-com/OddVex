@@ -180,7 +180,11 @@ def test_guidelines_are_one_structured_list_and_need_no_sign_in(
     assert "21" in by_key["adults_only"]
     assert "not betting advice" in by_key["opinions_not_advice"]
     assert "mocking" in by_key["be_civil"]  # RESPONSIBLE_GAMBLING.md: no mocking losses
-    assert "1-800-GAMBLER" in body["help"] and "21+" in body["help"]
+    assert body["help"] == (
+        "21+. OddVex does not accept wagers. Gambling problem? Call 1-800-MY-RESET "
+        "(1-800-697-3738) or text 800GAM. The helpline is confidential and answers 24 hours "
+        "a day, every day."
+    )
     # The rules describe what is banned without using hype themselves.
     text = " ".join([body["intro"], body["enforcement"], *by_key.values()]).lower()
     for phrase in ("best bet", "top pick", "can't lose", "free money", "!"):

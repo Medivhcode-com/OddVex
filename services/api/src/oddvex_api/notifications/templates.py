@@ -15,6 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from ..helpline import HELPLINE_AVAILABLE
 from ..quant import describe_price
 
 #: ``kind -> {name: template}``. Every user-visible string is built from these.
@@ -57,8 +58,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "title": "Weekly staking reminder",
         "body": (
             "You have staked {staked} this week, at or above the {threshold} reminder you "
-            "set. This is a reminder, not a limit. Free, confidential help is available at "
-            "1-800-GAMBLER."
+            "set. This is a reminder, not a limit. " + HELPLINE_AVAILABLE
         ),
     },
     # Community. Facts only: who did what, and how a pick was graded. No comment text, no

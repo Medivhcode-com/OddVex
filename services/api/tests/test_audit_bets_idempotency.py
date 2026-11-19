@@ -111,6 +111,31 @@ def test_a_repeat_is_answered_with_the_stored_bet_even_if_its_body_differs(
     assert stored(app) == (1, 1)
 
 
+def test_a_repeat_is_still_checked_as_a_request(make_app: AppFactory) -> None:
+    """What the route description says for client authors: a known id does not get a
+    request past the request schema (422) or past the write limit (429)."""
+    app = make_app(
+        rate_limit_enabled=True,
+        rate_limit_auth_per_minute=100,
+        rate_limit_user_writes_per_minute=3,
+    )
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        first = client.post("/v1/bets", json=bet(client_request_id=REQUEST_ID), headers=headers)
+        assert first.status_code == 201
+        no_legs = client.post(
+            "/v1/bets", json=bet(client_request_id=REQUEST_ID, legs=[]), headers=headers
+        )
+        assert no_legs.status_code == 422, no_legs.text
+        repeat = client.post("/v1/bets", json=bet(client_request_id=REQUEST_ID), headers=headers)
+        assert repeat.status_code == 200 and repeat.json() == first.json()
+        # Three writes this minute: the next one is refused, repeat or not.
+        limited = client.post("/v1/bets", json=bet(client_request_id=REQUEST_ID), headers=headers)
+        assert limited.status_code == 429, limited.text
+        assert_envelope(limited.json(), "rate_limited")
+        assert stored(app) == (1, 1)
+
+
 def test_bets_without_an_id_or_with_different_ids_are_separate_bets(
     client: TestClient, headers: Headers, app: FastAPI
 ) -> None:

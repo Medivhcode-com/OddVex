@@ -19,10 +19,21 @@ def ask(client: TestClient, message: str, headers: dict[str, str] | None = None)
     response = client.post("/v1/assistant/query", json={"message": message}, headers=headers or {})
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == {"intent", "answer", "data", "sources", "suggestions", "disclaimer"}
+    assert set(body) == {
+        "intent",
+        "answer",
+        "data",
+        "sources",
+        "suggestions",
+        "disclaimer",
+        "support",
+    }
     assert body["answer"]
+    # Set only on a responsible-gambling reply: tests/test_audit_assistant_support.py.
+    assert body["support"] is None and body["intent"] != "support"
     assert "not betting advice" in body["disclaimer"]
     assert "synthetic" in body["disclaimer"].lower()
+    assert "call 1-800-MY-RESET (1-800-697-3738) or text 800GAM" in body["disclaimer"]
     for source in body["sources"]:
         assert set(source) == {"label", "as_of", "data_mode"}
     for suggestion in body["suggestions"]:
@@ -232,6 +243,13 @@ def test_help(client: TestClient) -> None:
         reply = ask(client, message)
         assert reply["intent"] == "help", message
         assert reply["data"] is None and reply["sources"] == []
+        assert reply["support"] is None
+        # "help" may not be about the product, so the answer always ends with the helpline.
+        assert reply["answer"].endswith(
+            "Looking for help with gambling itself? The National Problem Gambling Helpline is "
+            "confidential and answers 24 hours a day, every day: call 1-800-MY-RESET "
+            "(1-800-697-3738) or text 800GAM (800426)."
+        )
     hrefs = {s["href"] for s in ask(client, "help")["suggestions"]}
     assert hrefs == {"/app/odds", "/app/props", "/app/tools", "/app/tracker"}
 
@@ -240,7 +258,6 @@ def test_help(client: TestClient) -> None:
     "message",
     [
         "Who will win the championship this year?",
-        "Give me a lock for tonight",
         "What's the weather in Paris?",
         "Write me a poem",
         "asdf qwer zxcv",
@@ -253,6 +270,17 @@ def test_fallback_is_honest_and_number_free(client: TestClient, message: str) ->
     assert "can't answer" in reply["answer"]
     assert "predictions" in reply["answer"]
     assert not re.search(r"\d", reply["answer"])
+
+
+def test_a_request_for_a_certain_winner_is_declined_without_numbers(client: TestClient) -> None:
+    """RESPONSIBLE_GAMBLING.md section 5, row 3. More phrasings in the audit test file."""
+    reply = ask(client, "Give me a lock for tonight")
+    assert reply["intent"] == "fallback"
+    assert reply["data"] is None and reply["sources"] == []
+    assert "No result in sports is certain" in reply["answer"]
+    assert "can't answer" in reply["answer"] and "predictions" in reply["answer"]
+    assert not re.search(r"\d", reply["answer"])
+    assert "lock" not in reply["answer"].lower()
 
 
 def test_request_validation(client: TestClient) -> None:

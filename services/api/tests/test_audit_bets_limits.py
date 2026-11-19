@@ -49,7 +49,7 @@ from oddvex_api.sync import (
     SyncRegistry,
 )
 
-from .conftest import AppFactory, auth_headers, register
+from .conftest import EXTERNAL_DATABASE_URL, AppFactory, auth_headers, register
 from .test_platform import assert_envelope
 
 Headers = dict[str, str]
@@ -250,6 +250,61 @@ def test_an_import_stops_at_the_cap_and_says_how_many_bets_it_left_out(
         assert all("not imported" in r["error_message"] for r in history.json())
 
 
+@pytest.mark.skipif(
+    EXTERNAL_DATABASE_URL is None,
+    reason="needs row locks: SQLite has none, PostgreSQL (the server's database) does",
+)
+def test_an_import_and_creates_at_the_same_moment_cannot_pass_the_bet_cap(
+    make_app: AppFactory,
+) -> None:
+    """An import waits on the same row lock as a create, so the two together stop at the
+    cap. Without the lock in the import the account ended two to four bets over."""
+    cap = 12
+    app = make_app(max_bets_per_user=cap)
+    app.state.sync_registry = SyncRegistry([ManyBetsProvider(cap)])
+    lock = threading.Lock()
+    with TestClient(app) as client:
+        for attempt in range(3):  # three accounts, one race each
+            headers = auth_headers(client, f"racer{attempt}@example.test")
+            user_id = client.get("/v1/me", headers=headers).json()["id"]
+            connection = client.post(
+                "/v1/sync/connections", json={"provider": "many"}, headers=headers
+            ).json()
+            barrier = threading.Barrier(9)
+            answers: list[tuple[str, int]] = []
+
+            def send(
+                kind: str,
+                url: str,
+                body: dict[str, Any] | None,
+                headers: Headers = headers,
+                barrier: threading.Barrier = barrier,
+                answers: list[tuple[str, int]] = answers,
+            ) -> None:
+                barrier.wait()
+                response = client.post(url, json=body, headers=headers)
+                with lock:
+                    answers.append((kind, response.status_code))
+
+            sync_url = f"/v1/sync/connections/{connection['id']}/sync"
+            threads = [threading.Thread(target=send, args=("import", sync_url, None))]
+            threads += [
+                threading.Thread(target=send, args=("create", "/v1/bets", bet())) for _ in range(8)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=60)
+            assert len(answers) == 9 and ("import", 200) in answers, answers
+            assert {status for kind, status in answers if kind == "create"} <= {201, 409}
+            with app.state.session_factory() as db:
+                stored = db.scalar(
+                    select(func.count()).select_from(Bet).where(Bet.user_id == user_id)
+                )
+            # Every create that was accepted is stored and the import filled the rest.
+            assert stored == cap, answers
+
+
 def test_an_import_with_room_for_everything_reports_nothing_left_out(
     client: TestClient, headers: Headers
 ) -> None:
@@ -388,7 +443,10 @@ def test_the_coarse_counter_counts_a_window_in_buckets() -> None:
 # ------------------------------------------------------------- export limit
 def test_the_export_has_its_own_lower_limit_per_user(make_app: AppFactory) -> None:
     app = make_app(
-        rate_limit_enabled=True, rate_limit_auth_per_minute=100, rate_limit_export_per_hour=2
+        rate_limit_enabled=True,
+        rate_limit_auth_per_minute=100,
+        rate_limit_export_per_hour=2,
+        rate_limit_user_streams_at_once=1,
     )
     with TestClient(app) as client:
         ada = auth_headers(client, "ada@example.test")
@@ -399,6 +457,13 @@ def test_the_export_has_its_own_lower_limit_per_user(make_app: AppFactory) -> No
         assert blocked.status_code == 429, blocked.text
         assert_envelope(blocked.json(), "rate_limited")
         assert 60 < int(blocked.headers["Retry-After"]) <= 3_600
+        # The refused export gave back its place among the streamed responses (one at
+        # a time here): the bet list still answers, and the next export is refused for
+        # the hour, not for want of a place.
+        assert client.get("/v1/bets", headers=ada).status_code == 200
+        again = client.get("/v1/me/export", headers=ada)
+        assert again.status_code == 429 and int(again.headers["Retry-After"]) > 60
+        assert client.get("/v1/bets", headers=ada).status_code == 200
         # A refused export is not audited as an export.
         with app.state.session_factory() as db:
             exports = db.scalar(
@@ -862,6 +927,50 @@ def test_the_bet_list_is_sent_a_batch_at_a_time_and_holds_no_connection_in_betwe
     assert b"".join(bets_router.page_chunks(app.state.session_factory, other_id, ids)) == b"[]"
 
 
+def test_the_list_and_export_routes_hold_one_connection_at_most_while_they_send(
+    client: TestClient, headers: Headers, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Through the routes, not the generators: while a batch is turned into JSON the only
+    connection out of the pool is that batch's own. The route has given its own back
+    before the first byte, so readers that stall cannot use up the pool (two accounts
+    with eight stalled lists each would otherwise hold all fifteen connections)."""
+    from oddvex_api.bets import router as bets_router
+
+    monkeypatch.setattr(bets_router, "LIST_BATCH", 2)
+    monkeypatch.setattr(account_export, "BET_BATCH", 2)
+    _fill(client, headers, 5)
+    pool = app.state.engine.pool
+    idle = pool.checkedout()
+    real_json = bets_service.bet_json
+    during_a_batch: list[int] = []
+    at_checkout: list[int] = []
+
+    def spy(row: Bet) -> bytes:
+        during_a_batch.append(pool.checkedout())
+        return real_json(row)
+
+    def checked_out(dbapi_connection: Any, record: Any, proxy: Any) -> None:
+        at_checkout.append(pool.checkedout())
+
+    monkeypatch.setattr(bets_service, "bet_json", spy)
+    event.listen(app.state.engine, "checkout", checked_out)
+    try:
+        for path in ("/v1/bets", "/v1/me/export"):
+            during_a_batch.clear()
+            at_checkout.clear()
+            response = client.get(path, headers=headers)
+            assert response.status_code == 200, response.text
+            document = response.json()
+            assert len(document if path == "/v1/bets" else document["bets"]) == 5
+            # Five bets in batches of two: the batch's own session and nothing else.
+            assert during_a_batch == [idle + 1] * 5, (path, during_a_batch)
+            # And at no moment of the request were two connections out at once.
+            assert len(at_checkout) > 3 and max(at_checkout) == idle + 1, (path, at_checkout)
+            assert pool.checkedout() == idle
+    finally:
+        event.remove(app.state.engine, "checkout", checked_out)
+
+
 def test_a_page_of_the_bet_list_is_decided_by_one_statement(
     client: TestClient, headers: Headers, app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1058,6 +1167,34 @@ def test_a_stream_gives_its_slot_back_however_it_ends() -> None:
     del response
     gc.collect()
     assert given_back == ["back"]
+
+
+def test_a_slot_given_back_twice_frees_one_slot_not_two(make_app: AppFactory) -> None:
+    """The call that gives a slot back can run twice (when the response ends and again
+    when it is discarded). The second call must not free a slot that another response
+    of the same user is still using."""
+    from types import SimpleNamespace
+
+    from oddvex_api.errors import ApiError
+    from oddvex_api.ratelimit import _in_progress, take_user_stream_slot
+
+    app = make_app(rate_limit_enabled=True, rate_limit_user_streams_at_once=2)
+    request: Any = SimpleNamespace(app=app)
+    counter = _in_progress(app, "streams")
+    first = take_user_stream_slot(request, "ada")
+    second = take_user_stream_slot(request, "ada")
+    assert counter.active("ada") == 2
+    first()
+    first()
+    assert counter.active("ada") == 1  # the second response still holds its slot
+    third = take_user_stream_slot(request, "ada")
+    with pytest.raises(ApiError) as refused:
+        take_user_stream_slot(request, "ada")
+    assert refused.value.status_code == 429
+    second()
+    third()
+    third()
+    assert counter.active("ada") == 0
 
 
 def test_one_user_runs_one_auto_settle_at_a_time(

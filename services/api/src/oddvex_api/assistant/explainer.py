@@ -1,12 +1,16 @@
 """Turning tool output into prose. Templates only: every number is copied from ``facts``.
 
-The responsible-gambling replies (``safeguards.py``) are fixed wording and do not come
-through an explainer.
+The responsible-gambling replies (``safeguards.py``) are fixed wording. The engine uses
+that wording directly and does not ask an explainer for it; :class:`TemplateExplainer`
+returns the same wording when it is asked.
 """
 
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
+
+from ..helpline import HELPLINE_SENTENCE
+from . import safeguards
 
 
 @runtime_checkable
@@ -199,9 +203,23 @@ class TemplateExplainer:
             "line movement for a team's game, explain expected value and no-vig math, and "
             "summarise your tracked bets when you're logged in. I answer from OddVex data and "
             f"calculators only, and {data_note}."
+            # "I need help" may not be about the product, so the helpline is always here.
+            f"\n\nLooking for help with gambling itself? {HELPLINE_SENTENCE}"
+        )
+
+    def _support(self, f: dict[str, Any]) -> str:
+        return safeguards.reply(
+            safeguards.Signals(
+                crisis=f["case"] == "crisis",
+                underage=f["case"] == "underage",
+                distress=f["case"] == "distress" or bool(f.get("distress")),
+                chasing_losses=bool(f.get("chasing_losses")),
+            )
         )
 
     def _fallback(self, f: dict[str, Any]) -> str:
+        if f.get("reason") == "certainty":
+            return safeguards.NO_CERTAINTY_REPLY
         return (
             "I can't answer that. I'm a rule-based helper, not a general chatbot, and I only "
             "answer from OddVex's data and calculators. I don't make picks or predictions. "

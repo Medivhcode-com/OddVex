@@ -272,8 +272,8 @@ def test_the_staking_reminder_is_supportive_and_points_to_help() -> None:
     assert draft.title == "Weekly staking reminder"
     assert draft.body == (
         "You have staked $520.00 this week, at or above the $500.00 reminder you set. "
-        "This is a reminder, not a limit. Free, confidential help is available at "
-        "1-800-GAMBLER."
+        "This is a reminder, not a limit. Confidential help is available 24 hours a day, "
+        "every day: call 1-800-MY-RESET (1-800-697-3738) or text 800GAM."
     )
     lowered = draft.body.lower()
     for shaming in (

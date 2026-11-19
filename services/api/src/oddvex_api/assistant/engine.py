@@ -221,7 +221,11 @@ class Assistant:
             ]
         return ToolResult(
             "support",
-            {"case": case},
+            {
+                "case": case,
+                "distress": signals.distress,
+                "chasing_losses": signals.chasing_losses,
+            },
             suggestions=suggestions,
             has_data=False,
             fixed_answer=safeguards.reply(signals),

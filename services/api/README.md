@@ -271,8 +271,10 @@ Behaviour worth knowing:
   differs and even when the retry arrives while the first request is still running (a unique
   index on `bets (user_id, client_request_id)` decides). That includes the case where the
   first request takes the account's last free place: the retry is answered with the stored
-  bet, not with `409 bet_limit_reached`. The id is not part of the response and is free again
-  once the bet is deleted. Imported bets have none.
+  bet, not with `409 bet_limit_reached`. A repeat is still a request: one whose body does not
+  pass the request schema is a 422 and one over the write limit is a 429, like any other
+  create. The id is not part of the response and is free again once the bet is deleted.
+  Imported bets have none.
 - **Write and export limits.** Bet writes (create, edit, delete, settle, auto-settle) and sync
   writes (connect, import, disconnect) share a limit per user id, whatever the address:
   `ODDVEX_RATE_LIMIT_USER_WRITES_PER_MINUTE` and `ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY`.
@@ -388,10 +390,38 @@ Behaviour worth knowing:
   current ISO week, Monday to Sunday in UTC, void bets excluded), `week_start` and `exceeded`.
   When `POST /v1/bets` or a sync import takes the weekly total from below the threshold to at or
   above it, one `stake_reminder` notification is created for that week, stating the amount
-  staked, the user's own threshold and that free, confidential help is available at
-  1-800-GAMBLER. **OddVex never blocks, rejects or delays a bet because of it: the bet is always
+  staked, the user's own threshold and how to reach the helpline (see "Helpline facts"
+  below). **OddVex never blocks, rejects or delays a bet because of it: the bet is always
   saved.** At most one reminder per user and week, even if the threshold changes or the
   notification is deleted.
+- **Helpline facts.** `oddvex_api/helpline.py` is the one place that spells out a helpline:
+  the National Problem Gambling Helpline is 1-800-MY-RESET (1-800-697-3738), call, or text
+  800GAM (800426); it is confidential and answers 24 hours a day, every day; it is not an
+  emergency service, and in a crisis the numbers are 988 (the Suicide and Crisis Lifeline,
+  call or text) and 911. The module also records the date the facts were verified
+  (2026-11-19). The assistant, the staking reminder, the email footer and the community
+  guidelines import their wording from it, and `tests/test_audit_helpline.py` fails if any
+  other module spells a number out. The number that was the national helpline before
+  2026-01-29 is run by the New Jersey council and is not given anywhere.
+- **Assistant: responsible-gambling replies.** `POST /v1/assistant/query` checks every message
+  against fixed patterns (`assistant/safeguards.py`) before any intent is matched, so a team
+  name, a player name or "my record" in the same message cannot pull in betting data. The
+  rows are those of `docs/compliance/RESPONSIBLE_GAMBLING.md`, section 5:
+
+  | The message | The answer |
+  | --- | --- |
+  | Crisis or self-harm language | Only support: 988 and 911 first, then the gambling helpline, and a line asking the user to tell someone they trust. One link, to `/responsible-gambling` |
+  | The user says they are under 21 ("I'm 17", "I turn 21 in March", "I'm in high school") | OddVex is for adults 21 and over; no betting information; the helpline |
+  | Distress about gambling (cannot stop, lost more than they can afford, borrowed money, hiding it) | An acknowledgement without judgement, the helpline, the weekly staking reminder and the bet tracker, the crisis line. No prices |
+  | Wanting to win losses back ("how much should I bet to recover my losses?") | The distress answer, which also declines to size or pick a bet and says that chasing losses is a recognised warning sign |
+  | A request for a certain winner | No result is certain; no picks or predictions; market data is offered |
+
+  When several apply, crisis comes first, then under 21, then distress. The first three kinds
+  have `intent: "support"`, `data: null`, no sources and `support: {"case": "crisis" |
+  "underage" | "distress"}`; every other answer has `support: null`. The last row keeps
+  `intent: "fallback"`. The wording is fixed in code and is not passed through the
+  `Explainer`. Each support reply is logged as `assistant_support_reply` with the case and
+  whether a token was sent: never the message, never a user id.
 - **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
   (public, flag `value_screen`). For every outcome of every upcoming event, the best
   open, non-stale price is compared with the mean no-vig probability of the **other** open,
@@ -513,7 +543,8 @@ Behaviour worth knowing:
   that never used the community, and whether or not the flag is on). The profile includes
   `plan` and `email_verified`. It never contains the password hash, email tokens or outbox
   emails. Each export is itself audited. The document is streamed (`account/export.py`): bets
-  are read 50 at a time and import runs and audit entries 1,000 at a time and written as
+  are read 50 at a time, import runs and audit entries 1,000 at a time, and of the community
+  part the picks 200 and the comments and reports 1,000 at a time, and written as
   they are read, and no database connection is held while the client is reading. The
   response therefore has no `Content-Length`; it is still one JSON document of the
   `AccountExportOut` schema, with the keys in the same order, to be read to the end and
@@ -697,7 +728,9 @@ src/oddvex_api/
   notifications/     templates (all wording), NotificationChannel + InAppChannel, preferences,
                      staking reminder, routes
   sync/              SyncProvider protocol, MockSyncProvider, idempotent import
-  assistant/         intent router, data tools, Explainer protocol + TemplateExplainer
+  assistant/         responsible-gambling checks and replies (safeguards.py), intent router,
+                     data tools, Explainer protocol + TemplateExplainer
+  helpline.py        the helpline and crisis-line facts; every text that names one imports them
   db/                SQLAlchemy 2 models, portable UTC datetime type, session factory
   textnorm.py        caseless text keys folded in Python, the same on every database
   errors.py middleware.py ratelimit.py cache.py logging_config.py deps.py
@@ -737,7 +770,7 @@ docs/QUANT_METHODOLOGY.md
 | Odds, lines, line history, prop offers, game logs | Synthetic. One scoring model produces both the results and the prices: each side scores as a Poisson process, a fair price is the exact probability of the final result given the score and the time left, and final scores are drawn from the same model (`tests/test_audit_board_calibration.py` checks that every side wins as often as its price says, before the start and in play). Book prices add a margin and noise. No book or prop has a real edge |
 | Stale / suspended / unavailable books | Simulated on purpose. One book (`oldmill`) is always stale. In a live game a book is stale for a few seconds after each score change, until it requotes, and it suspends a market once one outcome is more than 98% likely |
 | Sportsbook sync | `MockSyncProvider` only: a fictional account with a fixed bet history and a simulated failure switch. No credentials, no real sportsbook |
-| Assistant | Keyword/regex intent router and templates. **No language model is connected** |
+| Assistant | Fixed patterns for the responsible-gambling replies, then a keyword/regex intent router and templates. **No language model is connected** |
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
 | Community demo data | Six fictional profiles (`fictional_fox`, `sample_sam`, `madeup_mara`, `placeholder_pat`, `notreal_nia`, `example_eli`) and the demo user's `demo_bettor`, with graded and upcoming picks, comments, follows and likes. Seeded only when the `community` flag is on in that database or `--with-community` is passed. Graded picks are written as posted before events that are final by now, priced from the synthetic line history, and graded by the API's own grading code |
 | Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle. With a provider it also gets five alert rules (one price alert that is already met and fires, the others stay active) and the notifications the engine produces for them |
@@ -787,6 +820,13 @@ docs/QUANT_METHODOLOGY.md
   not stored, so a condition that was only true between two evaluations is missed.
 - Notifications are in-app only. Push, email and SMS need third-party services and Founder
   approval.
+- The assistant's responsible-gambling replies depend on fixed patterns. They miss messages
+  that are worded differently, they can fire on a message that meant something else (the
+  user then gets help resources instead of the answer), and they read one message at a time:
+  nothing is remembered, so a later message in the same chat is answered normally. A user who
+  says they are under 21 is told OddVex is for adults 21 and over; nothing is recorded against
+  an account and no account is closed, because conversations are not stored and the under-21
+  procedure does not exist yet.
 - The staking reminder is a reminder, never a limit. It looks at bets recorded in OddVex only,
   is checked when a bet is created or imported (not when a bet is edited, settled or deleted),
   and the "current week" is the ISO week in UTC, not the user's time zone.

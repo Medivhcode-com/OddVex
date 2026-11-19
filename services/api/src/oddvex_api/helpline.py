@@ -58,7 +58,9 @@ HELPLINE_SHORT = (
 
 #: What the helpline offers, without its name and without asking a question. For places
 #: where the reader has not said anything is wrong, such as the staking reminder.
-HELPLINE_AVAILABLE = f"Confidential help is available 24 hours a day, every day: {HELPLINE_CONTACT}."
+HELPLINE_AVAILABLE = (
+    f"Confidential help is available 24 hours a day, every day: {HELPLINE_CONTACT}."
+)
 
 #: The full sentence form.
 HELPLINE_SENTENCE = (

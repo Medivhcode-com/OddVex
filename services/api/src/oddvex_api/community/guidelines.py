@@ -7,6 +7,8 @@ needs the same counsel review as the other policy pages before the flag is turne
 
 from __future__ import annotations
 
+from ..helpline import HELPLINE_SHORT
+
 GUIDELINES_VERSION = "2026-11-16"
 
 INTRO = (
@@ -61,8 +63,8 @@ ENFORCEMENT = (
 )
 
 HELP = (
-    "21+. OddVex does not accept wagers. Gambling problem? Call 1-800-GAMBLER. Free, "
-    "confidential help is available."
+    f"21+. OddVex does not accept wagers. {HELPLINE_SHORT} The helpline is confidential and "
+    "answers 24 hours a day, every day."
 )
 
 #: Shown wherever a record or a ranking appears.

@@ -11,11 +11,18 @@ tested against four groups of fixed patterns, and the first that applies decides
    result is certain and offers market data.
 
 Everything here is a deterministic rule. No language model is involved and nothing is
-remembered between messages. Rules like these miss cases and that is a known limit; where
-a phrase could be read either way, the patterns lean towards showing help. The tests in
-``tests/test_audit_assistant_detection.py`` list what must match and, next to it, the
-ordinary sports talk that must not ("the Tides can't stop the run", "under 21.5",
-"I'm 15 units up").
+remembered between messages. The only input besides the message is today's date, which
+turns "I was born in 2009" into an age. Rules like these miss cases and that is a known
+limit; where a phrase could be read either way, the patterns lean towards showing help,
+and ``HELP_SHOWN_ANYWAY`` in the tests lists examples of help shown where none was asked
+for. The tests in ``tests/test_audit_assistant_detection.py`` list what must match and,
+next to it, the ordinary sports talk that must not ("the Tides can't stop the run",
+"under 21.5", "I'm 15 units up", "that parlay killed me", "I think my parlay is dead").
+
+Most patterns name a wording. Three are wider, for wordings no list has: a first-person
+subject joined to "die", "dead", "death" or "end it" by filler words only (``_CHAIN``).
+"I just really want to be dead" matches; "I think my parlay is dead" does not, because
+"my parlay is" is not filler.
 
 The reply wording is in this module too, so that a pluggable ``Explainer`` cannot reword
 it. Helpline details come from ``oddvex_api.helpline``.
@@ -26,6 +33,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from ..helpline import (
@@ -72,15 +80,15 @@ class Signals:
 
 
 # ------------------------------------------------------------------- normalising
-_APOSTROPHES = dict.fromkeys(map(ord, "'’‘ʼ`´′＇"), None)
-_DASHES = dict.fromkeys(map(ord, "‐‑‒–—―"), "-")
+_APOSTROPHES = dict.fromkeys(map(ord, "'\u2019\u2018\u02bc`\u00b4\u2032\uff07"), None)
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015"), "-")
 
 
 def normalise(message: str) -> str:
     """Lower case, one space between words, apostrophes removed and dashes made plain.
 
-    "I can’t stop", "I can't stop" and "i cant stop" all become ``i cant stop``, so the
-    patterns below are written without apostrophes.
+    "I can't stop" with a straight or a curly apostrophe and "i cant stop" all become
+    ``i cant stop``, so the patterns below are written without apostrophes.
     """
     text = unicodedata.normalize("NFKC", message).casefold()
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
@@ -93,50 +101,283 @@ def _any(*patterns: str) -> re.Pattern[str]:
 
 # First-person openers, after normalising ("i'm" is "im").
 _IM = r"\b(?:im|i am|i m)"
+_I = r"\b(?:i|im|ive|id|ill)"
 _CANT = r"(?:cant|cannot|can not|couldnt|could not)"
 _GAMBLING = r"(?:gambling|betting|sports betting|wagering|bets|parlays|sportsbooks?)"
+_SELF = r"(?:my ?self|myslef|mysef|meself)"
+_END = r"(?=[.,!?;]|$)"
+
+# Words that can stand between "I" and what a sentence says without changing whose sentence
+# it is: "I just really want to ...", "I think I might as well ...", "I have been thinking
+# about ...". A first-person rule built on this chain matches "I want to be dead" and not
+# "I think my parlay is dead", because "my parlay is" is not in the list.
+_CHAIN_WORD = (
+    r"(?:just|really|honestly|truly|sometimes|often|always|still|only|simply|actually|kinda|"
+    r"might|may|could|would|will|should|can|do|did|have|had|was|were|am|be|been|want|wanted|"
+    r"wanna|wish|wished|hope|hoped|need|must|deserve|deserved|ought|rather|going|gonna|ready|"
+    r"about|plan|planning|decided|to|as|well|feel|felt|like|think|thought|thinking|keep|kept|guess|"
+    r"know|if|when|i|im|id|ill|ive|my|own|not|dont|a|lot|that|soon|probably|maybe|of|on)"
+)
+_CHAIN = rf"{_I}(?: {_CHAIN_WORD}){{0,6}}"
 
 # ------------------------------------------------------------------------ crisis
+# Sports talk that follows "no way out of", "a way out of": a group, a parlay, a jam.
+_OUT_OF_SPORT = (
+    r"(?! of (?:the|this|that|my|a|his|her|their) (?:group|division|conference|bracket|pool|"
+    r"parlay|bet|wager|ticket|slip|contract|deal|subscription|plan|slump|jam|inning|game|"
+    r"league|trade)\b)"
+)
 _CRISIS_RE = _any(
-    r"\bkill(?:ing)? my ?self\b",
-    r"\bkms\b",
+    # "kill myself", with the common misspellings and ways of writing around a filter.
+    rf"\bk(?:i|[^a-z\s])?l{{1,3}}(?:ed|ing|in|s)? ?{_SELF}\b",
+    r"\bk[\W_]{0,3}i[\W_]{0,3}l[\W_]{0,3}l[\W_]{0,3}my[\W_]{0,3}self\b",
+    r"\bk[\W_]{0,2}m[\W_]{0,2}s\b|\bkys\b",
+    r"\bkill (?:your ?self|urself)\b",
     # "suicide squeeze" is a baseball play and a "suicide pool" is a survivor contest.
-    r"\bsuicid(?!e (?:squeeze|pools?)\b)",
-    r"\bsucid",
-    r"\bend(?:ing)? (?:my (?:own )?life|it all|my (?:pain|suffering))\b",
+    r"\bsu[\W_i1!|]{0,2}c[\W_i1!|]{0,2}d(?!e (?:squeeze|pools?)\b)",
+    r"\bs[\W_]{1,2}i?c[\W_i]{0,2}d",
+    r"\bsewer ?slide",
+    r"\bunaliv",
+    r"\bend(?:ing)? (?:my (?:own )?life|my (?:pain|suffering))\b",
+    r"\bend(?:ing)? it all\b(?! in (?:regulation|overtime|ot|extra|the (?:first|second|third|"
+    r"fourth|\d))\b)",
+    # "I'm going to end it tonight", "should I just end it". Not "end it here with one last
+    # question", and not a team that can end a series.
+    rf"{_CHAIN} end(?:ing)? (?:it|things|everything)\b"
+    r"(?! (?:here |there )?(?:with|on|at|in|early|already)\b)",
+    r"\bshould i (?:just |maybe )?end (?:it|things|everything)\b",
+    rf"{_CHAIN} end me\b",
+    r"\bending (?:it|things|it all|my life) (?:would|will|might|seems|sounds|feels|is)\b",
+    r"\b(?:want|wish|need) (?:my|this) life to (?:end|be over|stop)\b",
+    r"\b(?:end|out of) my misery\b",
+    r"\btime (?:for me )?to end (?:it|things|everything)\b"
+    r"(?! (?:here |there )?(?:with|on|at|in|early|already)\b)",
     r"\btak(?:e|ing) my (?:own )?life\b",
-    r"\b(?:want(?:ed)? to|wanna|going to|gonna|ready to|rather|should just|wish i could|"
-    r"hope i) die\b",
-    r"\bwish i (?:was|were|am) dead\b",
-    r"\bbetter off (?:dead|without me)\b",
-    r"\b(?:dont|do not) (?:want|wanna) (?:to )?(?:live|be alive|be here|exist|wake up|go on)\b",
-    r"\bno (?:reason|point) (?:to|in) (?:live|living|go on|going on)\b",
+    r"\b(?:want(?:ed)? (?:to|2)|wanna|going to|gonna|ready to|rather|should just|wish i could|"
+    r"hope i) d[i1!]e\b(?! (?:if (?:the|they|he|she|this|that|my)|laughing|of (?:laughter|"
+    r"boredom|embarrassment))\b)",
+    r"\bdeserve to (?:die|be dead)\b",
+    r"\blet me die\b",
+    r"\b(?:way|ways|how|take|takes|enough|pills|easiest|quickest) to die\b(?! hard)",
+    r"\bbetter (?:to be|being) dead\b",
+    r"\b(?:death|dying|being dead) (?:would|will|might|seems|sounds|feels|is) (?:be )?(?:a "
+    r"relief|easier|better|the only|my only|the answer|peaceful|welcome)\b",
+    r"\b(?:dont|do not) deserve to (?:live|be alive|be here|exist)\b",
+    # First person and "die", "dead" or "death", joined only by the chain words above.
+    rf"{_CHAIN} die\b(?! (?:for|to (?:see|watch|get|have|know)|laughing|happy|hard|on (?:this|"
+    r"that|the|my) hill|a (?:little|\w+ fan)|of (?:laughter|boredom|embarrassment)|if (?:the|"
+    r"they|he|she|this|that|my)|when (?:the|they|he|she)|every time)\b)",
+    r"\b(?:if|when|before|until|once|after) i die\b",
+    r"\b(?:dont|do not) care (?:if|whether) i (?:live|die)\b",
+    r"\b(?:dont|do not) care what happens to me\b",
+    r"\bwish i (?:was|were|am) (?:dead|gone)\b",
+    r"\bworth more dead\b",
+    r"\b(?:family|wife|husband|kids|children|they|she|he) (?:would|will|could|can) (?:get|"
+    r"collect|have) (?:the|my) (?:life )?insurance\b",
+    r"\bhope (?:i get|i am|im|to get|to be) (?:hit|run over|killed)\b(?! with)",
+    r"\bhope (?:a|some) (?:car|bus|truck|train) hits me\b",
+    r"\b(?:dont|do not|wont|will not|not going to|not gonna|might not|may not) (?:make it "
+    r"(?:through|to|past) (?:the night|tonight|tomorrow|morning)|see tomorrow)\b",
+    r"\bno tomorrow for me\b|\bwont be a tomorrow\b",
+    r"\bwont matter after tonight\b|\bafter tonight (?:it|nothing) (?:wont|will not|will) "
+    r"matter\b",
+    rf"{_CHAIN} (?:be|was|were) dead\b(?! ?(?:wrong|right|on|serious|set|last|even|tired|"
+    r"certain|sure|money|to rights|in the water|asleep|weight|after|without|lol|lmao)\b)",
+    r"\b(?:when|once|after|until|till) (?:im|i am) (?:dead|gone)\b(?! (?:on|for|from|to|at)\b)",
+    r"\bif i (?:was|were) (?:gone|dead)\b(?! (?:for|on|from|would my|will my|do my|does my)\b)",
+    r"\bif i (?:just )?(?:wasnt|werent|was not|were not) (?:here|around|alive)\b"
+    r"(?! (?:for|to|at|on|when|during)\b)",
+    rf"{_CHAIN} (?<!to )death\b(?! (?:by|row|stare|trap|grip|blow|valley|spiral|march|wish)\b)",
+    r"\bmy (?:own )?death\b",
+    r"\b(?:dead|dying|empty|numb) inside\b",
+    r"\bbetter off (?:dead|gone|without me|if i (?:was|were|wasnt|werent|am|died|die|"
+    r"disappeared)|not (?:being )?(?:here|around|alive))\b",
+    r"\b(?:happier|better|easier) (?:if i (?:was|were|wasnt|werent|died|die|disappeared)|"
+    r"without me|with me gone|when im gone)\b",
+    rf"(?:{_IM}|\bive become|\bi feel like) (?:just |such )?a burden\b",
+    r"\b(?:nobody|no one|noone) (?:would|will|wouldnt|is going to) (?:even )?(?:miss me|"
+    r"care (?:if|when|that) i|notice (?:if|when) i)\b",
+    r"\b(?:nobody|no one|noone) cares (?:if|whether) i (?:live|die|am|was|exist)\b",
+    rf"\b(?:nobody|no one|noone) (?:would|will|wouldnt) (?:even )?(?:notice|care)(?:{_END}| if i| "
+    r"when i| about me)",
+    r"\b(?:nobody|no one|noone) cares about me\b",
+    r"\b(?:would|will|wouldnt|wont|whod)(?: (?:even|anyone|anybody|they|you|she|he|really|"
+    r"ever)){0,3} miss me\b",
+    r"\b(?:wont|will not|never) (?:hear from|see) me (?:again|any ?more)\b",
+    rf"{_IM} (?:just |such )?a waste of (?:space|air|oxygen|life)\b",
+    r"\brather be dead\b",
+    r"\bfeel like dying\b",
+    r"\b(?:done|finished|through) with (?:this |my )?(?:life|living)\b",
+    rf"{_IM} (?:so |just )?done with (?:everything|it all|all of it)(?:{_END}| any ?more)",
+    rf"\bi (?:just |really )?{_CANT} any ?more{_END}",
+    rf"\b{_CANT} stand (?:being alive|living(?! (?:in|with|at|near)\b)|my life|my ?self)\b",
+    r"\b(?:living|life) is too (?:hard|much|painful)\b",
+    r"\blife has no (?:meaning|point|purpose)\b",
+    r"\bno (?:meaning|point|purpose) (?:to|in) (?:my )?life\b",
+    rf"\bnothing matters(?: any ?more\b|{_END})",
+    r"\bout of this life\b|\bquit life\b",
+    r"\b(?:stop|sick of|hate|done|quit|finished) living\b"
+    r"(?! (?:on|in|at|with|like|off|up|for|vicariously)\b)",
+    r"\b(?:dont|do not|why (?:should|do|would) i|no reason to|cant|cannot) (?:want to )?keep "
+    r"living\b",
+    r"\bwhy am i (?:even |still )?alive\b",
+    r"\bwhy (?:even )?(?:go on|keep going|bother living)\b"
+    r"(?! (?:with|to|for|at|on (?:this|the|that|a))\b)",
+    r"\btired of (?:living|life|being alive|being here|existing|it all|everything)\b",
+    r"\b(?:hate|sick of|stop) being alive\b",
+    r"\bshouldnt be alive\b",
+    r"\bwish i (?:had |was |were |d )?(?:never |not )?(?:been )?born\b",
+    r"\bwish i (?:wasnt|werent|was not|were not) (?:alive|here|born|around)\b",
+    r"\bnever (?:been|was) born\b",
+    r"\b(?:want|wanna|wish i could|need) (?:to )?(?:just )?(?:disappear|vanish)\b",
+    rf"{_CHAIN} (?:disappear|vanish)\b",
+    r"\bstop existing\b|\bcease to exist\b",
+    r"\bwish i (?:didnt|did not|could (?:just )?not) exist\b",
+    r"\b(?:rather|wish to|want to|prefer to) not (?:be alive|exist|live|wake up)\b",
+    r"\b(?:no longer|not|dont|do not) (?:want|wanna|wish|wanting|wishing) (?:to )?(?:live|be "
+    r"alive|exist|do life)\b",
+    r"\bgo away forever\b",
+    r"\b(?:point|purpose) of (?:living|life|going on)\b",
+    r"\b(?:dont|do not) (?:want|wanna) (?:to )?(?:live|be alive|be here|be around|exist|"
+    r"wake up|go on(?! (?:the|a|my|this|that|tilt)\b))\b",
+    r"\b(?:reason|point) (?:to|in|for) (?:keep(?:ing)? )?(?:live|living|go on|going on|"
+    r"being alive|being here|stay(?:ing)? alive)\b",
+    r"\breason to keep going\b(?! (?:with|for|at|to|after|on (?:this|that|the|my|a))\b)",
     r"\bnothing (?:left )?to live for\b",
-    r"\b(?:not|isnt) worth living\b",
-    r"\bgive up on life\b",
-    rf"\bi (?:just |really )?{_CANT} go on\b",
-    rf"\b{_CANT} (?:take|do) (?:it|this) any ?more\b",
-    r"\bno way out\b",
-    r"\b(?:hurt|harm|cut|shoot|hang|drown|poison)(?:ing)? my ?self\b",
+    r"\bworth living\b",
+    r"\blife (?:isnt|is not|aint|is no longer) worth (?:it|living|the pain|anything)\b",
+    r"\blife is (?:pointless|meaningless|hopeless)\b",
+    r"\bmy life is (?:over|pointless|meaningless|worthless)\b",
+    r"\b(?:give|giving|given|gave) up on (?:life|living|everything|my ?self)\b",
+    rf"\bi (?:just |really )?{_CANT} go on\b"
+    r"(?! (?:the|a|my|this|that|to|oddvex|air|without (?:knowing|seeing|checking))\b)",
+    r"\b(?:dont|do not) think i can (?:go on|keep going|do this|take (?:it|this)|live)\b"
+    r"(?! (?:the|a|my|to|with|without (?:knowing|seeing|checking))\b)",
+    r"\bnothing left for me\b",
+    r"\bno way forward\b",
+    r"\bno hope (?:for me|left|any ?more)\b",
+    r"\bi(?:ve| have)? (?:\w+ )?lost (?:all |any )?hope\b(?! (?:in|for|on) (?:the|this|that|"
+    r"my (?:parlay|bet|team))\b)",
+    r"\bthe end for me\b",
+    r"\bend of my (?:rope|tether)\b",
+    rf"\bi (?:just |really |honestly |literally )?{_CANT} keep (?:going|living|doing this)\b"
+    r"(?! (?:back|with|to|for|at|in|after|on (?:this|the|that|a|my|these|those))\b)",
+    rf"\bi (?:just |really |honestly |literally )?{_CANT} live (?:like this|this way|with "
+    r"my ?self|with this|with it|with what i(?:ve|d)?|with the (?:shame|guilt)|any ?more|any "
+    r"longer)\b",
+    rf"\b{_CANT} (?:take|do|bear|stand|handle|face|cope with|deal with) (?:it|this|the pain|"
+    r"life|things|everything|any of (?:it|this)) any ?more\b",
+    rf"\bi (?:just |really )?{_CANT} cope\b",
+    rf"\bno (?:other )?way out\b{_OUT_OF_SPORT}",
+    r"\bonly way out\b",
+    r"\b(?:a|any|another|an easy) way out\b(?! of (?:the|a|his|her|their|that) )"
+    rf"{_OUT_OF_SPORT}",
+    r"\b(?:want|wanna|need|wish) (?:it all|everything|the pain|the suffering|this all|all of "
+    r"(?:it|this)) (?:to |would )(?:all )?(?:stop|end|be over|go away|disappear)\b"
+    r"(?! (?:in|at|on|with|before|after|early|so|by)\b)",
+    r"\bjust (?:want|wanna|need) (?:it|this) to (?:stop|end|be over)\b"
+    r"(?! (?:in|at|on|with|before|after|early|so|by)\b)",
+    rf"\bi (?:really )?(?:want|need|wish) (?:it|this) (?:to|would) (?:all )?(?:stop|end|be "
+    rf"over){_END}",
+    # Never waking up. Not "the offense may never wake up" or "I didn't wake up in time".
+    r"\b(?:and|to|rather|wanna) (?:never|not) wak(?:e|ing) up\b"
+    r"(?! (?:in time|early|that early|on time|for|until|till|before|to|at)\b)",
+    r"\bwish i (?:wouldnt|would not|didnt|did not|dont|never) (?:have to )?wake up\b",
+    rf"{_I}(?: {_CHAIN_WORD}){{0,4}} (?:dont|do not|wont|will not|never) wak(?:e|ing) up\b"
+    r"(?! (?:in time|early|that early|on time|for|until|till|before|to|at)\b)",
+    r"\bsleep forever\b",
+    r"\b(?:please|someone|somebody) make it (?:all )?stop\b|\bmake it all stop\b",
+    rf"{_IM} in (?:so much|too much|constant|unbearable) pain\b",
+    r"\bpain is (?:too much|unbearable)\b",
+    rf"\b(?:hurt|hurting|harm|harming|cut|cutting|shoot|shooting|hang|hanging|drown|drowning|"
+    rf"poison|poisoning|off|offing|end|ending|stab|stabbing|starve|starving|delete|deleting) "
+    rf"{_SELF}\b",
+    r"\b(?:slit|slitting|slash|slashing|cut|cutting) my (?:own )?(?:wrists?|throat|veins?)\b",
+    r"\bblow(?:ing)? my (?:own )?(?:brains?|head) (?:out|off)\b",
+    r"\b(?:bullet|gun) (?:in|to|through|against) my (?:own )?(?:head|brain|mouth|temple)\b",
+    r"\b(?:i|ive) (?:just )?(?:bought|have|got|loaded|own) (?:a|my|the) (?:loaded )?(?:gun|"
+    r"pistol|revolver|noose|rope)\b(?![-\w])",
+    r"\bstanding on (?:a|the) (?:bridge|ledge|roof|edge)\b|\bon (?:the|a) ledge\b",
+    r"\b(?:pills|rope|gun|noose|blade|razor) (?:is |are )(?:ready|loaded|in my hand|next to "
+    r"me|right here)\b",
+    r"\b(?:take|took|taking|swallow\w*) every (?:\w+ )?pill\b",
+    r"\b(?:going to|gonna|want to|wanna|about to|might|will|ill) od\b",
+    r"\b(?:rope|belt|noose|cord) around my neck\b",
+    r"\beat a bullet\b",
+    rf"{_CHAIN} jump{_END}",
+    rf"{_CHAIN} (?:hurt|harm) (?:someone|somebody|people|him|her|them|my (?:wife|husband|kids|"
+    r"family|boss|bookie|partner|girlfriend|boyfriend|parents|mom|dad))\b",
+    rf"{_CHAIN} (?:go to|be in) heaven\b|\bbe with (?:my |our )?\w+ in heaven\b",
+    r"\bjoin my late\b",
+    r"\btell my (?:family|wife|husband|kids|mom|dad|parents|children|son|daughter) (?:that )?"
+    r"(?:i love (?:them|her|him|you)|im sorry|i am sorry|goodbye)\b",
+    r"\bsorry for everything\b",
+    r"\bcheck(?:ing)? out (?:for good|of life|permanently)\b",
+    r"\bwalk(?:ing)? into (?:traffic|the road|the sea|the ocean)\b",
+    r"\bcrash(?:ing)? my car\b",
+    r"\b(?:just|please|someone|somebody|god|lord) (?:shoot|end) me\b",
     r"\bself[- ]?harm",
     r"\boverdos(?:e|ed|ing)\b",
-    r"\bjump(?:ing)? off (?:a|the|my) (?:bridge|roof|building|balcony)\b",
-    r"\bthink(?:ing)? (?:of|about) (?:ending|killing|hurting|harming)\b",
+    # Pills, when the message gives a quantity. "I took my pills" is a prescription.
+    r"\b(?:took|take|taking|taken|swallow\w*|down(?:ed|ing)?) (?:a (?:whole )?(?:bunch|lot|"
+    r"bottle|handful|load|ton) of |all (?:of )?(?:my|the|these|those|her|his) |too many |the "
+    r"(?:whole|entire) bottle of )(?:\w+ )?(?:pills|tablets|meds|medication|painkillers)\b",
+    r"\b(?:jump|jumping|step|stepping|walk|walking|throw(?:ing)? my ?self) (?:in front of|off|"
+    r"under) (?:a |an |the |my |oncoming |moving )?(?:train|bus|truck|car|traffic|bridge|cliff|"
+    r"roof|building|balcony|overpass|ledge|subway|lorry)\b",
+    r"\bdriv(?:e|ing) (?:my car )?(?:off|into) (?:a |the )?(?:bridge|cliff|wall|tree|lake|"
+    r"river|oncoming)\b",
+    r"\b(?:think\w*|thought|thoughts|dream\w*|fantasi\w+) (?:a lot |often |constantly |all the "
+    r"time )?(?:about|of) (?:my (?:own )?)?(?:death|dying|jumping|not being (?:here|around|"
+    r"alive)|not waking up|disappearing)\b",
+    # "Thinking about ending it" or "... hurting myself", not "... ending my subscription".
+    r"\bthink(?:ing)? (?:of|about) (?:ending|killing|hurting|harming)\b(?! (?:my|the|this|that|"
+    r"a|an|our|his|her|their) (?!life\b|own\b|pain\b|suffering\b|family\b|wife\b|husband\b|"
+    r"kids\b|children\b)\w)",
+    r"\bdark thoughts\b|\b(?:in|into|to) a (?:very |really |pretty )?dark place\b",
+    r"\bdo something (?:\w+ )?to my ?self\b",
+    r"\bdanger to my ?self\b",
+    r"\b(?:scared|afraid) of what i (?:might|may|could|will) do\b",
+    r"\bmy life insurance\b|\blife insurance (?:would|will|pays?|payout|money|policy)\b",
+    r"\b(?:wont|will not|not going to|shouldnt) be (?:around|here) (?:much longer|any ?more|"
+    r"any longer)\b",
+    r"\b(?:wont|will not|not going to|shouldnt|might not) be alive\b",
+    rf"\b(?:{_CANT}|dont|do not) see (?:a|any|my) future\b"
+    r"(?! (?:markets?|bets?|lines?|prices?|odds|props?|games?|events?)\b)",
+    r"\bno future (?:for (?:me|my ?self)|left)\b",
+    r"\b(?:dont|do not|cant|cannot) see (?:the|a|any) point (?:any ?more|in (?:anything|any of "
+    r"(?:it|this)|living|going on|life|trying))\b",
+    r"\bwhats the point (?:any ?more|of (?:anything|it all|any of (?:it|this)|trying|living|"
+    r"life|going on))\b",
+    r"\bthis is (?:my )?goodbye\b",
+    rf"{_IM} saying (?:my )?goodbyes?\b(?! to (?:my|the|this|that|these|those)\b)",
+    r"\b(?:this is|its|this will be|tonight is|today is) my last (?:message|day|night)\b"
+    r"(?! (?:in|at|on|of|to)\b)|\bmy last (?:day|night) (?:on earth|alive)\b",
+    r"\bgoodbye (?:everyone|everybody|all|world|forever)\b",
+    # "Just kill me", as a plea. "That parlay killed me" and "these refs kill me" are slang.
+    r"(?:^|[.!?;,] )(?:(?:just|please|someone|somebody|god|lord) ){0,2}kill me\b",
+    r"\b(?:just|please|someone|somebody|god|lord) kill me\b",
 )
 
 # --------------------------------------------------------------------- under 21
 # What follows a number when it is not an age: a record ("3-0", "10 for 12"), a count
-# ("15 units", "18 bets in") or an amount ("20 dollars", "15%").
+# ("15 units", "18 bets in"), an amount ("20 dollars", "15%") or a stake ("20 on the Tides").
 _NOT_AN_AGE = (
     r"(?![-:/.,]\d)(?!\s?%)(?!\s?(?:k|x|u|pts?|th|st|nd|rd)\b)"
-    r"(?!\s(?:and|or|to|of|out of|for|from)\s\d)"
+    # "10-team parlay", but not "17-year-old".
+    r"(?!-(?!years?-old|yrs?-old|yo\b)[a-z])"
+    r"(?!\s(?:to|of|out of|for|from)\s\d)"
+    # "10 and 2 this month" is a record; "17 and 3-0 this week" is an age and then a record.
+    r"(?!\s(?:and|or)\s\d+(?![-\d]))"
+    r"(?!\s(?:on|in on) (?:the|a|an|this|that|my|tonights?|both|either)\b)"
     r"(?!\s(?:units?|bets?|wagers?|picks?|plays?|games?|legs?|parlays?|props?|dollars?|bucks?"
-    r"|grand|percent|points?|wins?|loss(?:es)?|for(?! sure)|of|out|up|down|deep|minutes?|mins?"
-    r"|hours?|hrs?|days?|weeks?|months?|seasons?|straight|consecutive|under|over|ahead|behind"
-    r"|times?|in a row|in the hole|in on|into|cents?|large|bands?)\b)"
-    r"(?!\s(?:years?|yrs?) (?:in|into|deep|of|removed|away|ago|behind|sober|clean)\b)"
+    r"|grand|percent|points?|wins?|loss(?:es)?|for(?! sure)|of(?! age)|out|up|down|deep"
+    r"|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|seasons?|straight|consecutive|under"
+    r"|over|ahead|behind|times?|in a row|in the hole|in on|into|cents?|large|bands?|teams?"
+    r"|teamers?|seeds?)\b)"
+    r"(?!\s(?:years?|yrs?) (?:in|into|deep|of(?! age)|removed|away|ago|behind|sober|clean)\b)"
 )
-_FILLER = r"(?:(?:only|just|still|currently|like|a|an) )*"
+_FILLER = r"(?:(?:only|just|still|currently|like|barely|literally|actually|legally|a|an) )*"
 _AGE_WORDS = {
     "ten": 10,
     "eleven": 11,
@@ -153,123 +394,308 @@ _AGE_WORDS = {
     "twenty-one": 21,
     "twentyone": 21,
 }
-_AGE = r"(\d{1,2}|twenty[- ]?one|" + "|".join(k for k in _AGE_WORDS if k.isalpha()) + r")\b"
+_AGE = (
+    r"(\d{1,2}(?!\d)|(?:twenty[- ]?one|" + "|".join(k for k in _AGE_WORDS if k.isalpha()) + r")\b)"
+)
 _YEARS_OLD = r"[- ]?(?:yo|y/o|years?[- ]old|yrs?[- ]old)\b"
 # "twenty" followed by another number word is 21 to 29.
 _NOT_TWENTIES = r"(?![- ]?(?:two|three|four|five|six|seven|eight|nine)\b)"
+_21 = r"(?:21|18|twenty[- ]?one|eighteen)\b(?![.\d])"
+# "A 20 years old veteran" is somebody else.
+_NOT_A_PLAYER = (
+    r"(?! (?:is|was|are|were|veteran|rookie|player|pitcher|quarterback|qb|kid|phenom|prospect|"
+    r"guard|forward|center|striker|goalie|star|receiver|record|streak)\b)"
+)
+_SOON = (
+    r"(?:next (?:week|month|year|\w+day)|tomorrow|soon|in (?:a|an|one|two|three|four|five|six|"
+    r"\d+|a few|a couple(?: of)?) (?:days?|weeks?|months?|years?)|in (?:january|february|march|"
+    r"april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|"
+    r"aug|sep|sept|oct|nov|dec)|this (?:week|month|year|\w+day)|on (?:mon|tues|wednes|thurs|"
+    r"fri|satur|sun)day)\b"
+)
 
-#: "I'm 17", "I am sixteen years old", "I just turned 19", "as a 17 year old": under 21
-#: when the number is below 21.
+#: "I'm 17", "I'm17", "I am sixteen years old", "I just turned 19", "as a 17 year old",
+#: "age 17": under 21 when the number is below 21.
 _AGE_NOW_RE = _any(
-    rf"(?:{_IM}|\bmy age is|\bi (?:just |recently |only )?turned) {_FILLER}{_AGE}"
+    rf"(?:{_IM} ?(?:aged? )?|\bmy age(?: is|:)? |\bi (?:just |recently |only )?turned |"
+    rf"(?:^|[.!?;] )(?:(?:just|recently) turned|being) ){_FILLER}{_AGE}"
     rf"{_NOT_TWENTIES}{_NOT_AN_AGE}",
     rf"\bas an? {_AGE}{_YEARS_OLD}",
-    # "17 years old here": an age that opens the message or a sentence is the writer's.
-    rf"(?:^|[.!?;] ){_AGE}{_YEARS_OLD}",
+    # "17 years old here", "17 here", "age 17": an age that opens the message or a sentence
+    # is the writer's.
+    rf"(?:^|[.!?;] ){_AGE}{_YEARS_OLD}{_NOT_A_PLAYER}",
+    rf"(?:^|[.!?;] ){_AGE} here\b",
+    rf"(?:^|[.!?;] )aged?:? {_AGE}{_NOT_TWENTIES}{_NOT_AN_AGE}",
+    # "19M here".
+    rf"(?:^|[.!?;] ){_AGE} ?[mf](?: here)?{_END}",
+    # A question about someone of that age gets the same answer.
+    rf"\b(?:can|could|may|should|is it (?:ok|okay|legal|allowed) for|allowed for) (?:an? |"
+    rf"someone |somebody |anyone )?{_AGE}[- ]?(?:yo|y/o|years?[- ]olds?|yrs?[- ]olds?)\b"
+    r"(?: \w+){0,3}? (?:bet|gamble|wager|use|sign up|join|register|download|(?:have|make|get|"
+    r"open) an account)\b",
+    r"\bcan (?:i|you|we|someone|anyone) (?:\w+ ){0,2}?(?:bet|gamble|use (?:this|oddvex|it|the "
+    rf"app)|sign up|join|register) at (?:age )?{_AGE}{_NOT_TWENTIES}{_NOT_AN_AGE}",
 )
-#: "I turn 21 in March", "I'm not 21 yet", "when I'm 21": not there yet, so under 21 when
-#: the number is 21 or below.
+#: "I turn 21 in March", "I'm not 21 yet", "when I'm 21", "I won't be 21 until May",
+#: "I'm 21 next month": not there yet, so under 21 when the number is 21 or below.
 _AGE_AHEAD_RE = _any(
     rf"(?:\bi turn|\bill (?:be|turn)|\bi will (?:be|turn)|{_IM} (?:turning|about to (?:be|turn)"
-    rf"|almost|nearly|not quite|not(?: even| yet)?)|\b(?:until|till|til|when|once|before) "
-    rf"(?:im|i am|i turn)) {_AGE}{_NOT_TWENTIES}{_NOT_AN_AGE}",
+    rf"|almost|nearly|not quite|not(?: even| yet)?)|\bi aint(?: even| yet)?|\b(?:until|till|til|"
+    rf"when|once|before) (?:im|i am|i turn)|(?:^|[.!?;] )(?:turning|almost|nearly|not quite)) "
+    rf"{_AGE}{_NOT_TWENTIES}{_NOT_AN_AGE}",
+    rf"\bi (?:havent|have not|didnt|did not|wont|will not|dont|do not) (?:even )?(?:be|turn|"
+    rf"turned|hit) {_AGE}{_NOT_TWENTIES}{_NOT_AN_AGE}",
+    rf"{_IM} {_AGE} {_SOON}",
 )
 _UNDERAGE_PHRASE_RE = _any(
-    rf"{_IM} {_FILLER}(?:technically )?(?:under ?age|under(?: the age of)? (?:21|18)\b(?![.\d])"
-    r"(?! (?:points?|pts|total|goals?|runs?))|(?:under|below) the (?:legal |betting |gambling )?"
-    r"age|too young|not old enough|not of (?:legal )?age|not legal age|minor\b(?! league)|kid\b"
-    r"(?! at heart)|child\b|teen(?:ager)?\b|in (?:high|middle|junior high) school|in (?:the )?(?:[6-9]th|"
-    r"1[0-2]th|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth) grade|(?:high school|hs) "
+    rf"{_IM} {_FILLER}(?:technically )?(?:under ?age|(?:under|below|younger than|less than|"
+    rf"short of)(?: the age of)? {_21}"
+    r"(?! (?:points?|pts|total|goals?|runs?))|under ?(?:21|18)\b(?![.\d])(?! (?:points?|pts|"
+    r"total|goals?|runs?))|u ?(?:21|18)\b(?![.\d])|(?:under|below) the (?:(?:legal|betting|"
+    r"gambling|minimum|required) ){0,2}age|too young|not old enough|not of (?:legal )?age|not "
+    r"legal\b|minor\b(?! league)|kid\b"
+    r"(?! at heart)|child\b|teen(?:ager)?\b|in (?:high|middle|junior high) ?school|in (?:the )?"
+    r"(?:[6-9]th|1[0-2]th|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth) grade|"
+    r"in grade (?:[6-9]|1[0-2])\b|"
+    r"(?:[6-9]th|1[0-2]th|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)[- ]grader|"
+    r"(?:high school|hs) "
     r"(?:student|kid|freshman|sophomore|junior|senior)|high ?schooler|(?:freshman|sophomore|"
-    r"junior|senior) in (?:high school|hs))",
+    r"junior|senior) in (?:high school|hs)|(?:college|university|uni) (?:freshman|sophomore|"
+    r"fresher)|(?:freshman|sophomore) (?:in|at) (?:college|university|uni))",
+    r"\bi (?:still )?(?:go to|attend) (?:high|middle|junior high) ?school\b",
+    r"\b(?:high ?school|hs|middle school) (?:student|kid|freshman|sophomore|junior|senior) here\b",
+    r"\b(?:too young|not old enough) to (?:bet|gamble|wager|use (?:this|oddvex|it)|sign up|join)\b",
+    r"\bas an? (?:minor\b(?! league)|teen(?:ager)?\b|high ?schooler|high school (?:student|kid|"
+    r"freshman|sophomore|junior|senior))",
+    rf"\bnot (?:even |quite )?{_21} yet\b|\bnot yet {_21}",
+    r"\b(?:\d+|a few|a couple(?: of)?|two|three|four|five|six) (?:years?|months?|weeks?|days?) "
+    r"(?:away from|from|until|till|til|shy of|short of|before) "
+    r"(?:im |i am |i turn |turning |being )?(?:21|twenty[- ]?one)\b",
+    r"\bmy (?:1[0-9]|20)th (?:birthday|bday)\b",
+    r"\b(?:until|till|til|before) my (?:21st|twenty[- ]?first)\b",
+    r"\bmy (?:21st|twenty[- ]?first) (?:birthday|bday) (?:is|isnt|will be|comes)\b",
     # Asked about anyone, the answer is the same: OddVex is for adults 21 and over.
     r"\bunder ?age\b",
+    r"\bunder (?:21|18) here\b",
     r"\b(?:if youre|if you are|people|someone|anyone|users|kids|those|everyone) under "
     r"(?:21|18)\b(?![.\d])",
 )
+#: "I was born in 2009". The year is compared with today's date in ``_says_under_21``.
+_BORN_RE = re.compile(r"\bi was born (?:in|on) (?:[\w,/]+ ){0,3}?((?:19|20)\d\d)\b")
 
 # ---------------------------------------------------------------------- distress
 #: Wanting to win back what was lost. Row 4 of the specification, and part of row 1.
 _CHASING_RE = _any(
     r"\bwin(?:ning)? (?:(?:it|it all|everything|them|that|some|some of it|(?:my|the) (?:money|"
     r"loss|losses|rent|cash|stake|savings|bankroll|paycheck|bets?)|my \$?\d+k?|what i(?:ve| have)"
-    r"? lost) )?back(?![-\w])",
+    r"? lost) )?back(?![-\w])(?! (?:the|a|their|his|her|its) (?:title|lead|belt|crown|trophy|"
+    r"cup|championship|ball|possession|momentum|division|conference|job|starting|spot|fans|"
+    r"serve|series|game)\b)",
     r"\b(?:make|making|earn|earning) (?:it|it all|everything|my money|my losses|the money|"
     r"what i(?:ve| have)? lost) back\b",
     r"\bget(?:ting)? (?:it|it all|everything|my money|my losses|the money|what i(?:ve| have)? "
     r"lost) back\b",
+    r"\b(?:make|making|earn|earning|win|winning|get|getting) back (?:my|the|those|these|all|"
+    r"all my|some of my) (?:\w+ )?(?:loss|losses|money|bankroll|stake)\b",
+    r"\b(?:make|making|win|winning|recover|recovering|recoup|recouping|get|getting|earn|"
+    r"earning) (?:back )?what i(?:ve| have)? lost\b",
     r"\b(?:recover|recoup|recovering|recouping) (?:my|the|those|these|all my|some of my) "
     r"(?:loss|losses|money|bankroll|stake)",
+    r"\brecoup",
+    r"\bneed (?:it|it all|the money|my money) back\b",
     r"\bchas(?:e|ed|ing) (?:my |the |these |those |all my )?loss(?:es)?\b",
-    r"\b(?:back to|get|getting) even\b(?! (?:money|odds|closer|better|more|worse|bigger|longer|"
-    r"shorter|higher|lower|though|if|when)\b)",
+    rf"{_IM} (?:just |still |always |back to )?chasing(?: again| it\b| them\b| bets\b|{_END})",
+    r"\b(?:get(?:ting)? back to|back to|get(?:ting)?) even\b(?! (?:money|odds|closer|better|"
+    r"more|worse|bigger|longer|shorter|higher|lower|though|if|when)\b)",
     r"\bmake up for (?:my loss|my losses|what i lost|last night|yesterday|(?:the|these|those) "
     r"losses)\b",
+    r"\brecover(?:ing)? from (?:my|last nights?|yesterdays|todays|tonights) (?:\w+ )?(?:loss|"
+    r"losses|bets|betting)\b",
+    r"\bjust (?:want|wanna|need) to (?:get|break) even\b",
+    r"\bbreak even (?:and|then) (?:quit|stop|walk away|im done|ill stop|ill quit)\b",
     r"\bdig my ?self out\b",
     r"\b(?:get|climb|dig) (?:my ?self )?out of (?:this|my) hole\b",
-    rf"{_IM} (?:deep )?in (?:a|the) hole\b",
+    rf"{_IM} (?:so |too |really |way |pretty )?(?:deep |far |far down )?in (?:a|the) hole\b",
 )
 #: A refund question ("do I get my money back on a push?") is not loss chasing.
 _REFUND_RE = re.compile(
     r"\b(?:push(?:es|ed)?|void(?:ed)?|refund(?:ed|s)?|cancel(?:led|ed|s)?|postponed?|"
     r"withdraw(?:al|als)?|cash ?out|abandoned|no action)\b"
 )
-_GET_BACK_RE = re.compile(r"\bget(?:ting)? (?:it|my money|the money) back\b")
+_GET_BACK_RE = re.compile(r"\bget(?:ting)? (?:back )?(?:it|my money|the money)(?: back)?\b")
+#: "Can the Tides win it back in game 7?" and "will the Tides get back to even?" are about
+#: a team, not about the writer's money. "What's the play to win it back?" and "I need the
+#: Tides to win it back for me" are about the writer.
+_ABOUT_A_TEAM_RE = re.compile(
+    r"\b(?:win(?:ning)? (?:it|it all|them|that) back|(?:get(?:ting)? back to|back to|"
+    r"get(?:ting)?) even)\b"
+)
+_SOMEONE_ELSE_RE = re.compile(
+    r"\b(?:they|he|she|team|the (?!(?:bet|bets|play|pick|move|parlay|way|loss|losses|plan|"
+    r"wager|odds|price|line|stake|amount|money|best|right|only|one|chance|time|need|urge|rent|"
+    r"bankroll|cash|same|next|last|first)\b)\w+(?: \w+){0,3}) "
+    r"(?:(?:can|could|will|would|might|should|to|gonna|going to|ever|really|still) )*$"
+    # "Can Dara Okafor win it back?": a question about somebody named.
+    r"|\b(?:can|could|will|would|might|should|did|do|does) (?!i\b|we\b|you\b)\w+(?: \w+){0,3} $"
+)
+_MY_NEED_RE = re.compile(
+    r"\b(?:i|we) (?:really |just |desperately )?(?:need|have|got|gotta|want|must)\b|\b(?:me|my)\b"
+)
 
+#: What may follow "stop" or "quit" when it is the betting that cannot be stopped: a betting
+#: word, or the end of the clause. Not "stop the run" or "stop notifications".
+_STOP_TAIL = (
+    rf"(?= (?:{_GAMBLING}|gambl\w*|bet\w*|placing|playing|chasing|depositing|my ?self|doing "
+    r"(?:it|this)|it\b|this\b)|[.,!?;]|$)"
+)
 _DISTRESS_RE = _any(
     # Cannot stop.
     rf"\bi (?:just |really |literally |honestly )?(?:{_CANT}|am unable to) (?:seem to )?"
     r"(?:stop|quit|control|help my ?self|walk away)\b"
     r"(?! (?:watching|laughing|smiling|cheering|reading|talking|thinking about (?:that|the)))",
+    rf"\b(?:stop|quit) but (?:i )?{_CANT}\b",
+    rf"\b(?:tried|trying|try) to (?:quit|stop)(?:{_STOP_TAIL}| (?:and|but|so many|before|"
+    r"again|many times|several times|multiple times)\b)",
+    rf"\b{_CANT} stay away\b",
+    r"\b(?:back to|started|start|end up|ended up|im) (?:betting|gambling) again\b",
+    r"\b(?:go|going|went|gone|im) back to (?:betting|gambling)\b",
+    r"\bneed to be stopped\b|\b(?:somebody|someone|please) stop me\b",
+    rf"\b(?:dont|do not) know how to (?:stop|quit){_STOP_TAIL}",
     rf"\b(?:stop|quit|quitting|stopping|give up|giving up|cut back on|cutting back on|cut down "
-    rf"on|take a break from|taking a break from|walk away from|stay away from) (?:my )?{_GAMBLING}"
-    r"\b",
+    rf"on|(?:a |my )?break from|time off from|time away from|step(?:ping)? (?:away|back) from|"
+    rf"walk away from|stay away from) (?:my )?{_GAMBLING}"
+    r"\b(?! (?:markets?|lines?|limits?|windows?)\b)",
     r"\bhelp me (?:stop|quit)\b",
+    r"\bi think i need help\b|\bi need (?:serious|real|professional) help\b",
     rf"\b(?:need|want|get|getting|find|seeking) help (?:with|for|to stop|stopping|quitting) "
     rf"(?:my |the |this )?(?:{_GAMBLING}|addiction|problem)\b",
     rf"\bi(?:ve| have)? (?:lost|no) control\b|{_IM} (?:losing|out of) control\b",
-    rf"\b{_GAMBLING} is (?:getting |way )?out of control\b",
-    r"\b(?:stop|block|ban|exclude) (?:me|my ?self) from\b",
+    rf"\b(?:{_GAMBLING}|gambl\w+|its|it is|this is|things are) (?:(?:is|has|have|getting|"
+    r"gotten|got|way|becoming|really) )*out of (?:control|hand)\b",
+    r"\bfeel(?:ing)? out of control\b",
+    r"\bstop (?:me|my ?self) from\b|\b(?:block|ban|exclude) (?:me|my ?self)\b",
+    r"\bhelp ?line\b|\bhotline\b",
+    r"\bneed help (?:quitting|stopping)\b",
+    r"\b(?:need|want) (?:someone|somebody) to talk to\b|\b(?:need|want) to talk to (?:someone|"
+    r"somebody)\b",
     r"\bself[- ]?exclu",
     r"\brelaps",
     r"\bgamblers? anonymous\b",
+    r"\bkeep (?:on )?(?:betting|gambling|chasing|depositing)\b"
+    r"(?= (?:even|although|though|when|after|despite|anyway|more|and (?:losing|cant))|[.,!?;]|$)",
+    r"\b(?:promised|swore|vowed|told my ?self) (?:\w+ ){0,4}?(?:quit|stop|never|last time|no "
+    r"more|not (?:to )?(?:bet|gamble))\b",
+    r"\bbroke (?:my|a|the) promise\b",
+    r"\b(?:one|1) (?:more|last) bet and (?:im|i am|ill) (?:done|out|finished)\b",
+    r"\bthink(?:ing)? about (?:betting|gambling) (?:all the time|all day|constantly|non-?stop)\b",
+    r"\ball i (?:think about|do|can think about) is (?:bet|betting|gambl\w+)\b",
+    rf"\b{_CANT} think about anything (?:but|except|other than)\b",
+    r"\bbet(?:ting)? on (?:everything|anything|sports i (?:dont|do not) (?:even )?(?:watch|"
+    r"follow|know))\b",
+    r"\b(?:betting|gambling) is my (?:only |main |sole )?(?:income|job|way out|way to (?:pay|"
+    r"make))\b",
+    r"\bquit my job to (?:bet|gamble)\b",
+    r"\binstead of paying\b",
+    r"\bskip(?:ping|ped)? (?:meals|work|class|school) to (?:bet|gamble)\b",
+    r"\b(?:gambl(?:e|ing)|bet|betting|wager(?:ing)?) (?:on \w+ )?(?:every ?day|every single "
+    r"day|every night|all day|all night|daily(?! fantasy)|non-?stop|constantly|at work|during "
+    r"work)\b",
     # A gambling problem, in any words.
     rf"\b{_GAMBLING} (?:problem|addiction|addict|disorder)\b",
     r"\bproblem gambl",
+    r"\bproblem with (?:my |the |this )?(?:gambling|betting|sports betting|wagering)\b"
+    r"(?! (?:markets?|lines?|limits?|slips?|history|tracker|page|screen|tab|import|sync|odds|"
+    r"board|feed)\b)",
+    r"\b(?:my|the|this) (?:gambling|betting|sports betting|wagering) (?:is|has become|is "
+    r"becoming|is turning into|became|has turned into|is getting to be) (?:a |an |my |the |such "
+    r"a |really a |kind of a )?(?:\w+ )?(?:problem|issue|addiction|sickness|disease)\b",
+    rf"\bstruggl\w+ (?:with (?:my |the |this )?(?:{_GAMBLING}|gambl\w+|addiction|debts?)|to "
+    r"(?:stop|quit|control|pay))\b",
     r"\bcompulsive(?:ly)? (?:gambl|bett)",
-    rf"\baddicted to (?:{_GAMBLING}|this|it)\b",
-    rf"{_IM} (?:so |really |totally |completely )?addicted\b",
-    rf"{_IM} (?:an |a )?(?:gambling |betting )?addict\b",
+    rf"\bhooked on (?:{_GAMBLING}|gambl\w+|this|it)\b",
+    r"\baddict",
+    r"\bis (?:my|this) (?:gambling|betting) (?:a|becoming a|turning into a) problem\b",
     r"\bi (?:think i |might |may |probably |really |definitely )?(?:have|ve got|got) a "
     r"(?:gambling |betting |serious |real |bad |big )?problem\b"
     r"(?! (?:with|logging|signing|on the|in the|loading|opening|seeing))",
     # Losses that hurt.
     r"\blost (?:everything|it all|all of it|too much|way too much|so much money|thousands|"
     r"more than i (?:can|could|should))\b(?! in the (?:first|second|third|fourth|1st|2nd|3rd|4th))",
-    r"\b(?:lost|losing|lose|blew|blown|blowing|gambled away|bet|betting|wagered|spent) (?:all "
-    r"(?:of )?)?(?:my|the|our) (?:whole |entire |life )?(?:savings|rent|mortgage|paycheck|"
-    r"paycheque|tuition|bankroll|house|college fund|retirement|401k|car payment)\b",
-    r"\blost my (?:job|house|home|car|marriage|family|wife|husband|kids|business)\b",
+    r"\blost all (?:of )?(?:my|our) (?:money|cash|winnings)\b",
+    r"\b(?:lost|losing|lose|blew|blown|blowing|gambled away|gambled|bet|betting|wagered|spent|"
+    r"used|using|put|putting|risked|risking|staked|cashed out|cashing out|drained|emptied|wiped "
+    r"out|cleaned out|blew through|burned through) (?:all (?:of )?)?(?:my|the|our) (?:whole |"
+    r"entire |life )?(?:savings|rent|mortgage|paycheck|paycheque|tuition|bankroll|college fund|"
+    r"retirement|401k|car payment|student loans?|inheritance|emergency fund|financial aid|"
+    r"scholarship|unemployment|disability|pension|social security|tax refund|bank account|"
+    r"account)\b(?! (?:settings?|page|screen|details|password|email|name)\b)",
+    r"\ball in with (?:my|our) (?:savings|rent|paycheck|retirement|401k)\b",
+    r"\b(?:bank )?account is (?:empty|overdrawn|negative|in the red)\b|\boverdr(?:ew|awn|aft)",
+    r"\b(?:my|our) (?:money|paycheck|savings|rent) is (?:all )?gone\b",
+    r"\b(?:have|got|with|theres) (?:nothing|no money|no cash) left\b",
+    rf"{_IM} (?:completely |totally )?out of money\b",
+    r"\bno money for (?:food|rent|bills|gas|groceries|my kids)\b",
+    rf"\b{_CANT} (?:buy|afford) (?:food|groceries|gas|diapers)\b",
+    rf"\b{_CANT} feed (?:my|our|the) (?:kids|family|children)\b",
+    r"\bmissed (?:my |the |our |a )?(?:(?:car|rent|mortgage|loan|credit card) )?payments?\b",
+    r"\bmissed (?:my |the |our )?rent\b",
+    r"\breposs",
+    r"\b(?:money|cash|\$?\d[\d,.]*k?(?: dollars| bucks)?) (?:that )?i (?:dont|do not|didnt|did "
+    r"not) (?:really )?have\b",
+    r"\b(?:money|cash) (?:that )?i need(?:ed)? (?:for|to pay)\b",
+    r"\b(?:used?|using|spent|spend|spending|took|taking|blew|lost|bet|betting|gambled|"
+    r"gambling) (?:all (?:of )?)?(?:my|our) (?:kids?|childs|childrens|sons|daughters|wifes|"
+    r"husbands|familys|parents|moms|mums|dads|partners) (?:\w+ )?(?:fund|tuition|savings|money|"
+    r"account|card|inheritance|rent|paycheck|allowance|piggy bank|college)\b",
+    r"\blost (?:my|our|the) (?:job|house|car|marriage|family|wife|husband|kids|business)\b",
+    r"\b(?:lose|losing) (?:my|our) (?:job|house|home\b(?! (?:opener|game|team|bet|pick|field))|"
+    r"car|marriage|family|wife|husband|kids|business|apartment)\b",
+    r"\bcost(?:s|ing)? me (?:my (?:marriage|family|job|house|home|savings|relationship|wife|"
+    r"husband|kids|friends|life|sanity|health|career|business)|everything)\b",
+    # A loss of a thousand or more, in the writer's own words.
+    rf"(?:\bi(?:ve| have)? (?:just |already |now )?(?:lost|blew|blown|dropped)|{_IM} (?:now |"
+    r"already )?down) (?:over |about |around |almost |nearly |like |more than )?\$?"
+    r"(?:\d{1,3},\d{3}|\d{4,}|\d+(?:\.\d+)?k|\d+ (?:grand|thousand))\b"
+    r"(?! (?:points?|pts|yards?|units?)\b)",
+    r"\b(?:gambl|bett)ing with (?:my|our|the) (?:kids|rent|savings|mortgage|retirement|tuition|"
+    r"bill|paycheck|last)",
+    r"\b(?:bet|betting|gamble|gambling|spend|spending|staking|wagering)\b(?: \w+){0,3}? (?:too "
+    r"much(?! time)|more than i (?:should|can|could|want|meant|planned))\b",
     r"\b(?:rent|mortgage|bill|grocery|tuition) money\b",
-    rf"\b{_CANT} afford\b",
     r"\bmore than i (?:can|could) afford\b",
-    r"\bmoney i (?:dont|do not) have\b",
-    rf"\b{_CANT} (?:pay|cover|make) (?:my|the|our) (?:rent|bills?|mortgage|debts?)\b",
+    rf"\b{_CANT} (?:pay|cover|make) (?:(?:my|the|our|this months?|next months?) )?(?:rent|"
+    r"bills?|mortgage|debts?)\b",
     r"\bbehind on (?:my |the |our )?(?:rent|bills|mortgage|payments)\b",
-    r"\b(?:in|into) debt\b",
-    r"\b(?:my|gambling|betting) debts?\b",
+    r"\bdebts?\b(?! (?:to|of gratitude)\b)",
+    r"\b(?:gambl\w+|bet|betting) to (?:pay|cover|make|afford|get out of)\b",
+    r"\bpay(?:ing)? off (?:my |the |our |this |some )?(?:debts?|loans?|credit cards?|bills|"
+    r"mortgage)\b",
     r"\bbankrupt",
     r"\bevict",
     r"\bforeclos",
-    r"\bbet (?:it all|everything|the house)\b",
-    r"\bmy last (?:\$\d|\d+ ?(?:dollars|bucks)|dollars?|bucks|money|paycheck|dime|cent|penny)",
+    r"\bbet (?:it all|everything|(?:the|my|our) house)\b(?! (?:edge|always|wins))",
+    r"\bi owe (?:my|a|the|people|everyone|him|her|them|\$?\d|money|so much|too much|thousands)"
+    r"(?!.{0,20}\b(?:beer|drink|thank|thanks|apology|favor|favour)\b)",
+    # Not "the Tides need a big win".
+    r"(?<![a-z]s )\bneed (?:to win big|a big win)\b",
+    r"\b(?:i|we) (?:just |only |really )?need one big win\b",
+    r"\bone big win (?:and i|to (?:fix|pay|get|make|cover|clear)|would (?:fix|solve|cover))\b",
+    r"\bpay (?:everyone|everybody|people|them|him|her|it all) back\b",
+    r"\b(?:have|has|need|needs|got) to (?:win|hit|cash)\b.{0,30}?\bor (?:im|i am|i|ill|my|we)\b",
+    r"\bmy last (?:\$\d|\d+ ?(?:dollars|bucks)|(?:few |hundred |thousand |couple (?:of )?)?"
+    r"(?:dollars?|bucks)|money|paycheck|dime|cent|penny)",
     r"\ball i have left\b|\beverything i have (?:left|on)\b",
     # Borrowed money, or money that was not for betting.
-    r"\bborrow",
-    r"\b(?:took|take|taking|get|got|getting) (?:out )?(?:a|another) (?:payday )?loan\b",
+    r"\bborrow(?:ed|ing|s)?(?: (?:money|cash|\$?\d[\d,.]*k?|from|against|more|some|a (?:few|"
+    r"couple|lot|bit|grand)|to (?:bet|gamble|cover|pay|keep))\b|(?=[.,!?]|$))",
+    r"\b(?:took|take|taking|get|got|getting) (?:out )?(?:a|another|a second|a personal|a title|"
+    r"a home equity) (?:payday )?(?:loan|mortgage|line of credit|cash advance)\b",
+    r"\b(?:second|2nd|reverse) mortgage\b|\bremortgag",
     r"\bpayday loan",
     r"\bloan shark",
     r"\bmaxed (?:out )?(?:my|the|our|a|another)? ?(?:credit )?cards?\b",
+    r"\b(?:credit cards?|overdraft|cash advance|line of credit) (?:to|for) (?:bet|gambl|wager|"
+    r"deposit|fund|cover|chase|keep|parlay)",
     r"\b(?:sold|selling|pawned|pawning) (?:my|our) (?!bet|ticket|slip|position|pick)",
     r"\b(?:stole|stealing|steal) (?:money|cash|from (?:my|work|him|her|them))\b",
     r"\b(?:took|taking|take) money from\b",
@@ -280,30 +706,79 @@ _DISTRESS_RE = _any(
     r"\b(?:wife|husband|partner|girlfriend|boyfriend|fiance|fiancee|spouse|family|parents|mom|"
     r"mum|dad|kids) (?:doesnt|does not|dont|do not|cant|cannot|mustnt|must not|wont|will not) "
     r"(?:know|find out)\b",
-    r"\b(?:wife|husband|partner|girlfriend|boyfriend|fiance|fiancee|spouse|family) (?:left|is "
-    r"leaving|will leave|is going to leave|threatened to leave|found out|finds out|kicked me "
-    r"out)\b",
+    r"\b(?:wife|husband|partner|girlfriend|boyfriend|fiance|fiancee|spouse|family) (?:left"
+    r"(?! (?:the (?:game|room|house|bar|stadium|party)|early|for (?:work|the)|a (?:message|"
+    r"note))\b)|is leaving|will leave|is going to leave|threatened to leave|found out|finds "
+    r"out|kicked me out)\b",
+    r"\b(?:wife|husband|partner|girlfriend|boyfriend|fiance|fiancee|spouse|family|parents|mom|"
+    r"mum|dad|kids) (?:has|have) no idea\b",
+    r"\b(?:havent|have not|didnt|did not|cant|cannot|never|afraid to|scared to) (?:told|tell) "
+    r"(?:my (?:wife|husband|partner|girlfriend|boyfriend|fiance|fiancee|spouse|family|parents|"
+    r"mom|mum|dad|kids)|anyone|anybody|her|him|them)\b",
+    r"\b(?:nobody|no one) knows (?:how much|about my|that i|i)\b",
+    r"\bl(?:ie|ied|ying) about how much\b",
+    r"\b(?:gambl\w+|bet|betting) in secret\b|\bsecret(?:ly)? (?:gambl|bett)",
+    r"\bso (?:she|he|they|my \w+) (?:wont|doesnt|dont|cant) (?:see|know|find out)\b",
+    r"\bdivorce",
+    r"\b(?:marriage|family|relationship|life) is falling apart\b",
+    r"\b(?:taken|took|takes) everything\b",
     rf"\bl(?:ie|ied|ying) (?:to (?:my|everyone|people)|about (?:my |the )?(?:{_GAMBLING}|losses|"
     r"money))\b",
-    rf"\bkeep(?:ing)? (?:it|this|my (?:{_GAMBLING})) (?:a )?secret\b",
+    rf"\bkeep(?:ing)? (?:it|this|my (?:{_GAMBLING})) (?:a )?secret(?: from\b|(?=[.,!?]|$))",
     r"\bbehind (?:my|her|his|their) (?:wifes |husbands |partners )?back\b",
     # What it is doing to the person.
-    rf"\b(?:{_GAMBLING}|losing|losses) (?:is|are|has|have) (?:ruin|destroy|wreck|kill|consum|"
-    r"control|tak)\w* (?:my|me|our|over)\b",
+    rf"\b(?:{_GAMBLING}|losing|losses) (?:is|are|has|have) (?:(?:ruin|destroy|wreck|kill|"
+    r"consum|control|hurt|stress)\w* (?:my|me|our)|tak\w* over)\b",
+    rf"\b(?:scared|worried|afraid|anxious|stressed|ashamed|embarrassed|guilty|sick|concerned|"
+    rf"depressed|upset|miserable|devastated|panicking|panicked|freaking out|crying|terrified) "
+    rf"(?:about|of|over|by) (?:how much i|how much im|how much ive|my (?:{_GAMBLING}|losses|"
+    rf"debts?)|what i(?:ve| have)? lost|money|(?:{_GAMBLING}|gambl\w+))\b",
+    r"\bregret (?:betting|gambling|ever (?:betting|gambling|starting))\b",
+    rf"\b(?:{_CANT} sleep|not sleeping|lost sleep|up all night) (?:because of|over|about|"
+    rf"thinking about|from) (?:my |the |this )?(?:{_GAMBLING}|losses|loss|debts?|money|bets?)\b",
+    r"\bi(?:ve| have)? (?:ruined|destroyed|wrecked|messed up|screwed up) (?:everything|my life|"
+    r"it all)\b",
+    rf"\b(?:messed|screwed) up (?:\w+ ){{0,3}}?(?:with|by|from|on) (?:{_GAMBLING}|gambl\w+)\b",
+    r"\b(?:its|it is|thats|this is) (?:ruin|destroy|wreck)\w* (?:me|my|us|our)\b",
+    rf"{_IM} in (?:deep |big |serious |real |so much )?trouble\b",
+    rf"\bin over my head\b|{_IM} in (?:way )?too deep\b|{_IM} (?:so )?underwater\b",
+    r"\bdo something (?:stupid|drastic|desperate|i(?:ll| will)? regret)\b",
+    r"\bits over for me\b",
+    rf"\bi (?:just |really )?{_CANT} do this(?:{_END}| any ?more| alone)",
     r"\b(?:ruin|destroy|wreck)(?:ed|ing|s)? my (?:life|marriage|family|finances|credit|"
     r"relationship)\b",
     rf"(?:{_IM}|\bi feel|\bi felt) (?:so |really |just |completely |totally )?(?:hopeless|"
-    r"desperate|worthless|ashamed|ruined|trapped|a failure|disgusted with my ?self|sick about)\b",
+    r"desperate|worthless|ashamed|ruined|trapped|depressed|guilty|panicking|terrified|drowning|a "
+    r"failure|like (?:such )?a (?:failure|loser|fraud)|disgusted with my ?self|sick about)\b",
     rf"{_IM} (?:flat |dead |completely |totally |so )?broke\b",
-    r"\bhate my ?self\b",
-    r"\brock bottom\b",
+    r"\bhate (?:my ?self|my life)\b",
+    r"\b(?:i|ive|im|we|weve|my|me)(?: \w+){0,4}? rock bottom\b|\brock bottom for me\b",
     r"\bdesperately need\b",
     r"\bon tilt\b",
     rf"\blosing sleep over (?:my |the |this )?(?:{_GAMBLING}|losses|loss|debt)\b",
-    rf"\b{_CANT} (?:afford to )?lose (?:any ?more|another|again|this one|the rent)\b",
+    rf"\bi {_CANT} (?:afford to )?lose (?:any ?more|another|again|this one|the rent)\b",
     r"\bneed(?:ed)? (?:to win|a win|this (?:one |bet )?to (?:hit|win|cash))\b.{0,40}?\b"
     r"(?:rent|mortgage|pay|debt|or im|or else|or my)\b",
 )
+#: "I have a problem with gambling" is about the writer; "I have a problem with the app" is
+#: about the product and is left to the lookahead in the rule above.
+_MY_PROBLEM_RE = re.compile(
+    r"\bproblem with (?:my |the |this )?(?:money|debts?|addiction|losing|stopping|chasing)\b"
+)
+#: "I can't afford this" is the writer; "the Tides can't afford to lose this one" is a team.
+_AFFORD_RE = re.compile(
+    rf"\b{_CANT} afford\b(?! (?:the |a |to pay for )?(?:premium|plan|subscription|upgrade))"
+)
+_TEAM_SUBJECT_RE = re.compile(
+    r"\b(?:(?:they|he|she|team) |the (?:(?!(?:and|but|so|now|i|we|im)\b)\w+ ){1,4})"
+    r"(?:(?:just|really|simply) )?$"
+)
+#: "... and can't stop", "... but I just can't quit": the subject is earlier in the sentence.
+_AND_CANT_STOP_RE = re.compile(
+    rf"\b(?:and|but|just|still|simply|really) (?:i )?(?:just |still )?{_CANT} (?:stop|quit)"
+    rf"{_STOP_TAIL}"
+)
+_FIRST_PERSON_RE = re.compile(r"\b(?:i|im|ive|id|ill|we)\b")
 
 # --------------------------------------------------------------------- certainty
 _CERTAINTY_RE = _any(
@@ -318,13 +793,16 @@ _CERTAINTY_RE = _any(
     r"\bfree money\b",
     r"\beasy money\b",
     r"\bno[- ]brainer",
-    r"\b100 ?(?:%|percent) (?:sure|certain|safe|chance|going|win|winner|hit)",
+    r"\b100 ?(?:%|percent) (?:sure (?:thing|bet|win|winner)|certain to|safe|chance|going to|"
+    r"win|winner|to (?:win|hit|cash))",
     r"\bcertain (?:to win|winner|win)\b",
     r"\b(?:safe|safest) bets?\b",
     r"\b(?:never|cant|cannot) loses?\b",
     r"\bwin either way\b",
     r"\bdefinitely (?:going to |gonna |will )?(?:win|hit|cash)\b",
-    r"\bfixed (?:game|match|fight)\b",
+    r"\b(?:fixed|rigged) (?:game|match|fight)\b",
+    r"\b(?:game|match|fight|games|matches|fights) (?:(?:is|are|was|were|being) )?(?:fixed|"
+    r"rigged)\b",
 )
 
 
@@ -332,7 +810,7 @@ def _age(token: str) -> int:
     return int(token) if token.isdigit() else _AGE_WORDS[token.replace("-", " ")]
 
 
-def _says_under_21(text: str) -> bool:
+def _says_under_21(text: str, today: date) -> bool:
     if _UNDERAGE_PHRASE_RE.search(text):
         return True
     for pattern, limit in ((_AGE_NOW_RE, 20), (_AGE_AHEAD_RE, 21)):
@@ -341,25 +819,50 @@ def _says_under_21(text: str) -> bool:
             # Nobody younger than ten is typing here; a smaller number is something else.
             if 10 <= _age(token) <= limit:
                 return True
-    return False
+    # Twenty or younger whatever the birthday; a year that leaves it open is not used.
+    return any(10 <= today.year - int(born.group(1)) <= 20 for born in _BORN_RE.finditer(text))
 
 
 def _chasing_losses(text: str) -> bool:
     for match in _CHASING_RE.finditer(text):
-        if _GET_BACK_RE.fullmatch(match.group(0)) and _REFUND_RE.search(text):
+        found, before = match.group(0), text[: match.start()]
+        if _GET_BACK_RE.fullmatch(found) and _REFUND_RE.search(text):
+            continue
+        if (
+            _ABOUT_A_TEAM_RE.fullmatch(found)
+            and _SOMEONE_ELSE_RE.search(before)
+            and not _MY_NEED_RE.search(before)
+        ):
             continue
         return True
     return False
 
 
-def detect(message: str) -> Signals:
-    """Every group of patterns ``message`` matches. Pure and deterministic."""
+def _in_distress(text: str) -> bool:
+    if _DISTRESS_RE.search(text) or _MY_PROBLEM_RE.search(text):
+        return True
+    for match in _AFFORD_RE.finditer(text):
+        if not _TEAM_SUBJECT_RE.search(text[: match.start()]):
+            return True
+    for match in _AND_CANT_STOP_RE.finditer(text):
+        sentence = re.split(r"[.!?;] ", text[: match.start()])[-1]
+        if _FIRST_PERSON_RE.search(sentence):
+            return True
+    return False
+
+
+def detect(message: str, today: date | None = None) -> Signals:
+    """Every group of patterns ``message`` matches. Deterministic.
+
+    ``today`` is only used to turn "I was born in 2009" into an age; it defaults to the
+    current date.
+    """
     text = normalise(message)
     chasing = _chasing_losses(text)
     return Signals(
         crisis=_CRISIS_RE.search(text) is not None,
-        underage=_says_under_21(text),
-        distress=chasing or _DISTRESS_RE.search(text) is not None,
+        underage=_says_under_21(text, today or datetime.now(UTC).date()),
+        distress=chasing or _in_distress(text),
         chasing_losses=chasing,
         certainty=_CERTAINTY_RE.search(text) is not None,
     )

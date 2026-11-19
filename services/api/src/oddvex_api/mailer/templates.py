@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..helpline import HELPLINE_SHORT
+
 IGNORE_LINE = "If you didn't ask for this, you can ignore this email."
 FOOTER = (
-    "OddVex is for information only and does not accept or place wagers. 21+. "
-    "Gambling problem? Call 1-800-GAMBLER."
+    f"OddVex is for information only and does not accept or place wagers. 21+. {HELPLINE_SHORT}"
 )
 
 
