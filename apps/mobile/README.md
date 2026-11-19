@@ -15,7 +15,9 @@ also includes everything in the latest slice: the value screen, tracker analytic
 in Settings, the forgot-password, reset-password and verify-email screens, and opening those two from a link.
 And it includes every community screen described below: the feed, the pick, profile, leaderboard, guidelines and
 profile-setup screens, the "Share a pick" panel on a game, multi-line text entry with the keyboard open, and the
-inline report, block and delete confirmations. None of it has been seen on a phone.
+inline report, block and delete confirmations. None of it has been seen on a phone. The same goes for the helpline
+phone links (whether the dialer opens has only been checked against a mocked `Linking`), the width of the "Data
+source not confirmed" badge in a header, and "Show more" on the tracker.
 
 ## What is built
 
@@ -33,12 +35,12 @@ is reached from a link row on Games and from notification links.
 | OddVex AI | Chat reached from the Games tab and from Settings. Example questions seeded from current games and props, `POST /v1/assistant/query`, suggestion chips that open the matching screen in this app, and the sources line and disclaimer under every answer. |
 | Props (tab) | Prop board with league and stat filters: consensus line, best over and under with the book, last-10 over rate with its sample size. |
 | Prop analyzer | Stat, window (5 / 10 / 20 / season) and split (all / home / away / vs opponent) selectors. Over rate with "x of n games" and the API's 95% Wilson range, averages, a game-log bar chart against the line (plain views, each bar labelled Over, Under or Push), per-book offers with Best / Stale / Suspended / Not offered in words, the API's caveat under "A record, not a forecast", the game log list, and a Follow toggle for the player. |
-| Tracker (tab) | Signed out: an invitation to log in. Signed in: profit, ROI, record, average closing line value, open bets and exposure (`GET /v1/bets/summary`); open and settled bets with "Tied to a game", "Settled from final score" and "Synced" badges; settle (won, lost, push, void, half won, half lost, cashed out with the amount), settle a parlay leg by leg, edit stake / sportsbook / notes / closing odds, delete after confirmation; "Settle from final scores"; mock sportsbook sync (connect, sync now, disconnect and delete). When your weekly staking reminder has been reached, a notice at the top says so, says it is a reminder and not a limit, and gives 1-800-GAMBLER. Nothing is blocked. |
+| Tracker (tab) | Signed out: an invitation to log in. Signed in: profit, ROI, record, average closing line value, open bets and exposure (`GET /v1/bets/summary`); open and settled bets with "Tied to a game", "Settled from final score" and "Synced" badges. Open bets are read in their own request (`GET /v1/bets?status=pending&limit=1000`). Settled bets are read 50 at a time, most recently placed first (`status=settled&limit=50&offset=N`), with "Show more" for the next page until none are left; the heading says "Showing 50 of 120" from the summary's count, and a reload after a change asks again for as many as are on screen. Settle (won, lost, push, void, half won, half lost, cashed out with the amount), settle a parlay leg by leg, edit stake / sportsbook / notes / closing odds, delete after confirmation; "Settle from final scores"; mock sportsbook sync (connect, sync now, disconnect and delete). When your weekly staking reminder has been reached, a notice at the top says so, says it is a reminder and not a limit, and gives the helpline. Nothing is blocked. The short responsible-gambling line with a "Call 1-800-MY-RESET" phone link sits near the top of the screen in every state, signed out included, and again at the foot of the sync panel (see "Help with problem gambling"). |
 | Analytics | Flag `tracker_analytics`. "Open analytics" on the Tracker tab when signed in. `GET /v1/bets/analytics`: results by odds band, weekday and month as labelled bars drawn from plain views, each with its values written out ("7 bets · $175.00 staked · profit −$12.50 · ROI −7.1% · win rate 42.9%"); average stake and average odds; runs ("2 losses in a row", longest run of wins and of losses) in plain text with no color, plus the API's `streak_note` when it sends one; closing line value (average, share above the close, buckets); stake sizes; the API's `sample_note` as a "Small sample" caution when present, and its `note` at the foot. Empty state when nothing is settled. The bar lengths are the only arithmetic: a row's count against the largest count in its list. |
-| Log a bet | Straight, parlay, same-game parlay or future; add and remove legs; American, decimal or fractional odds; league, sportsbook, stake, optional closing odds. OddVex records the bet. It does not place it. |
+| Log a bet | Straight, parlay, same-game parlay or future; add and remove legs; American, decimal or fractional odds; league, sportsbook, stake, optional closing odds. OddVex records the bet. It does not place it. If the session ends before the bet is saved, what was typed is back in the form after logging in again (see "Unsaved input when the session ends"). |
 | Tools (tab) | Odds converter, no-vig (two or three sides), expected value, closing line value. Each posts to `/v1/quant/*`, shows the API's result and caveat, and has a "Show the working" toggle listing the API's steps. |
 | Parlay research | Pick moneyline legs from current games or add a custom leg, set a stake, `POST /v1/quant/parlay`. Shows combined odds, payout and break-even. When the API reports correlated legs it shows the warning, the API's note, and "Not shown" for combined probability. |
-| Settings (tab) | Account (name, email, "Email verified" or "Email not verified", the plan when the API sends one, "Preview: every feature is included" while `GET /v1/me/entitlements` reports `preview`, log out with the line "Logging out ends every session for this account, on every device where it is signed in."; or log in / create account). While the address is not verified and `email_flows` is on, "Send verification email" (`POST /v1/auth/verify-email/request`) shows the API's confirmation and the preview statement below. There is no purchase or upgrade UI anywhere. Then odds format, data source notice, responsible-gambling line, a switch per kind of notification (`PUT /v1/me/notification-preferences` with only the kind that changed; "New followers", "Comments on your picks" and "Graded picks" are listed only while the `community` flag is on), the weekly staking reminder (amount, Save, Turn off, "You have staked $X this week"), change password, delete account with a typed DELETE confirmation, versions. |
+| Settings (tab) | Account (name, email, "Email verified" or "Email not verified", the plan when the API sends one, "Preview: every feature is included" while `GET /v1/me/entitlements` reports `preview`, log out with the line "Logging out ends every session for this account, on every device where it is signed in."; or log in / create account). While the address is not verified and `email_flows` is on, "Send verification email" (`POST /v1/auth/verify-email/request`) shows the API's confirmation and the preview statement below. There is no purchase or upgrade UI anywhere. Then odds format, data source notice, the responsible-gambling panel (the short line, a "Call 1-800-MY-RESET" phone link, the text line, the statement that the helpline is not an emergency service with a "Call 988" link, and a link to the Council's website), a switch per kind of notification (`PUT /v1/me/notification-preferences` with only the kind that changed; "New followers", "Comments on your picks" and "Graded picks" are listed only while the `community` flag is on), the weekly staking reminder (amount, Save, Turn off, "You have staked $X this week"), change password, delete account with a typed DELETE confirmation, versions. |
 | Log in, Create account | Modals above the tabs, so they open from any screen and close back to it. Create account needs a name, an email, a password of at least 10 characters and the "I am 21 or older…" switch. With `email_flows` on, Log in has "Forgot password?". After a suspension it shows "This account can't be used right now" (see "Accounts and the token"). |
 | Reset your password (`/forgot-password`) | Takes an email, `POST /v1/auth/password-reset/request`, and always answers "If an account exists for that address, a reset link has been sent." whether or not the address has an account, with the preview statement. 429 shows "Too many attempts. Wait a minute, then try again." |
 | Set a new password (`/reset-password?token=`) | New password (at least 10 characters) and a confirmation field, `POST /v1/auth/password-reset/confirm`, then the saved session on the device is cleared and Log in opens with "Password changed. Log in with your new password." A used or expired link says so and offers a new one; a link with no token says it is incomplete. |
@@ -70,7 +72,14 @@ and nothing is turned into a link. The app sends what was typed, trimmed, and th
 moderators" note on your own pick, the moderators' note in place of your removed comment, and a notice on your own
 hidden profile.
 
-A "Synthetic data" badge sits in every header while the API reports `data_mode: "synthetic"`.
+Every header carries a data-mode badge: "Synthetic data" while the API reports `data_mode: "synthetic"`, "Replay"
+for `"replay"`, and "Data source not confirmed" (neutral, not a warning) while the mode is not known because
+`GET /v1/meta` has not answered yet, failed, or answered without a data mode. An unknown mode never draws nothing
+and is never treated as real data. `src/providers/meta.tsx` keeps asking until it has an answer: after 2, 5, 15, 30
+and then every 60 seconds while the app is in the foreground, and at once each time the app returns to the
+foreground. The badge is absent only after the API has named some other mode; the API has none today. In Settings,
+the "Data source" panel says the data service cannot be reached from the first failed read until an answer
+arrives, and does not go back to "Checking the data source." while a retry is on its way.
 
 The app does no odds math. Prices, probabilities, payouts, hit rates, ranges, CLV and grading all arrive from the
 API; `src/utils/format.ts` only formats, and forms send odds as typed for the API to parse. The two unit changes made
@@ -141,7 +150,8 @@ the API always saves the bet, and the app never blocks or delays logging one.
   reads the stored session, drops it if it has expired, and confirms it with `GET /v1/me`.
 - The token is only sent on the user's own endpoints (and to the assistant, when there is one). If the API answers
   401 to a request that carried the token, the session is cleared from memory and SecureStore and the log in screen
-  opens. A 401 for a wrong password does not do this.
+  opens. A 401 for a wrong password does not do this. Form input that was not saved yet is kept for the next log
+  in by the same account (next section).
 - Changing the password returns a new token, which replaces the stored one. Delete account clears it.
 - **Log out ends every session of the account.** The app calls `POST /v1/auth/logout` with the token and then
   clears it from memory and SecureStore. The API has no per-device sessions: that call rejects every token issued
@@ -158,6 +168,63 @@ the API always saves the bet, and the app never blocks or delays logging one.
   address yet, so none is shown). The message goes away after the next successful log in.
 - 429 shows "Too many attempts. Wait a minute, then try again."
 
+## Unsaved input when the session ends
+
+Tokens last an hour and are not refreshed, and logging out anywhere ends every session, so the API can reject the
+token while someone is in the middle of a form: on Save, or on any other request (the bell re-reads the unread
+count whenever the app returns to the foreground). The screen then swaps the form for a log in prompt.
+
+`src/session/drafts.ts` keeps what was typed through that. Form fields use `useDraft(key, initial)` in place of
+`useState`. When the session provider ends a session because of a 401, every field that holds unsaved input is
+kept in memory as its form leaves the screen. Log in is a modal that closes back to the screen underneath, so after
+logging in with the same account the form is drawn again with the fields as they were and the line "You were signed
+out, so nothing was saved. What you entered is still here." Nothing is sent again automatically: the person presses
+Save.
+
+Unsaved means different from the value the field had when the form was drawn or, once the form has been saved,
+from what was saved. Each form tells the module when the API has accepted it (the third value `useDraftKept`
+returns, called in the success path after the form's own resets). A form that stays on screen after a save, such as
+an alert, the staking reminder or a profile, is therefore not brought back by a later sign-out and is never
+described as not saved. Only what is typed after the save is kept.
+
+- Covered: Log a bet, "Track a bet on this game", "Set an alert", "Share a pick", the community profile form, a
+  comment, an open report, a bet being edited or settled on the tracker, and the weekly staking reminder amount.
+- Not kept, on purpose: the two fields of Change password, the typed DELETE confirmation, and an open "Delete
+  this bet for good?" prompt. A password or a confirmation should be given again by the person who is now signed in.
+- Discarded: on Log out, Delete account, a suspension, a completed password reset, and when a different account
+  logs in. Nothing typed under one account is shown to another.
+- In memory only. Nothing is written to disk, so closing the app loses it, as before.
+- Leaving a form in the ordinary way (going back, switching market) still clears it, as before.
+- If a save was already on its way when another request ended the session, and the API then accepts it, the copy
+  kept for that form is dropped. If the form is already back on screen by then, it stops saying nothing was saved,
+  but the fields it took back stay in it and no "saved" confirmation is shown.
+- A kept draft waits for its form: if the person logs in again and does not open that form until later in the same
+  run of the app, it comes back then, with the same line. Nothing expires it before a log out.
+- The community profile form is kept per screen (the community's first screen and the profile screen can both be
+  in the stack), so what was typed in one is not put into the other.
+- Screens that do not swap their form out on sign-out (the assistant, the calculators, parlay research) never lost
+  input and are unchanged.
+
+## Help with problem gambling
+
+`src/helpline.ts` is the only file that writes the helpline down; a test fails if the number, the text code or the
+website appears in any other source file. Checked on 2026-11-19 against the National Council on Problem Gambling's
+own pages:
+
+- The National Problem Gambling Helpline is **1-800-MY-RESET (1-800-697-3738)**, in service since 2026-01-29. Call
+  it, or text 800GAM (800426). It is confidential and answers 24 hours a day, every day.
+- It is not an emergency service. In a crisis: call or text 988 (the Suicide and Crisis Lifeline), or call 911.
+- The Council's site is https://www.ncpgambling.org, where online chat is offered. The app links to the front page
+  only.
+- 1-800-GAMBLER is not the national helpline (the Council on Compulsive Gambling of New Jersey runs it). The app never shows it.
+
+The short line is "21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738)." It
+appears in Settings, on the tracker and in the sportsbook sync panel, each time with a "Call 1-800-MY-RESET" button
+that opens the dialer through `tel:+18006973738` (`src/components/help-link.tsx`). The weekly staking reminder
+notice ends with the same number. Settings also gives the text line, the 988 sentence with a "Call 988" link, and
+the link to the Council's site. On a device that cannot place calls the link does nothing; the number is always
+written out next to it. The community guidelines show the API's own `help` sentence, which this app does not word.
+
 ## What is not built
 
 - Any purchase, upgrade or pricing UI. Plans are shown, never sold; nothing is gated by plan.
@@ -173,13 +240,17 @@ the API always saves the bet, and the app never blocks or delays logging one.
 - Automatic refresh. Data updates on pull to refresh, on a filter change, and after you change a bet or a follow.
   The "ago" labels keep counting.
 - Offline cache. With no connection you get the error state. A saved session survives being offline.
-- Token refresh. When the token expires you are asked to log in again.
+- Token refresh. When the token expires you are asked to log in again; unsaved form input is kept for that (see
+  "Unsaved input when the session ends").
 - Push notifications, email, alert sounds, an app icon badge and background checks (see "Alerts and notifications
   are in-app only"). An unread-only filter on the notification list. Alerts on player props.
-- A tappable phone link on the responsible-gambling line, tablet layouts, web
+- A text-message link for 800GAM (the code is written out, not tappable), tablet layouts, web
   (`react-native-web` is not installed).
-- Final app icon and splash art. EAS project, build profiles, store configuration: none exist; nothing has been
-  published.
+- Final app icon and splash art. Store configuration (listings, submit profiles): none exists, and nothing has
+  been published to a store. The EAS project and its two build profiles exist; see "Builds".
+- A search or filter on the tracker's lists. Older settled bets are reached with "Show more". Open bets come in
+  one request of 1,000, the API's largest page: an account with more than that sees "Showing 1000 of N open" and
+  cannot reach the rest from the app.
 - Geist Sans. Interface text uses the system face. Numbers use IBM Plex Mono.
 
 ## Run it
@@ -215,6 +286,39 @@ after changing it.
 Plain `http://` is fine in Expo Go and development builds. Release builds on both platforms block cleartext traffic
 by default, so a production API address must be `https://`.
 
+## Builds
+
+The app is linked to an EAS project (`extra.eas.projectId` in `app.json`) and `eas.json` has two build profiles.
+
+| Profile | What it builds | API | Signing |
+|---|---|---|---|
+| `preview` | An Android APK for direct install (`distribution: internal`) | `https://api-preview.oddvex.com` | **The public debug key.** See below. |
+| `production` | Store builds, version number raised automatically | `https://api.oddvex.com` | Real credentials kept by EAS. None are recorded as created yet; creating them is a Founder decision. |
+
+**The preview APK is signed with a key everyone has.** The profile sets `withoutCredentials: true`, so EAS adds no
+signing credentials and the build falls back to the Expo template's `debug.keystore` (password `android`), a file
+published inside the `expo` npm package. The flag was added so that a build started from GitHub would not stop at
+the prompt that creates a keystore. Whether such a build would create one by itself has not been established.
+
+What that means:
+
+- Anyone can build an APK for `com.oddvex.app` with the same signature. Android would install it over the preview
+  app as an update, and it would then run as that app and could read what the app has saved, including the signed-in
+  session.
+- So the preview build is for the Founder's own test phone. It must never be passed around, posted where others
+  can download it, or uploaded to a store. Install it only from the EAS build page it came from.
+- A phone that has the preview build cannot install a build signed with a different key over it. Uninstall the
+  preview app before installing any build signed with real credentials (a `production` build, or a `preview` build
+  made after the flag is removed).
+
+The `production` profile does not set the flag. Its builds are signed with real credentials that EAS keeps for the
+project: an Android keystore, and on iOS a distribution certificate and provisioning profile. None are recorded
+as created yet (docs/marketing/STORE_SUBMISSION_PREP.md, row B-7), so a production build cannot be signed until
+they are. Creating or changing them is a decision for the Founder (PROJECT_CONSTITUTION.md, section 3). Moving the preview profile to
+a private keystore means removing `withoutCredentials` and, to be safe, running one
+`eas build -p android --profile preview` from a signed-in computer first, so the keystore exists before a GitHub
+build needs it. EAS keeps one default Android keystore per application id, so the two profiles would then share it.
+
 ## Checks
 
 ```bash
@@ -237,14 +341,18 @@ src/
   components/     cards, forms, calculators, chart, badges, loading/empty/error states; for the community: the flag
                   gate, guidelines, profile form, pick card, share-a-pick, report control, record, and
                   community-copy.ts (its fixed sentences and the API-code-to-sentence mapping)
-  providers/      session, feature flags, odds format (persisted), API meta, font status
-  session/        store.ts: the SecureStore-backed session
-  hooks/          useResource (fetch state), usePaged (cursor-paged lists), useWatchlist, useMyProfile,
-                  useUnreadCount / useStakeReminder, useNow, useTheme, shared stack options
+                  help-link.tsx holds the helpline phone links and the short line with its link
+  providers/      session, feature flags, odds format (persisted), API meta (with its retry), font status
+  session/        store.ts: the SecureStore-backed session. drafts.ts: unsaved form input kept across an
+                  unexpected sign-out (useDraft)
+  hooks/          useResource (fetch state), usePaged (cursor-paged lists), useSettledBets (the tracker's settled
+                  list, paged by offset), useWatchlist, useMyProfile, useUnreadCount / useStakeReminder, useNow,
+                  useTheme, shared stack options
   api/            client.ts (fetch, bearer token, error mapping, one function per endpoint), types.ts
   utils/          format.ts (display helpers ported from apps/web/src/lib/format.ts), routes.ts (web link to screen)
   test/           fixtures (fictional teams and sportsbooks), fake fetch, fake session, fake flags, screen strings
   theme.ts        every design token: colors for dark and light, spacing, radii, type sizes
+  helpline.ts     the helpline facts and the sentences that give them; nothing else writes the number
 ```
 
 Tests sit next to the file they test.

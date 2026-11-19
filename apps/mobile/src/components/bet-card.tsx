@@ -6,9 +6,10 @@ import type { Bet, BetResult, BetSettle, BetUpdate, LegResult } from '@/api/type
 import { Badge } from '@/components/badge';
 import { Choice, Field } from '@/components/form';
 import { Price } from '@/components/price';
-import { Button } from '@/components/states';
+import { Button, Notice } from '@/components/states';
 import { Num, Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { fontSize, radius, space } from '@/theme';
 import { cleanOdds, formatDay, formatMoney, formatSignedPercent } from '@/utils/format';
 
@@ -84,31 +85,46 @@ function Figure({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-/** One bet: what it is, its numbers (all from the API), its status in words, and the settle, edit and delete actions. */
+/**
+ * One bet: what it is, its numbers (all from the API), its status in words, and the settle, edit and delete actions.
+ * An open settle or edit form is a draft: it comes back, with what was typed, if the session ends before it is
+ * saved and the bet has not changed in the meantime. The delete confirmation is never brought back.
+ */
 export function BetCard({ bet, leagueName, onChanged }: { bet: Bet; leagueName?: string; onChanged: () => void }) {
   const theme = useTheme();
   const open = bet.status === 'pending';
   const multi = bet.legs.length > 1;
   const title = betTitle(bet);
-  const [mode, setMode] = useState<Mode>('idle');
-  const [result, setResult] = useState<BetResult>('won');
-  const [cashout, setCashout] = useState('');
-  const [legResults, setLegResults] = useState<Record<string, LegResult>>(() =>
+  const draft = `bet:${bet.id}:${bet.updated_at}`;
+  const [form, setForm] = useDraft<Exclude<Mode, 'delete'>>(`${draft}:form`, 'idle');
+  const [deleting, setDeleting] = useState(false);
+  const mode: Mode = deleting ? 'delete' : form;
+  const setMode = (next: Mode) => {
+    setDeleting(next === 'delete');
+    if (next !== 'delete') setForm(next);
+  };
+  const [result, setResult] = useDraft<BetResult>(`${draft}:result`, 'won');
+  const [cashout, setCashout] = useDraft(`${draft}:cashout`, '');
+  const [legResults, setLegResults] = useDraft<Record<string, LegResult>>(`${draft}:legs`, () =>
     Object.fromEntries(bet.legs.map((leg) => [leg.id, 'won' as LegResult])),
   );
-  const [stake, setStake] = useState(String(bet.stake));
-  const [sportsbook, setSportsbook] = useState(bet.sportsbook);
-  const [notes, setNotes] = useState(bet.notes ?? '');
-  const [closing, setClosing] = useState('');
+  const [stake, setStake] = useDraft(`${draft}:stake`, String(bet.stake));
+  const [sportsbook, setSportsbook] = useDraft(`${draft}:sportsbook`, bet.sportsbook);
+  const [notes, setNotes] = useDraft(`${draft}:notes`, bet.notes ?? '');
+  const [closing, setClosing] = useDraft(`${draft}:closing`, '');
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(draft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function run(action: () => Promise<unknown>) {
+    dismissKeptNotice();
     setBusy(true);
     setError(null);
     try {
       await action();
       setMode('idle');
+      // The list reloads and replaces this card. Until it does, what the form holds is saved, not a draft.
+      draftSaved();
       onChanged();
     } catch (caught) {
       setError(describeError(caught, "That didn't work. Try again."));
@@ -118,6 +134,7 @@ export function BetCard({ bet, leagueName, onChanged }: { bet: Bet; leagueName?:
   }
 
   const go = (next: Mode) => {
+    dismissKeptNotice();
     setError(null);
     setMode(next);
   };
@@ -205,6 +222,8 @@ export function BetCard({ bet, leagueName, onChanged }: { bet: Bet; leagueName?:
           <Button label="Delete" variant="ghost" compact accessibilityLabel={`Delete ${title}`} onPress={() => go('delete')} />
         </View>
       ) : null}
+
+      {keptNotice && mode !== 'idle' ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
 
       {mode === 'settle' ? (
         <View style={[styles.sheet, { borderColor: theme.border }]}>

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 
 import { setAuthToken } from '@/api/client';
 import type { SyncConnection } from '@/api/types';
@@ -19,7 +20,11 @@ const connection: SyncConnection = {
   last_synced_at: '2026-11-15T19:54:00Z',
 };
 
-beforeEach(() => setAuthToken('token-1'));
+beforeEach(() => {
+  // One shared mock for the whole file (the React Native Jest preset): emptied so no test depends on another.
+  jest.mocked(Linking.openURL).mockReset();
+  setAuthToken('token-1');
+});
 afterEach(() => setAuthToken(null));
 
 describe('SyncPanel', () => {
@@ -29,6 +34,15 @@ describe('SyncPanel', () => {
     expect(screen.getByText('Demonstration only')).toBeOnTheScreen();
     expect(screen.getByText(/OddVex never asks for a sportsbook password\.$/)).toBeOnTheScreen();
     expect(screen.getByText('No connections yet.')).toBeOnTheScreen();
+  });
+
+  it('carries the helpline as a phone link', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    await render(<SyncPanel providers={[provider]} connections={[]} now={now} onChanged={() => {}} />);
+
+    expect(screen.getByText('21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738).')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('link', { name: 'Call the National Problem Gambling Helpline, 1-800-697-3738' }));
+    expect(openURL).toHaveBeenCalledWith('tel:+18006973738');
   });
 
   it('connects to the mock provider', async () => {

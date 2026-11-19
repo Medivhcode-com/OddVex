@@ -1,12 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 
 import { setAuthToken } from '@/api/client';
+import { HELPLINE, HELPLINE_ABOUT, HELPLINE_CHAT, HELPLINE_NOT_EMERGENCY, RESPONSIBLE_GAMBLING_LINE } from '@/helpline';
+import { META_RETRY_DELAYS_MS, MetaProvider } from '@/providers/meta';
 import { SettingsScreen } from '@/screens/settings';
 import { errorResponse, installFetch, jsonResponse, serveRoutes } from '@/test/api';
 import { PREVIEW_EMAIL_NOTE } from '@/components/account-forms';
 import { flagsAllOn, reminderExceeded, unverifiedUser, user } from '@/test/fixtures';
 import { WithFlags } from '@/test/flags';
 import { fakeSession, WithSession } from '@/test/session';
+import { screenStrings } from '@/test/strings';
 
 const preferences = {
   in_app: {
@@ -23,7 +27,90 @@ const preferences = {
   },
 };
 
-afterEach(() => setAuthToken(null));
+// The React Native Jest preset makes `Linking.openURL` one shared mock for the whole file, which
+// `restoreAllMocks` does not empty: its calls and its answer are cleared here so no test depends on another.
+beforeEach(() => jest.mocked(Linking.openURL).mockReset());
+afterEach(() => {
+  setAuthToken(null);
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+});
+
+describe('SettingsScreen data source', () => {
+  it('keeps saying the data service cannot be reached while it asks again, instead of going back to "Checking"', async () => {
+    jest.useFakeTimers();
+    const UNKNOWN = /^OddVex can.t reach its data service, so the data source is unknown\.$/;
+    const { fetchMock } = installFetch();
+    fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
+    await render(
+      <MetaProvider>
+        <WithSession value={fakeSession({ user: null })}>
+          <SettingsScreen />
+        </WithSession>
+      </MetaProvider>,
+    );
+    expect(await screen.findByText(UNKNOWN)).toBeOnTheScreen();
+    expect(screen.queryByText('Checking the data source.')).toBeNull();
+
+    // The automatic second read is on its way and has not been answered.
+    let answer: (response: unknown) => void = () => {};
+    fetchMock.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    await act(async () => jest.advanceTimersByTime(META_RETRY_DELAYS_MS[0]));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(UNKNOWN)).toBeOnTheScreen();
+    expect(screen.queryByText('Checking the data source.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeOnTheScreen();
+
+    await act(async () => answer(jsonResponse({ provider: 'synthetic', data_mode: 'synthetic', version: '0.1.0', server_time: '2026-01-10T18:00:00Z', notice: 'Notice.' })));
+    expect(await screen.findByText(/^Synthetic data — fictional teams/)).toBeOnTheScreen();
+    expect(screen.queryByText(UNKNOWN)).toBeNull();
+  });
+});
+
+describe('SettingsScreen responsible gambling', () => {
+  it('gives the national helpline with a phone link, the text line, and where to turn in a crisis', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    installFetch();
+    await render(
+      <WithSession value={fakeSession({ user: null })}>
+        <SettingsScreen />
+      </WithSession>,
+    );
+
+    expect(screen.getByText('21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738).')).toBeOnTheScreen();
+    expect(screen.getByText(RESPONSIBLE_GAMBLING_LINE)).toBeOnTheScreen();
+    expect(screen.getByText(HELPLINE_ABOUT)).toBeOnTheScreen();
+    expect(screen.getByText(HELPLINE_NOT_EMERGENCY)).toBeOnTheScreen();
+    expect(screen.getByText(HELPLINE_CHAT)).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByRole('link', { name: 'Call the National Problem Gambling Helpline, 1-800-697-3738' }));
+    expect(openURL).toHaveBeenLastCalledWith('tel:+18006973738');
+    expect(openURL).toHaveBeenLastCalledWith(HELPLINE.tel);
+
+    await fireEvent.press(screen.getByRole('link', { name: 'Call 988, the Suicide and Crisis Lifeline' }));
+    expect(openURL).toHaveBeenLastCalledWith('tel:988');
+
+    await fireEvent.press(screen.getByRole('link', { name: 'Open the National Council on Problem Gambling website' }));
+    expect(openURL).toHaveBeenLastCalledWith('https://www.ncpgambling.org');
+    expect(openURL).toHaveBeenCalledTimes(3);
+
+    // The helpline is described as confidential and always open, and never as the old number.
+    for (const text of screenStrings()) expect(text).not.toMatch(/426-?2537|Call or text 1-800/);
+  });
+
+  it('leaves the number readable when the device cannot open the dialer', async () => {
+    jest.spyOn(Linking, 'openURL').mockRejectedValue(new Error('No app can open this'));
+    installFetch();
+    await render(
+      <WithSession value={fakeSession({ user: null })}>
+        <SettingsScreen />
+      </WithSession>,
+    );
+
+    await fireEvent.press(screen.getByRole('link', { name: 'Call the National Problem Gambling Helpline, 1-800-697-3738' }));
+    expect(screen.getByText(RESPONSIBLE_GAMBLING_LINE)).toBeOnTheScreen();
+  });
+});
 
 describe('SettingsScreen notifications', () => {
   it('has the notification switches and the staking reminder, and says what they are not', async () => {
@@ -44,7 +131,7 @@ describe('SettingsScreen notifications', () => {
     expect(screen.getByText('A reminder, not a limit. OddVex will not stop you logging bets.')).toBeOnTheScreen();
     expect(await screen.findByText('You have staked $250.00 this week.')).toBeOnTheScreen();
     expect(screen.getByText('Your reminder is set at $200.00 a week.')).toBeOnTheScreen();
-    expect(screen.getByText(/free, confidential help is available at 1-800-GAMBLER\.$/)).toBeOnTheScreen();
+    expect(screen.getByText(/confidential help is available at 1-800-MY-RESET \(1-800-697-3738\)\.$/)).toBeOnTheScreen();
   });
 
   it('adds the three community switches while the community flag is on', async () => {

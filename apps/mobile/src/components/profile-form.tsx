@@ -9,6 +9,7 @@ import { LimitedText, tooLong } from '@/components/limited-text';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useSession } from '@/providers/session';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 
 const HANDLE = /^[a-z0-9_]{3,20}$/;
@@ -28,12 +29,24 @@ function fieldOf(error: unknown): 'handle' | 'bio' | null {
 /**
  * Creates or edits the caller's community profile (`PUT /v1/community/profile`). Opt-in and private unless
  * the switch is turned on; the statement under the switch says exactly what a public profile shows.
+ * The three fields are drafts: they come back if the session ends before the profile is saved. The form can be
+ * on two screens of one stack at once (the community's first screen, and the profile screen opened over it), so
+ * each place gives its own `draft` name and gets back only what was typed there.
  */
-export function ProfileForm({ existing, onSaved }: { existing?: MyCommunityProfile | null; onSaved?: (profile: MyCommunityProfile) => void }) {
+export function ProfileForm({
+  existing,
+  onSaved,
+  draft = 'community-profile',
+}: {
+  existing?: MyCommunityProfile | null;
+  onSaved?: (profile: MyCommunityProfile) => void;
+  draft?: string;
+}) {
   const { changed } = useSession();
-  const [handle, setHandle] = useState(existing?.handle ?? '');
-  const [bio, setBio] = useState(existing?.bio ?? '');
-  const [isPublic, setIsPublic] = useState(existing?.is_public ?? false);
+  const [handle, setHandle] = useDraft(`${draft}:handle`, existing?.handle ?? '');
+  const [bio, setBio] = useDraft(`${draft}:bio`, existing?.bio ?? '');
+  const [isPublic, setIsPublic] = useDraft(`${draft}:public`, existing?.is_public ?? false);
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(draft);
   const [handleError, setHandleError] = useState<string | null>(null);
   const [bioError, setBioError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +55,7 @@ export function ProfileForm({ existing, onSaved }: { existing?: MyCommunityProfi
 
   async function submit() {
     setSaved(false);
+    dismissKeptNotice();
     setError(null);
     setBioError(null);
     if (!HANDLE.test(handle)) return setHandleError(`Enter a handle of ${HANDLE_RULE}`);
@@ -51,6 +65,8 @@ export function ProfileForm({ existing, onSaved }: { existing?: MyCommunityProfi
     setBusy(true);
     try {
       const profile = await saveCommunityProfile(body);
+      // The fields stay as saved. They are no longer unsaved input.
+      draftSaved();
       setSaved(true);
       changed('community');
       onSaved?.(profile);
@@ -67,6 +83,7 @@ export function ProfileForm({ existing, onSaved }: { existing?: MyCommunityProfi
 
   return (
     <View style={styles.form}>
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <Field
         label="Handle"
         hint={`${HANDLE_RULE} This is the only name other people see.`}

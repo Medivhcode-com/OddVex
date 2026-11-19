@@ -6,6 +6,7 @@ import { createBet, describeError } from '@/api/client';
 import type { BetCreate, EventSummary, OddsComparison } from '@/api/types';
 import { Choice, Field } from '@/components/form';
 import { Button, Notice } from '@/components/states';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 import { formatAmerican, formatLine } from '@/utils/format';
 
@@ -58,6 +59,7 @@ export function quickBetPayload(event: EventSummary, market: string, option: Qui
 
 /**
  * Logs a bet on this game at the best current price. OddVex records the bet. It does not place it.
+ * The side and the stake are drafts: they come back if the session ends before the bet is saved.
  */
 export function QuickBet({
   event,
@@ -71,8 +73,10 @@ export function QuickBet({
   onSaved: () => void;
 }) {
   const router = useRouter();
-  const [choice, setChoice] = useState<string>(options[0]?.outcomeKey ?? '');
-  const [stake, setStake] = useState('');
+  const draft = `quick-bet:${event.id}:${market}`;
+  const [choice, setChoice] = useDraft<string>(`${draft}:side`, options[0]?.outcomeKey ?? '');
+  const [stake, setStake] = useDraft(`${draft}:stake`, '');
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(draft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -80,6 +84,7 @@ export function QuickBet({
 
   async function submit() {
     setSaved(false);
+    dismissKeptNotice();
     const amount = Number(stake);
     if (!option) return setError('Pick a side.');
     if (stake.trim() === '' || !Number.isFinite(amount) || amount <= 0) return setError('Enter a stake greater than zero.');
@@ -88,6 +93,7 @@ export function QuickBet({
     try {
       await createBet(quickBetPayload(event, market, option, amount));
       setStake('');
+      draftSaved();
       setSaved(true);
       onSaved();
     } catch (caught) {
@@ -99,6 +105,7 @@ export function QuickBet({
 
   return (
     <View style={styles.form}>
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <Choice
         label="Side, at the best current price"
         options={options.map((item): { value: string; label: string } => ({

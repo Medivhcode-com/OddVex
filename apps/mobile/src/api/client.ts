@@ -344,8 +344,19 @@ export function confirmPasswordReset(token: string, newPassword: string): Promis
 
 // Bet tracker
 
-export function getBets(signal?: AbortSignal): Promise<Bet[]> {
-  return apiRequest<Bet[]>('/v1/bets', { auth: 'required', signal });
+/**
+ * The user's bets, most recently placed first. `status` narrows to open (`pending`) or settled bets; `limit`
+ * (the API allows up to 1,000 and defaults to 500) and `offset` page through them.
+ */
+export function getBets(
+  filters: { status?: 'pending' | 'settled'; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+): Promise<Bet[]> {
+  return apiRequest<Bet[]>('/v1/bets', {
+    auth: 'required',
+    query: { status: filters.status, limit: filters.limit, offset: filters.offset },
+    signal,
+  });
 }
 
 export function getBetSummary(signal?: AbortSignal): Promise<BetSummary> {

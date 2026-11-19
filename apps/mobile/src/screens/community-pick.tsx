@@ -17,6 +17,7 @@ import { useNow } from '@/hooks/use-now';
 import { usePaged, type Paged } from '@/hooks/use-paged';
 import { useResource } from '@/hooks/use-resource';
 import { useSession } from '@/providers/session';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 import { formatAge } from '@/utils/format';
 
@@ -139,7 +140,9 @@ function AddComment({
   onAdded: (comment: PickComment) => void;
 }) {
   const router = useRouter();
-  const [text, setText] = useState('');
+  // A draft: the comment comes back if the session ends before it is posted.
+  const [text, setText] = useDraft(`comment:${pickId}:text`, '');
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(`comment:${pickId}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -170,6 +173,7 @@ function AddComment({
   }
 
   async function submit() {
+    dismissKeptNotice();
     const body = text.trim();
     if (!body) return setError('Write a comment first.');
     if (tooLong(text, COMMENT_MAX)) return;
@@ -178,6 +182,7 @@ function AddComment({
     try {
       onAdded(await createPickComment(pickId, body));
       setText('');
+      draftSaved();
     } catch (caught) {
       setError(communityError(caught, 'The comment was not posted. Try again.', 'comment'));
     } finally {
@@ -187,6 +192,7 @@ function AddComment({
 
   return (
     <View style={styles.block}>
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <LimitedText label="Add a comment" value={text} onChangeText={setText} max={COMMENT_MAX} />
       <Txt variant="caption" tone="muted">
         {TEXT_RULES} Discuss the pick, not the person.

@@ -189,7 +189,7 @@ describe('StakeReminderNotice', () => {
     expect(screen.getByText('You have reached your weekly staking reminder')).toBeOnTheScreen();
     expect(
       screen.getByText(
-        'You have staked $250.00 this week. Your reminder is set at $200.00. This is a reminder, not a limit: OddVex will not stop you logging bets. If betting is causing you stress, free, confidential help is available at 1-800-GAMBLER.',
+        'You have staked $250.00 this week. Your reminder is set at $200.00. This is a reminder, not a limit: OddVex will not stop you logging bets. If betting is causing you stress, confidential help is available at 1-800-MY-RESET (1-800-697-3738).',
       ),
     ).toBeOnTheScreen();
     // Supportive, not an alarm.
@@ -203,6 +203,6 @@ describe('StakeReminderNotice', () => {
         <StakeReminderNotice reminder={{ ...reminderExceeded, staked_this_week: 150, exceeded: false }} />
       </>,
     );
-    expect(screen.queryByText(/1-800-GAMBLER/)).toBeNull();
+    expect(screen.queryByText(/1-800-MY-RESET/)).toBeNull();
   });
 });

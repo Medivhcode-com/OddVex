@@ -1,10 +1,11 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { getBets, getBetSummary, getLeagues, getSyncConnections, getSyncProviders } from '@/api/client';
+import { describeError, getBets, getBetSummary, getLeagues, getSyncConnections, getSyncProviders } from '@/api/client';
 import type { Bet, League } from '@/api/types';
 import { AutoSettleButton } from '@/components/auto-settle';
 import { BetCard } from '@/components/bet-card';
+import { HelpLine } from '@/components/help-link';
 import { StakeReminderNotice } from '@/components/notification-settings';
 import { Screen } from '@/components/screen';
 import { Button, EmptyState, ErrorState, Notice, Panel, PanelHeading, SkeletonCards, Stat, StatGrid } from '@/components/states';
@@ -13,13 +14,15 @@ import { Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
 import { useStakeReminder } from '@/hooks/use-notifications';
 import { useResource } from '@/hooks/use-resource';
+import { useSettledBets } from '@/hooks/use-settled-bets';
 import { useFlag } from '@/providers/flags';
 import { openLogin, useSession } from '@/providers/session';
 import { leagueLabel } from '@/screens/games';
 import { space } from '@/theme';
 import { formatMoney, formatPercent, formatSignedPercent } from '@/utils/format';
 
-const SETTLED_SHOWN = 50;
+/** Open bets are read in one request of their own, at the API's largest `limit`, so none falls outside it. */
+const OPEN_LIMIT = 1000;
 
 function SignedOut() {
   const router = useRouter();
@@ -36,6 +39,7 @@ function SignedOut() {
           <Button label="Log in" variant="secondary" onPress={openLogin} />
         </View>
       </EmptyState>
+      <HelpLine />
     </Screen>
   );
 }
@@ -76,7 +80,8 @@ function SignedIn({ userId }: { userId: string }) {
   const { revision, changed } = useSession();
   const analyticsOn = useFlag('tracker_analytics');
   const summary = useResource(`bet-summary:${userId}`, getBetSummary, revision.bets);
-  const bets = useResource(`bets:${userId}`, getBets, revision.bets);
+  const openBets = useResource(`bets-open:${userId}`, (signal) => getBets({ status: 'pending', limit: OPEN_LIMIT }, signal), revision.bets);
+  const settledBets = useSettledBets(userId, revision.bets);
   const leagues = useResource('leagues', getLeagues);
   const providers = useResource(`sync-providers:${userId}`, getSyncProviders);
   const connections = useResource(`sync-connections:${userId}`, getSyncConnections, revision.bets);
@@ -86,27 +91,34 @@ function SignedIn({ userId }: { userId: string }) {
   const onChanged = () => changed('bets');
   const refresh = () => {
     summary.reload();
-    bets.reload();
+    openBets.reload();
+    settledBets.reload();
     connections.reload();
     reminder.reload();
     if (leagues.status === 'error') leagues.reload();
     if (providers.status === 'error') providers.reload();
   };
 
-  const failed = bets.status === 'error' ? bets.error : summary.status === 'error' ? summary.error : undefined;
-  const loading = bets.status === 'loading' || summary.status === 'loading';
-  const all = bets.data ?? [];
-  const open = all.filter((bet) => bet.status === 'pending');
-  const settled = all.filter((bet) => bet.status === 'settled');
+  const lists = [openBets, settledBets, summary];
+  const failed = lists.find((list) => list.status === 'error')?.error;
+  const loading = lists.some((list) => list.status === 'loading');
+  const open = openBets.data ?? [];
+  const settled = settledBets.bets;
   const totals = summary.data?.totals;
+  // The counts are the summary's: the lists hold only what has been loaded so far.
+  const openCount = totals?.pending_count ?? open.length;
+  const settledCount = totals?.settled_count ?? settled.length;
+  // A full page with nothing behind it (exactly 50 settled bets, say) offers no "Show more".
+  const moreSettled = settledBets.hasMore && (!totals || settled.length < settledCount);
   const leagueList = leagues.data ?? [];
 
   return (
-    <Screen refreshing={bets.refreshing || summary.refreshing} onRefresh={refresh}>
+    <Screen refreshing={lists.some((list) => list.refreshing)} onRefresh={refresh}>
       {reminder.data ? <StakeReminderNotice reminder={reminder.data} /> : null}
       <Txt variant="secondary" tone="muted">
         Results you enter yourself are self-reported. Past results don&apos;t predict future ones.
       </Txt>
+      <HelpLine />
 
       {failed !== undefined ? (
         <ErrorState error={failed} onRetry={refresh} />
@@ -114,7 +126,7 @@ function SignedIn({ userId }: { userId: string }) {
         <SkeletonCards label="Loading your bets" />
       ) : (
         <>
-          {bets.error !== undefined || summary.error !== undefined ? (
+          {lists.some((list) => list.error !== undefined) ? (
             <Notice text="Couldn't refresh. Showing the last results loaded." />
           ) : null}
 
@@ -153,7 +165,11 @@ function SignedIn({ userId }: { userId: string }) {
             </View>
           </Panel>
 
-          <SectionTitle title="Open bets" detail={`${open.length} open`} />
+          <SectionTitle
+            title="Open bets"
+            // Only an account with more open bets than one request can carry sees the longer wording.
+            detail={open.length >= OPEN_LIMIT && open.length < openCount ? `Showing ${open.length} of ${openCount} open, most recently placed first` : `${openCount} open`}
+          />
           {open.length === 0 ? (
             <EmptyState title="No open bets" body="Bets you log appear here until you settle them." />
           ) : (
@@ -166,16 +182,28 @@ function SignedIn({ userId }: { userId: string }) {
           <SectionTitle
             title="Settled bets"
             detail={
-              settled.length > SETTLED_SHOWN
-                ? `Latest ${SETTLED_SHOWN} of ${settled.length}, most recent first`
-                : `${settled.length} settled, most recent first`
+              moreSettled
+                ? `Showing ${settled.length} of ${settledCount}, most recently placed first`
+                : `${settledCount} settled, most recently placed first`
             }
           />
           {settled.length === 0 ? (
             <EmptyState title="Nothing settled yet" body="Settle an open bet to start building your record." />
           ) : (
-            <BetList bets={settled.slice(0, SETTLED_SHOWN)} leagues={leagueList} onChanged={onChanged} />
+            <BetList bets={settled} leagues={leagueList} onChanged={onChanged} />
           )}
+          {settledBets.moreError !== undefined ? (
+            <Notice tone="error" text={describeError(settledBets.moreError, "Couldn't load more bets. Try again.")} />
+          ) : null}
+          {moreSettled ? (
+            <Button
+              label={settledBets.loadingMore ? 'Loading more' : 'Show more'}
+              variant="secondary"
+              disabled={settledBets.loadingMore}
+              accessibilityLabel={settledBets.loadingMore ? 'Loading more settled bets' : 'Show more settled bets'}
+              onPress={settledBets.showMore}
+            />
+          ) : null}
 
           <Panel>
             <View style={styles.block}>
@@ -204,6 +232,7 @@ export function TrackerScreen() {
   if (session.status === 'loading') {
     return (
       <Screen>
+        <HelpLine />
         <SkeletonCards label="Checking your account" count={2} />
       </Screen>
     );

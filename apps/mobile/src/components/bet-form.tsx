@@ -7,6 +7,7 @@ import { Choice, Field } from '@/components/form';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { radius, space } from '@/theme';
 import { cleanOdds } from '@/utils/format';
 
@@ -76,7 +77,12 @@ export function buildBetPayload(draft: BetDraft): { error: string } | { body: Be
   };
 }
 
-/** Log a bet by hand: straight, parlay, same-game parlay or future. OddVex records the bet. It does not place it. */
+/**
+ * Log a bet by hand: straight, parlay, same-game parlay or future. OddVex records the bet. It does not place it.
+ * The fields are drafts (`useDraft`): if the session ends before the bet is saved, they are back in the form
+ * after the same person logs in again. A bet that was saved is not brought back. One of these forms is on
+ * screen at a time.
+ */
 export function BetForm({
   leagues,
   sportsbooks,
@@ -87,12 +93,14 @@ export function BetForm({
   onSaved: () => void;
 }) {
   const theme = useTheme();
-  const [betType, setBetType] = useState<BetType>('straight');
-  const [format, setFormat] = useState<EntryOddsFormat>('american');
-  const [league, setLeague] = useState<string>(leagues[0]?.key ?? OTHER_LEAGUE);
-  const [sportsbook, setSportsbook] = useState(sportsbooks[0] ?? '');
-  const [stake, setStake] = useState('');
-  const [legs, setLegs] = useState<LegDraft[]>([emptyLeg()]);
+  const [betType, setBetType] = useDraft<BetType>('log-bet:type', 'straight');
+  const [format, setFormat] = useDraft<EntryOddsFormat>('log-bet:format', 'american');
+  const [league, setLeague] = useDraft<string>('log-bet:league', leagues[0]?.key ?? OTHER_LEAGUE);
+  const [sportsbook, setSportsbook] = useDraft('log-bet:sportsbook', sportsbooks[0] ?? '');
+  const [stake, setStake] = useDraft('log-bet:stake', '');
+  const [legs, setLegs] = useDraft<LegDraft[]>('log-bet:legs', () => [emptyLeg()]);
+  // Said until the next Save: the fields came back after the session ended.
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept('log-bet');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
@@ -109,6 +117,7 @@ export function BetForm({
 
   async function submit() {
     setSaved(false);
+    dismissKeptNotice();
     const built = buildBetPayload({ betType, format, league, sportsbook, stake, legs });
     if ('error' in built) return setError(built.error);
     setError(null);
@@ -117,6 +126,8 @@ export function BetForm({
       await createBet(built.body);
       setLegs(isMulti(betType) ? [emptyLeg(), emptyLeg()] : [emptyLeg()]);
       setStake('');
+      // What is in the form now is the saved state: a later sign-out has nothing of this bet to bring back.
+      draftSaved();
       setSaved(true);
       onSaved();
     } catch (caught) {
@@ -128,6 +139,7 @@ export function BetForm({
 
   return (
     <View style={styles.form}>
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <Choice label="Bet type" options={TYPES} value={betType} onChange={changeType} />
       <Choice
         label="League"

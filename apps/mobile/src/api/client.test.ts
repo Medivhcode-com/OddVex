@@ -157,6 +157,21 @@ describe('signed-in requests', () => {
     expect(fetchMock.mock.calls[1][1].headers).toEqual({ accept: 'application/json' });
   });
 
+  it('pages the bet list with the status, limit and offset the API takes', async () => {
+    setAuthToken('token-1');
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await getBets({ status: 'pending', limit: 1000 });
+    await getBets({ status: 'settled', limit: 50, offset: 0 });
+    await getBets({ status: 'settled', limit: 50, offset: 100 });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://localhost:8000/v1/bets?status=pending&limit=1000',
+      'http://localhost:8000/v1/bets?status=settled&limit=50&offset=0',
+      'http://localhost:8000/v1/bets?status=settled&limit=50&offset=100',
+    ]);
+  });
+
   it('refuses a signed-in request without a token, before any network call', async () => {
     const onUnauthorized = jest.fn();
     setUnauthorizedHandler(onUnauthorized);
