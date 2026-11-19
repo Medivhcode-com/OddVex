@@ -100,8 +100,9 @@ services:
   # older than KEEP_DAYS days are deleted only after a new dump has been written, is not empty
   # and can be read back, so a run of failures never empties the directory. A failed dump is
   # reported in this container's log and tried again after an hour. An unfinished file left by
-  # a pass that was stopped half way is removed at the start of the next one. The dumps stay on
-  # the same disk: they protect against a bad change, not against losing the server.
+  # a pass that was stopped half way is removed at the start of the next one. Old dumps are
+  # removed with `-exec`, not `-delete`: not every BusyBox build of find has `-delete`. The
+  # dumps stay on the same disk: they protect against a bad change, not against losing the server.
   backup:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -121,7 +122,7 @@ services:
           if pg_dump -h oddvex-db -U oddvex -Fc -f "$$f.part" oddvex && [ -s "$$f.part" ] && pg_restore -l "$$f.part" > /dev/null; then
             mv "$$f.part" "$$f"
             echo "backup ok: wrote $$f ($$(wc -c < "$$f") bytes)"
-            find /backups -name 'oddvex-*.dump' -mtime +"$${KEEP_DAYS:-14}" -delete
+            find /backups -name 'oddvex-*.dump' -mtime +"$${KEEP_DAYS:-14}" -exec rm -f {} +
             fails=0
             pause=86400
           else
