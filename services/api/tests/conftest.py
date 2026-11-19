@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from oddvex_api.auth import security
 from oddvex_api.config import Settings
 from oddvex_api.db import Base, make_engine
 from oddvex_api.main import create_app
@@ -35,6 +36,14 @@ def _reset_external_database(url: str) -> None:
         Base.metadata.drop_all(connection)
         connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _default_password_hash_limits() -> Iterator[None]:
+    """The hashing limiter belongs to the process (``auth/security.py``). An app built with
+    other limits would leave them in force for the tests that follow, so put the defaults back."""
+    yield
+    security.configure_password_hashing()
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ Read `PROJECT_CONSTITUTION.md` first. It is binding. This file is the practical 
 | `packages/types` | TypeScript types generated from the API's OpenAPI schema | openapi-typescript |
 | `data/fixtures` | Synthetic sample data used by contract tests | JSON |
 | `data/external` | Third-party open data for the internal replay preview. Raw files are never committed (real names) | CSV, Parquet, JSON |
+| `docs/backlog` | The Founder's feature backlog (6 foundations, 44 build items), how to work on it, and progress | Markdown |
 | `docs/` | Architecture, product, design, research, compliance, marketing | Markdown |
 
 Top-level `services/odds`, `services/ai`, `services/notifications` and `apps/admin` from the original plan do not
@@ -46,3 +47,11 @@ cd services/api && .venv/bin/python scripts/export_openapi.py && cd ../.. && pnp
 - UI copy follows `docs/marketing/BRAND_VOICE.md`. Sentence case, plain verbs, no hype.
 - Never use color alone to carry meaning. Best price, over/under, win/loss all have a text or shape cue.
 - Do not add a dependency for something a few lines of code can do.
+
+## Feature backlog
+
+The Founder supplied a 50-idea backlog on 2026-11-19. Before working on any backlog item read `docs/backlog/README.md`
+and `docs/backlog/BUILD_PROMPT.md`: the process (one item at a time in ID order, one pull request each, its own flag
+default off, a failing test for every "Done when" line, synthetic fixtures, a document under `docs/features/`) and
+the six hard rules in that prompt are binding for backlog work. `docs/backlog/orientation.md` maps the already-built
+features to their code. Tickets are in Linear, MED-72 (P0.1) to MED-121 (F44).

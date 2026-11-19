@@ -109,19 +109,28 @@ email (verification, password reset), historical odds storage against a real fee
 
 ## Private preview on the Hostinger VPS (decision D-016)
 
-Deployed 2026-11-18 from commit `d5749e0` with `infrastructure/hostinger/ops.sh`:
+First deployed 2026-11-18 from commit `d5749e0`, redeployed 2026-11-19 from `main` at `855991c`, both with
+`infrastructure/hostinger/ops.sh`:
 
-- Three containers (`oddvex-db-1`, `oddvex-api-1`, `oddvex-web-1`) were running on the server; the database and API
-  reported healthy through the Hostinger API. The API runs in production mode on synthetic data.
+- Five containers run on the server (`db`, `api`, `web`, `worker`, `backup`), with `api` and `web` on the image tag
+  `855991c`. The database and API report healthy through the Hostinger API. The API runs in production mode on
+  synthetic data.
+- The worker's output shows completed passes at 05:23 and 05:25 UTC on 2026-11-19 (alert evaluation, then pick
+  grading; nothing to do yet). The backup's output shows the first dump written:
+  `/backups/oddvex-20261119T052302Z.dump`. A restore from a dump has not been rehearsed.
 - DNS `A` records `preview` and `api-preview` for `oddvex.com` point at the server.
 - One marked block for `preview.oddvex.com` (password-protected) and `api-preview.oddvex.com` was appended to the
   server's shared Caddyfile. Caddy validated the file and reloaded without error. The previous file is kept at
   `/opt/oddvex/Caddyfile.before-oddvex-20261118T074444Z` on the server.
-- The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works. Whether the server's other
-  sites still answer after the reload was not checked by the build session, whose network cannot reach them.
-- Added after that first deploy, and not yet running on the server until the next deploy: a `worker` container
-  (alert evaluation and pick grading every two minutes) and a `backup` container (one database dump a day, 14 kept).
-- Not configured: real email, off-server backups. `oddvex.com` itself is unchanged.
+- The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works.
+- A check run on the server itself at 2026-11-18 07:45 UTC, right after the reload, got: `preview.oddvex.com` 401
+  without the password and 200 with it (home page and `/app/games`), with the `X-Robots-Tag: noindex, nofollow`
+  header; `api-preview.oddvex.com/health` and `/v1/meta` 200; and every other site on the shared proxy answering
+  (tickettoss.io, fleetsort.com, medivhboost.com, replyhub.site, n8n, office and myoffice 200; app.fleetsort.com and
+  rentex.fleetsort.com 307, their normal redirect).
+- The mailbox `support@oddvex.com` exists (created by the Founder on 2026-11-19) and the domain has MX, SPF, DKIM and
+  DMARC records. The address is not on the contact page yet, and no test message was sent by the build session.
+- Not configured: real email from the product, off-server backups. `oddvex.com` itself is unchanged.
 
 ## Replay preview (internal only, decision D-015)
 
