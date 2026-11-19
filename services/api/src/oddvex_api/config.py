@@ -77,6 +77,22 @@ class Settings(BaseSettings):
 
     sync_max_attempts: int = 3
 
+    #: Most bets one account can hold, manual and imported together. ``POST /v1/bets``
+    #: answers 409 ``bet_limit_reached`` at the cap and an import stops there. It bounds
+    #: the disk one account can use (a bet with 20 legs and 2,000 characters of notes is
+    #: about 22 KiB of database) and what the summary, analytics and export read.
+    max_bets_per_user: int = Field(default=5000, ge=1)
+    #: Per-user ceilings on bet writes (create, update, delete, settle, auto-settle) and
+    #: sync writes, keyed on the user id whatever the address. In process memory, off
+    #: with ``rate_limit_enabled``.
+    rate_limit_user_writes_per_minute: int = Field(default=120, ge=1)
+    rate_limit_user_writes_per_day: int = Field(default=2000, ge=1)
+    #: ``GET /v1/me/export`` requests one user can make in an hour.
+    rate_limit_export_per_hour: int = Field(default=10, ge=1)
+    #: Streamed responses (the bet list and the export) one user can have in progress at
+    #: the same moment. Each holds one batch of bets while the client reads.
+    rate_limit_user_streams_at_once: int = Field(default=8, ge=1)
+
     #: Minimum seconds between two lazy alert evaluations for one user (triggered by the
     #: notification read routes). 0 evaluates on every request.
     alert_eval_min_seconds: int = Field(default=30, ge=0)

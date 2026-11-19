@@ -47,7 +47,14 @@ class ControlledProvider(SyntheticProvider):
         score = self._finished.get(event.id)
         if score is None:
             return event
-        return event.model_copy(update={"status": "final", "score": score, "period_text": "Final"})
+        return event.model_copy(
+            update={
+                "status": "final",
+                "score": score,
+                "period_text": "Final",
+                "score_updated_at": None,  # only a live event has one
+            }
+        )
 
     def get_event(self, event_id: str) -> Event | None:
         return self._apply(super().get_event(event_id))

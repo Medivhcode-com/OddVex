@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { PageIntro, Prose } from "@/components/marketing/chrome";
+import { HelplineLink } from "@/components/ui/helpline";
+import { HELPLINE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -25,11 +27,17 @@ export default function Page() {
         <ul>
           <li>For how a number is calculated, see <a href="/methodology">data and methodology</a>.</li>
           <li>For account and tracker questions, see the <a href="/help">help center</a>.</li>
-          <li>To delete your account and data, use Settings in the app. It takes effect immediately.</li>
+          <li>
+            To delete your account and data, sign in and use Settings, then Delete account. The <a href="/privacy">privacy policy</a> says what is removed and what is kept.
+          </li>
+          <li>
+            If you cannot sign in, {email ? "write to the address above" : "write to the contact address once it is published here"} and ask for a copy of your data or for the account to be
+            deleted. Staff can do either on request.
+          </li>
         </ul>
         <p>
           OddVex can&rsquo;t help with a bet placed at a sportsbook. Contact that sportsbook directly. If gambling is
-          causing harm, call or text <a href="tel:18004262537">1-800-GAMBLER</a>.
+          causing harm, call <HelplineLink />, the {HELPLINE.name}.
         </p>
       </Prose>
     </>

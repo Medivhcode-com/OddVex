@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Literal
+from datetime import UTC, date, datetime
+from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, Field, model_validator
+from pydantic import AfterValidator, AwareDatetime, BaseModel, Field, model_validator
 
 from ..schemas import OddsFormatIn, OddsValue, PriceOut
 
@@ -26,6 +26,22 @@ AutoSettleSkipReason = Literal[
 ]
 
 MAX_STAKE = 1_000_000
+
+
+def _recordable(value: datetime) -> datetime:
+    """Times are stored in UTC. One within hours of the first or last day of the
+    calendar can fall outside it once converted, which is refused here."""
+    try:
+        value.astimezone(UTC)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("this date and time cannot be recorded: it is out of range") from exc
+    return value
+
+
+#: A time with a UTC offset that is still inside the calendar when converted to UTC.
+Moment = Annotated[AwareDatetime, AfterValidator(_recordable)]
+#: Shape of ``client_request_id``: 8 to 64 letters, digits, ``_`` or ``-``.
+CLIENT_REQUEST_ID_PATTERN = r"^[A-Za-z0-9_-]{8,64}$"
 
 
 class BetLegIn(BaseModel):
@@ -72,9 +88,13 @@ def _check_leg_count(bet_type: str, count: int) -> None:
 class BetCreate(BaseModel):
     bet_type: BetType = "straight"
     legs: list[BetLegIn] = Field(min_length=1, max_length=20)
-    stake: float = Field(gt=0, le=MAX_STAKE)
+    stake: float = Field(
+        gt=0,
+        le=MAX_STAKE,
+        description="Rounded to cents. A stake that rounds to 0.00 is refused with 422.",
+    )
     sportsbook: str = Field(min_length=1, max_length=80)
-    placed_at: AwareDatetime | None = Field(default=None, description="Defaults to now.")
+    placed_at: Moment | None = Field(default=None, description="Defaults to now.")
     notes: str | None = Field(default=None, max_length=2000)
     odds: OddsValue | None = Field(
         default=None,
@@ -84,6 +104,19 @@ class BetCreate(BaseModel):
         ),
     )
     odds_format: OddsFormatIn = "american"
+    client_request_id: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=64,
+        pattern=CLIENT_REQUEST_ID_PATTERN,
+        description=(
+            "Optional id chosen by the client for this one create, 8 to 64 characters "
+            "from `A-Z a-z 0-9 _ -` (a UUID fits). Send the same id when retrying a "
+            "create whose answer was lost: the bet stored the first time is returned "
+            "with status 200 and nothing is stored twice."
+        ),
+        examples=["3f0c1f0a-6c1d-4f6e-9a55-2f1d7e0b9c11"],
+    )
 
     @model_validator(mode="after")
     def _legs_match_type(self) -> BetCreate:
@@ -103,9 +136,14 @@ class BetUpdate(BaseModel):
 
     bet_type: BetType | None = None
     legs: list[BetLegIn] | None = Field(default=None, min_length=1, max_length=20)
-    stake: float | None = Field(default=None, gt=0, le=MAX_STAKE)
+    stake: float | None = Field(
+        default=None,
+        gt=0,
+        le=MAX_STAKE,
+        description="Rounded to cents. A stake that rounds to 0.00 is refused with 422.",
+    )
     sportsbook: str | None = Field(default=None, min_length=1, max_length=80)
-    placed_at: AwareDatetime | None = None
+    placed_at: Moment | None = None
     notes: str | None = Field(default=None, max_length=2000)
     odds: OddsValue | None = None
     odds_format: OddsFormatIn = "american"
@@ -134,7 +172,7 @@ class BetSettleRequest(BaseModel):
             "derived from them (pushed and void legs drop out)."
         ),
     )
-    settled_at: AwareDatetime | None = Field(default=None, description="Defaults to now.")
+    settled_at: Moment | None = Field(default=None, description="Defaults to now.")
 
     @model_validator(mode="after")
     def _needs_something(self) -> BetSettleRequest:
@@ -222,6 +260,15 @@ class AutoSettleOut(BaseModel):
     checked: int = Field(description="Pending bets examined.")
     settled: list[BetOut]
     skipped: list[AutoSettleSkipOut]
+    has_more: bool = Field(
+        default=False,
+        description=(
+            "Present, and true, only when the call stopped at the most bets one call "
+            "settles (200) and pending bets were left unexamined: call again to "
+            "continue. Left out of the response otherwise, so read a missing value as "
+            "false."
+        ),
+    )
 
 
 class BetTotalsOut(BaseModel):

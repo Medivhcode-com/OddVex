@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { PageIntro, Prose } from "@/components/marketing/chrome";
 import { DraftBanner } from "@/components/marketing/draft-banner";
+import { HELPLINE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Responsible gambling",
-  description: "Help and practical limits if betting stops being fun. Call or text 1-800-GAMBLER.",
+  description: `Help and practical limits if betting stops being fun. Call ${HELPLINE.display}.`,
   alternates: { canonical: "/responsible-gambling" },
 };
 
@@ -13,14 +14,29 @@ export default function Page() {
     <>
       <PageIntro
         title="Responsible gambling"
-        lede="Betting should be entertainment you can afford. If it stops being that, help is free and confidential."
+        lede="Betting should be entertainment you can afford. If it stops being that, confidential help is available at any hour."
       />
       <Prose>
         <h2>Get help now</h2>
+        {/* Every helpline fact below comes from HELPLINE in lib/site.ts, which records where and when it was checked. */}
         <ul>
-          <li>Call or text <a href="tel:18004262537"><strong>1-800-GAMBLER</strong></a> (1-800-426-2537), the National Problem Gambling Helpline. It is free, confidential and open 24/7.</li>
-          <li>If you are in crisis or thinking about harming yourself, call or text <a href="tel:988"><strong>988</strong></a>.</li>
+          <li>
+            Call <a href={HELPLINE.tel}><strong>{HELPLINE.number}</strong></a> ({HELPLINE.digits}), the {HELPLINE.name}, or text{" "}
+            <a href={HELPLINE.sms}><strong>{HELPLINE.textTo}</strong></a> ({HELPLINE.textDigits}). It is confidential and answers 24 hours a day, every day.
+          </li>
+          <li>
+            The helpline is not an emergency service. In a crisis, call or text <a href={HELPLINE.crisisTel}><strong>{HELPLINE.crisisNumber}</strong></a> (the{" "}
+            {HELPLINE.crisisName}) or call <a href={HELPLINE.emergencyTel}><strong>{HELPLINE.emergencyNumber}</strong></a>.
+          </li>
+          <li>
+            Online chat is offered on the {HELPLINE.council}&rsquo;s website, <a href={HELPLINE.site}>{HELPLINE.siteLabel}</a>.
+          </li>
         </ul>
+        <p>
+          {HELPLINE.number} has been the number of the {HELPLINE.name} since {HELPLINE.inServiceSinceText}. 1-800-GAMBLER is a different line, run by the Council on Compulsive Gambling of New Jersey.
+          Some states publish their own helpline. If yours does, you can call that one instead.
+        </p>
+        <p>These details were checked on {HELPLINE.verifiedOnText} against the {HELPLINE.council}&rsquo;s own pages.</p>
         <h2>Signs it may be a problem</h2>
         <ul>
           <li>Betting more than you planned, or to win back losses.</li>
@@ -36,7 +52,7 @@ export default function Page() {
         </ul>
         <h2>What OddVex commits to</h2>
       </Prose>
-      {/* Only the commitments are draft text. The helpline information above is not hedged. */}
+      {/* Only the commitments are draft text. The helpline facts above were checked on the date the page gives. */}
       <DraftBanner className="mt-4">
         These commitments describe how the preview works today. They have not yet been reviewed by legal counsel and
         will be replaced by a final version before public launch.

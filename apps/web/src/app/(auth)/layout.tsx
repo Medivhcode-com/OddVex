@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ResponsibleGamblingLine } from "@/components/ui/helpline";
 import { Logo } from "@/components/ui/logo";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -12,8 +13,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <main id="main" className="mx-auto w-full max-w-md flex-1 px-4 pb-16 pt-6 sm:pt-12">
         {children}
       </main>
-      <footer className="px-4 py-6 text-center text-xs text-muted">
-        For adults 21+. OddVex never takes wagers. Gambling problem? Call or text 1-800-GAMBLER.
+      <footer className="px-4 py-6 text-center">
+        <ResponsibleGamblingLine />
       </footer>
     </div>
   );

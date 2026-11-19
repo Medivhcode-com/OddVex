@@ -102,6 +102,11 @@ class Bet(Base):
         ),
         Index("ix_bets_user_status", "user_id", "status"),
         Index("ix_bets_user_placed_at", "user_id", "placed_at"),
+        # One bet per user and client request id: a repeated ``POST /v1/bets`` finds the
+        # first bet instead of storing a second. A unique index, not a table constraint,
+        # so the migration can add it to an existing SQLite table without rebuilding it.
+        # Rows without an id (NULL) never collide.
+        Index("uq_bets_user_client_request", "user_id", "client_request_id", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -136,6 +141,9 @@ class Bet(Base):
     )
     external_provider: Mapped[str | None] = mapped_column(String(40))
     external_bet_id: Mapped[str | None] = mapped_column(String(120))
+    #: Chosen by the client for one ``POST /v1/bets`` and sent again when it retries.
+    #: Null for imported bets and for bets created without one. Not the sync key above.
+    client_request_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 

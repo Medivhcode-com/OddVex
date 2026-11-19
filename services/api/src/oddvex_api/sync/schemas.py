@@ -37,7 +37,16 @@ class SyncRunOut(BaseModel):
     imported_count: int
     duplicate_count: int = Field(description="Bets skipped because they were already imported.")
     retryable: bool = Field(description="For failed runs: whether trying again may succeed.")
-    error_message: str | None = None
+    error_message: str | None = Field(
+        default=None,
+        description=(
+            "For a failed run: what went wrong. For a succeeded run that left bets out: "
+            "how many and why, for example because the account already held the most bets "
+            "it can (`ODDVEX_MAX_BETS_PER_USER`) or because the provider sent a price, "
+            "stake or amount that cannot be recorded. The number left out is also "
+            "`fetched_count - imported_count - duplicate_count`. Null otherwise."
+        ),
+    )
     started_at: datetime
     finished_at: datetime | None = None
 

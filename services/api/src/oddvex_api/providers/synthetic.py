@@ -8,9 +8,22 @@ exist. Output is a pure function of ``(seed, current time)``:
 * every random-looking number is a hash of the seed and a stable key, so two
   processes with the same seed and clock return identical data.
 
-The pricing model is intentionally simple and internally consistent (a normal
-model for margin and total). Book prices are the model's fair probabilities
-plus a margin and small noise, so no book or prop has a real edge.
+The scoring model is intentionally simple and is the only source of both the
+results and the prices. Each side scores as a Poisson process: its scoring
+plays arrive at a constant rate through the game, independently of the other
+side (one point per play, except football, where a play is worth 3 or 7). The
+rates are fixed at the start from the two teams' ratings; before the start the
+quoted expectation drifts around them and reaches them at the start, so the
+closing price is the model's own probability. A game level after regulation in
+a league without draws goes to the next score, which each side takes with a
+chance proportional to its rate.
+
+A fair price is the exact probability of the final result under that model,
+given the score so far and the time left. Final scores are drawn from the same
+model, so over many games every side of every market wins as often as its fair
+price says. Book prices are the fair probabilities plus a margin and small
+noise, so no book or prop has a real edge. A book stops quoting a market
+(``suspended``) once one outcome is more than 98% likely.
 """
 
 from __future__ import annotations
@@ -18,8 +31,9 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+from bisect import bisect_right
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from statistics import NormalDist
 
@@ -42,12 +56,21 @@ from .base import (
 PROVIDER_NAME = "synthetic"
 _NORMAL = NormalDist()
 
+#: Fair probabilities of one market: (outcome key, display name, line, probability).
+type _Fair = list[tuple[str, str, float | None, float]]
+
 #: Days of schedule exposed by ``list_events`` relative to today (UTC).
 WINDOW_DAYS_BACK = 3
 WINDOW_DAYS_AHEAD = 4
 GAMES_PER_DAY = 4
 GAME_LOG_GAMES = 40
 HISTORY_HOURS = 48
+
+#: A book suspends a market once one outcome's fair probability passes this. Above it the
+#: price grid (which ends near -6600) could no longer keep the price at or below fair.
+_DECIDED_PROBABILITY = 0.98
+#: Probability mass a truncated score distribution may leave out.
+_PMF_TAIL = 1e-13
 
 
 @dataclass(frozen=True)
@@ -66,19 +89,28 @@ class _LeagueCfg:
     sport: str
     index: int
     duration_hours: float
-    sigma_margin: float
+    #: How far the quoted expected margin drifts before the start, in points.
+    margin_drift: float
     home_advantage: float
     rating_sd: float
     total_mean: float
     total_team_sd: float
-    sigma_total: float
+    #: How far the quoted expected total drifts before the start, in points.
+    total_drift: float
     has_draw: bool = False
     has_spread: bool = True
     fixed_spread: float | None = None
     #: Size of the occasional per-book line offset (0 = books share the line).
     line_step: float = 0.0
-    score_model: str = "events"
+    #: Kinds of scoring play: (points, share of all scoring plays).
+    scoring: tuple[tuple[int, float], ...] = ((1, 1.0),)
+    #: Points the next score is worth when a game without draws is level after regulation.
+    overtime_points: int = 1
     roster: tuple[tuple[str, dict[str, _PropSpec]], ...] = ()
+
+    @property
+    def points_per_play(self) -> float:
+        return sum(points * share for points, share in self.scoring)
 
     @property
     def markets(self) -> list[str]:
@@ -105,14 +137,13 @@ _LEAGUES: tuple[_LeagueCfg, ...] = (
         sport="basketball",
         index=0,
         duration_hours=2.5,
-        sigma_margin=12.0,
+        margin_drift=0.6,
         home_advantage=2.5,
         rating_sd=4.0,
         total_mean=224.0,
         total_team_sd=4.0,
-        sigma_total=18.0,
+        total_drift=0.72,
         line_step=1.0,
-        score_model="proportional",
         roster=(
             (
                 "G",
@@ -158,14 +189,15 @@ _LEAGUES: tuple[_LeagueCfg, ...] = (
         sport="american_football",
         index=1,
         duration_hours=3.0,
-        sigma_margin=13.5,
+        margin_drift=0.675,
         home_advantage=1.8,
         rating_sd=4.0,
         total_mean=44.5,
         total_team_sd=2.0,
-        sigma_total=13.0,
+        total_drift=0.52,
         line_step=1.0,
-        score_model="proportional",
+        scoring=((3, 0.4), (7, 0.6)),
+        overtime_points=3,
         roster=(
             ("QB", {"passing_yards": _p(245.0, 0.1, 55.0), "rushing_yards": _p(18.0, 0.4, 14.0)}),
             ("RB", {"rushing_yards": _p(72.0, 0.18, 28.0), "receptions": _p(2.8, 0.2, 1.5)}),
@@ -179,12 +211,12 @@ _LEAGUES: tuple[_LeagueCfg, ...] = (
         sport="baseball",
         index=2,
         duration_hours=3.0,
-        sigma_margin=4.2,
+        margin_drift=0.21,
         home_advantage=0.15,
         rating_sd=0.6,
         total_mean=8.6,
         total_team_sd=0.5,
-        sigma_total=4.2,
+        total_drift=0.168,
         fixed_spread=1.5,
         roster=(
             ("OF", {"hits": _p(1.05, 0.12, 0.85)}),
@@ -199,12 +231,12 @@ _LEAGUES: tuple[_LeagueCfg, ...] = (
         sport="ice_hockey",
         index=3,
         duration_hours=2.5,
-        sigma_margin=2.4,
+        margin_drift=0.12,
         home_advantage=0.15,
         rating_sd=0.35,
         total_mean=6.1,
         total_team_sd=0.3,
-        sigma_total=2.3,
+        total_drift=0.092,
         fixed_spread=1.5,
         roster=(
             ("C", {"shots": _p(3.1, 0.14, 1.5), "points": _p(0.95, 0.16, 0.85)}),
@@ -219,12 +251,12 @@ _LEAGUES: tuple[_LeagueCfg, ...] = (
         sport="soccer",
         index=4,
         duration_hours=2.0,
-        sigma_margin=1.7,
+        margin_drift=0.085,
         home_advantage=0.3,
         rating_sd=0.5,
         total_mean=2.7,
         total_team_sd=0.2,
-        sigma_total=1.6,
+        total_drift=0.064,
         has_draw=True,
         has_spread=False,
         roster=(
@@ -327,6 +359,16 @@ _BOOKS: tuple[_Book, ...] = (
 
 
 @dataclass
+class _Timeline:
+    """Every scoring play of regulation, in order, with the score after each one."""
+
+    #: Played fraction of the game (0 to 1) at which each play happens.
+    times: list[float]
+    home_after: list[int]
+    away_after: list[int]
+
+
+@dataclass
 class _EventCore:
     id: str
     cfg: _LeagueCfg
@@ -336,12 +378,25 @@ class _EventCore:
     away: Team
     start: datetime
     end: datetime
+    #: Expected margin and total from the ratings, before the pre-start drift is added.
     margin_pre: float
     total_pre: float
+    #: Points each side is expected to score in regulation: the rates the game is played at
+    #: and the expectation the closing price quotes.
+    home_mean: float
+    away_mean: float
+    #: Scoring plays of each side in regulation, per kind of play (same order as
+    #: ``cfg.scoring``).
+    home_plays: tuple[int, ...]
+    away_plays: tuple[int, ...]
     final_home: int
     final_away: int
-    home_times: list[float] = field(default_factory=list)
-    away_times: list[float] = field(default_factory=list)
+    timeline: _Timeline | None = None
+
+    @property
+    def home_share(self) -> float:
+        """Chance that the home side gets the next score."""
+        return self.home_mean / (self.home_mean + self.away_mean)
 
 
 @dataclass(frozen=True)
@@ -350,10 +405,30 @@ class _State:
     fraction: float
     home_score: int
     away_score: int
-    margin: float
-    sigma_margin: float
-    total: float
-    sigma_total: float
+    #: Points each side is still expected to score in regulation.
+    home_mean: float
+    away_mean: float
+    #: When the score last changed (the start counts). Only set while the game is live.
+    score_updated_at: datetime | None = None
+
+    @property
+    def margin(self) -> float:
+        """Expected margin at the end of regulation, home minus away."""
+        return self.home_score - self.away_score + self.home_mean - self.away_mean
+
+    @property
+    def total(self) -> float:
+        """Expected total at the end of regulation."""
+        return self.home_score + self.away_score + self.home_mean + self.away_mean
+
+
+@dataclass(frozen=True)
+class _Priced:
+    """One book's prices for one market at one moment."""
+
+    outcomes: list[OddsOutcome]
+    #: One outcome was more than ``_DECIDED_PROBABILITY`` likely.
+    decided: bool
 
 
 def _utc_now() -> datetime:
@@ -363,6 +438,152 @@ def _utc_now() -> datetime:
 def _half_line(value: float) -> float:
     """Nearest line ending in .5 (so synthetic spreads and totals never push)."""
     return math.floor(value) + 0.5
+
+
+def _poisson_pmf(mean: float) -> list[float]:
+    """P(N = 0), P(N = 1), ... for a Poisson count, cut once the rest is negligible.
+
+    The terms fall faster than geometrically past the mean, so stopping at the first term
+    below ``_PMF_TAIL`` leaves out about that much. The means used here are at most a few
+    hundred, far from where ``exp(-mean)`` underflows.
+    """
+    if mean <= 0:
+        return [1.0]
+    probability = math.exp(-mean)
+    pmf = [probability]
+    count = 0
+    while count < mean or probability > _PMF_TAIL:
+        count += 1
+        probability *= mean / count
+        pmf.append(probability)
+    return pmf
+
+
+def _points_pmf(cfg: _LeagueCfg, mean_points: float) -> list[float]:
+    """Distribution of the points one side adds when ``mean_points`` are expected."""
+    plays = mean_points / cfg.points_per_play
+    pmf = [1.0]
+    for points, share in cfg.scoring:
+        counts = _poisson_pmf(plays * share)
+        if points == 1 and len(pmf) == 1:
+            pmf = counts
+            continue
+        combined = [0.0] * (len(pmf) + points * (len(counts) - 1))
+        for have, p in enumerate(pmf):
+            if p:
+                for count, q in enumerate(counts):
+                    combined[have + points * count] += p * q
+        pmf = combined
+    return pmf
+
+
+def _at_least(pmf: list[float]) -> list[float]:
+    """``result[n]`` = P(X >= n) for n = 0 .. len(pmf); the last entry is 0."""
+    tail = [0.0] * (len(pmf) + 1)
+    running = 0.0
+    for n in range(len(pmf) - 1, -1, -1):
+        running += pmf[n]
+        tail[n] = running
+    tail[0] = 1.0
+    return tail
+
+
+class _Outlook:
+    """Exact distribution of the final score, given the score so far and what is expected.
+
+    ``home_pmf`` and ``away_pmf`` are the distributions of the points each side still adds
+    in regulation. With ``overtime_points`` set, a game level after regulation is decided
+    by one more score of that size, taken by the home side with chance ``home_share``.
+    """
+
+    def __init__(
+        self,
+        home_score: int,
+        away_score: int,
+        home_pmf: list[float],
+        away_pmf: list[float],
+        home_share: float,
+        overtime_points: int | None,
+    ) -> None:
+        self._lead = home_score - away_score
+        self._points = home_score + away_score
+        self._home = home_pmf
+        self._away = away_pmf
+        self._home_at_least = _at_least(home_pmf)
+        self._away_at_least = _at_least(away_pmf)
+        self._home_share = home_share
+        self._overtime = overtime_points
+        self.level = self._margin_is(0)
+
+    def _margin_at_least(self, margin: int) -> float:
+        """P(regulation margin >= ``margin``), home minus away."""
+        need = margin - self._lead  # home must add at least ``need`` more than away adds
+        tail = self._home_at_least
+        size = len(self._home)
+        total = 0.0
+        for added, p in enumerate(self._away):
+            index = need + added
+            total += p if index <= 0 else p * tail[index] if index <= size else 0.0
+        return total
+
+    def _margin_is(self, margin: int) -> float:
+        need = margin - self._lead
+        size = len(self._home)
+        total = 0.0
+        for added, p in enumerate(self._away):
+            index = need + added
+            if 0 <= index < size:
+                total += p * self._home[index]
+        return total
+
+    def _total_at_least(self, points: int) -> float:
+        need = points - self._points
+        tail = self._away_at_least
+        size = len(self._away)
+        total = 0.0
+        for added, p in enumerate(self._home):
+            index = need - added
+            total += p if index <= 0 else p * tail[index] if index <= size else 0.0
+        return total
+
+    def _level_with_total_between(self, low: int, high: int) -> float:
+        """P(level after regulation with ``low`` <= regulation total <= ``high``)."""
+        size = len(self._away)
+        total = 0.0
+        for added, p in enumerate(self._home):
+            index = added + self._lead  # what away must add to be level
+            if 0 <= index < size and low <= self._points + added + index <= high:
+                total += p * self._away[index]
+        return total
+
+    def home_win(self) -> float:
+        ahead = self._margin_at_least(1)
+        return ahead if self._overtime is None else ahead + self.level * self._home_share
+
+    def draw(self) -> float:
+        return self.level if self._overtime is None else 0.0
+
+    def home_covers(self, home_line: float) -> float:
+        """P(final margin + ``home_line`` > 0) for a line ending in .5."""
+        need = math.floor(-home_line) + 1  # smallest final margin that covers
+        covered = self._margin_at_least(need)
+        if self._overtime is None:
+            return covered
+        if need <= 0:
+            covered -= self.level  # a level game is not final: the next score decides it
+        if self._overtime >= need:
+            covered += self.level * self._home_share
+        if -self._overtime >= need:
+            covered += self.level * (1 - self._home_share)
+        return covered
+
+    def over(self, line: float) -> float:
+        """P(final total > ``line``) for a line ending in .5."""
+        need = math.floor(line) + 1
+        above = self._total_at_least(need)
+        if self._overtime is None:
+            return above
+        return above + self._level_with_total_between(need - self._overtime, need - 1)
 
 
 def _american_from_implied(implied: float) -> int:
@@ -396,6 +617,9 @@ class SyntheticProvider:
         self._player_specs: dict[str, dict[str, _PropSpec]] = {}
         self._core_cache: dict[str, _EventCore] = {}
         self._matchup_cache: dict[tuple[str, int], list[tuple[Team, Team]]] = {}
+        #: Fair probabilities already worked out, keyed on everything they depend on:
+        #: (event id, market, the book's line offset, score, expected points still to come).
+        self._fair_cache: dict[tuple[str, str, float, int, int, float, float], _Fair] = {}
         self._build_static()
 
     # ------------------------------------------------------------------ utils
@@ -552,15 +776,18 @@ class SyntheticProvider:
         total_pre = cfg.total_mean + cfg.total_team_sd * (
             self._z("pace", home.id) + self._z("pace", away.id)
         )
-        margin = round(margin_pre + cfg.sigma_margin * self._z("fm", event_id))
-        total = max(0, round(total_pre + cfg.sigma_total * self._z("ft", event_id)))
-        total = max(total, abs(margin))
-        if (total + margin) % 2:
-            total += 1
-        final_home = (total + margin) // 2
-        final_away = total - final_home
+        # The game is played at the expectation quoted at the start (the closing price).
+        home_mean, away_mean = self._expected_points(cfg, event_id, margin_pre, total_pre, 0.0)
+        home_plays = self._play_counts(cfg, event_id, "h", home_mean)
+        away_plays = self._play_counts(cfg, event_id, "a", away_mean)
+        final_home = sum(n * points for n, (points, _) in zip(home_plays, cfg.scoring, strict=True))
+        final_away = sum(n * points for n, (points, _) in zip(away_plays, cfg.scoring, strict=True))
         if not cfg.has_draw and final_home == final_away:
-            final_home += 1
+            # Level after regulation: the next score wins it.
+            if self._u("ot", event_id) < home_mean / (home_mean + away_mean):
+                final_home += cfg.overtime_points
+            else:
+                final_away += cfg.overtime_points
         core = _EventCore(
             id=event_id,
             cfg=cfg,
@@ -572,16 +799,81 @@ class SyntheticProvider:
             end=end,
             margin_pre=margin_pre,
             total_pre=total_pre,
+            home_mean=home_mean,
+            away_mean=away_mean,
+            home_plays=home_plays,
+            away_plays=away_plays,
             final_home=final_home,
             final_away=final_away,
         )
-        if cfg.score_model == "events":
-            core.home_times = sorted(self._u("gt", event_id, "h", k) for k in range(final_home))
-            core.away_times = sorted(self._u("gt", event_id, "a", k) for k in range(final_away))
         if len(self._core_cache) > 5000:
             self._core_cache.clear()
         self._core_cache[event_id] = core
         return core
+
+    def _expected_points(
+        self,
+        cfg: _LeagueCfg,
+        event_id: str,
+        margin_pre: float,
+        total_pre: float,
+        hours_to_start: float,
+    ) -> tuple[float, float]:
+        """Expected regulation points (home, away) as quoted ``hours_to_start`` before the start.
+
+        The quoted margin and total drift on two slow waves; the values at the start are the
+        ones the game is played at.
+        """
+        phase_a = 2 * math.pi * self._u("ph1", event_id)
+        phase_b = 2 * math.pi * self._u("ph2", event_id)
+        wave = math.sin(2 * math.pi * hours_to_start / 31 + phase_a) + 0.5 * math.sin(
+            2 * math.pi * hours_to_start / 11 + phase_b
+        )
+        margin = margin_pre + cfg.margin_drift * wave
+        total = total_pre + cfg.total_drift * math.cos(phase_a + wave)
+        floor = 0.1 * cfg.points_per_play
+        return max((total + margin) / 2, floor), max((total - margin) / 2, floor)
+
+    def _play_counts(
+        self, cfg: _LeagueCfg, event_id: str, side: str, mean_points: float
+    ) -> tuple[int, ...]:
+        """Scoring plays of one side in regulation, per kind of play: Poisson draws."""
+        plays = mean_points / cfg.points_per_play
+        counts: list[int] = []
+        for points, share in cfg.scoring:
+            pmf = _poisson_pmf(plays * share)
+            pick = self._u("plays", event_id, side, points)
+            count = 0
+            covered = pmf[0]
+            while covered <= pick and count < len(pmf) - 1:
+                count += 1
+                covered += pmf[count]
+            counts.append(count)
+        return tuple(counts)
+
+    def _timeline(self, core: _EventCore) -> _Timeline:
+        """When each scoring play happens. Given their number, the plays of a Poisson
+        process fall independently and uniformly over the game."""
+        if core.timeline is None:
+            plays: list[tuple[float, int, int]] = []
+            for side, counts in (("h", core.home_plays), ("a", core.away_plays)):
+                for count, (points, _) in zip(counts, core.cfg.scoring, strict=True):
+                    for k in range(count):
+                        at = self._u("gt", core.id, side, points, k)
+                        plays.append(
+                            (at, points if side == "h" else 0, points if side == "a" else 0)
+                        )
+            plays.sort()
+            home = away = 0
+            timeline = _Timeline([], [], [])
+            for at, home_points, away_points in plays:
+                home += home_points
+                away += away_points
+                timeline.times.append(at)
+                timeline.home_after.append(home)
+                timeline.away_after.append(away)
+            core.timeline = timeline
+        return core.timeline
 
     def _core_by_id(self, event_id: str) -> _EventCore | None:
         parts = event_id.split("_")
@@ -599,44 +891,34 @@ class SyntheticProvider:
         return self._core(self._cfg[parts[1]], day, slot)
 
     def _state(self, core: _EventCore, at: datetime) -> _State:
-        cfg = core.cfg
-        hours_to_start = (core.start - at).total_seconds() / 3600
         if at < core.start:
-            phase_a = 2 * math.pi * self._u("ph1", core.id)
-            phase_b = 2 * math.pi * self._u("ph2", core.id)
-            wave = math.sin(2 * math.pi * hours_to_start / 31 + phase_a) + 0.5 * math.sin(
-                2 * math.pi * hours_to_start / 11 + phase_b
+            # The quoted expectation moves once a minute; in the last minute it is the one
+            # the game is played at.
+            minutes_to_start = (core.start - at).total_seconds() // 60
+            home_mean, away_mean = self._expected_points(
+                core.cfg, core.id, core.margin_pre, core.total_pre, minutes_to_start / 60
             )
-            return _State(
-                status="upcoming",
-                fraction=0.0,
-                home_score=0,
-                away_score=0,
-                margin=core.margin_pre + 0.05 * cfg.sigma_margin * wave,
-                sigma_margin=cfg.sigma_margin,
-                total=core.total_pre + 0.04 * cfg.sigma_total * math.cos(phase_a + wave),
-                sigma_total=cfg.sigma_total,
-            )
+            return _State("upcoming", 0.0, 0, 0, home_mean, away_mean)
         if at >= core.end:
-            return _State("final", 1.0, core.final_home, core.final_away, 0.0, 1.0, 0.0, 1.0)
-        fraction = (at - core.start).total_seconds() / (core.end - core.start).total_seconds()
-        if cfg.score_model == "events":
-            home_score = sum(1 for t in core.home_times if t <= fraction)
-            away_score = sum(1 for t in core.away_times if t <= fraction)
-        else:
-            home_score = math.floor(core.final_home * fraction)
-            away_score = math.floor(core.final_away * fraction**1.04)
+            return _State("final", 1.0, core.final_home, core.final_away, 0.0, 0.0)
+        length = core.end - core.start
+        fraction = (at - core.start).total_seconds() / length.total_seconds()
+        timeline = self._timeline(core)
+        played = bisect_right(timeline.times, fraction)
         remaining = 1.0 - fraction
-        shrink = max(math.sqrt(remaining), 0.08)
         return _State(
             status="live",
             fraction=fraction,
-            home_score=home_score,
-            away_score=away_score,
-            margin=(home_score - away_score) + core.margin_pre * remaining,
-            sigma_margin=cfg.sigma_margin * shrink,
-            total=(home_score + away_score) + core.total_pre * remaining,
-            sigma_total=cfg.sigma_total * shrink,
+            home_score=timeline.home_after[played - 1] if played else 0,
+            away_score=timeline.away_after[played - 1] if played else 0,
+            # A Poisson process has no memory: what is still to come does not depend on
+            # the score so far.
+            home_mean=core.home_mean * remaining,
+            away_mean=core.away_mean * remaining,
+            # ``min``: rounding to a whole microsecond must not put the change after ``at``.
+            score_updated_at=min(at, core.start + length * timeline.times[played - 1])
+            if played
+            else core.start,
         )
 
     @staticmethod
@@ -677,6 +959,7 @@ class SyntheticProvider:
             period_text=self._period_text(core.cfg, state.fraction)
             if state.status == "live"
             else ("Final" if state.status == "final" else None),
+            score_updated_at=state.score_updated_at,
             markets=core.cfg.markets,
             **self._prov(core.id, now),
         )
@@ -737,45 +1020,72 @@ class SyntheticProvider:
         return None
 
     # ------------------------------------------------------------------- odds
-    def _fair(
-        self, core: _EventCore, market: str, book: _Book, state: _State
-    ) -> list[tuple[str, str, float | None, float]]:
+    def _fair(self, core: _EventCore, market: str, book: _Book, state: _State) -> _Fair:
+        """Fair probability of each outcome: exact under the scoring model, given ``state``."""
         cfg = core.cfg
         offset = 0.0
         if cfg.line_step:
             pick = self._u("lineoff", core.id, market, book.key)
             offset = -cfg.line_step if pick < 0.15 else cfg.line_step if pick > 0.85 else 0.0
+        key = (
+            core.id,
+            market,
+            offset,
+            state.home_score,
+            state.away_score,
+            state.home_mean,
+            state.away_mean,
+        )
+        hit = self._fair_cache.get(key)
+        if hit is None:
+            hit = self._fair_at(core, market, offset, state)
+            if len(self._fair_cache) > 20000:
+                self._fair_cache.clear()
+            self._fair_cache[key] = hit
+        return hit
+
+    def _fair_at(self, core: _EventCore, market: str, offset: float, state: _State) -> _Fair:
+        cfg = core.cfg
+        outlook = _Outlook(
+            state.home_score,
+            state.away_score,
+            _points_pmf(cfg, state.home_mean),
+            _points_pmf(cfg, state.away_mean),
+            core.home_share,
+            None if cfg.has_draw else cfg.overtime_points,
+        )
         if market == "moneyline":
+            p_home = min(max(outlook.home_win(), 0.0), 1.0)
             if cfg.has_draw:
-                p_away = _NORMAL.cdf((-0.5 - state.margin) / state.sigma_margin)
-                p_home = 1 - _NORMAL.cdf((0.5 - state.margin) / state.sigma_margin)
+                p_draw = min(outlook.draw(), 1.0 - p_home)
                 return [
                     ("home", core.home.name, None, p_home),
-                    ("draw", "Draw", None, max(1 - p_home - p_away, 0.0)),
-                    ("away", core.away.name, None, p_away),
+                    ("draw", "Draw", None, p_draw),
+                    ("away", core.away.name, None, max(1.0 - p_home - p_draw, 0.0)),
                 ]
-            p_home = _NORMAL.cdf(state.margin / state.sigma_margin)
             return [
                 ("home", core.home.name, None, p_home),
                 ("away", core.away.name, None, 1 - p_home),
             ]
         if market == "spread":
             if cfg.fixed_spread is not None:
-                home_line = -cfg.fixed_spread if core.margin_pre >= 0 else cfg.fixed_spread
+                favoured = core.home_mean >= core.away_mean
+                home_line = -cfg.fixed_spread if favoured else cfg.fixed_spread
             else:
                 home_line = _half_line(-state.margin + offset)
-            p_home = _NORMAL.cdf((state.margin + home_line) / state.sigma_margin)
+            p_home = min(max(outlook.home_covers(home_line), 0.0), 1.0)
             return [
                 ("home", core.home.name, home_line, p_home),
                 ("away", core.away.name, -home_line, 1 - p_home),
             ]
-        line = max(0.5, _half_line(state.total + offset))
-        p_over = _NORMAL.cdf((state.total - line) / state.sigma_total)
+        # A total is never quoted below what has already been scored.
+        line = max(state.home_score + state.away_score + 0.5, _half_line(state.total + offset))
+        p_over = min(max(outlook.over(line), 0.0), 1.0)
         return [("over", "Over", line, p_over), ("under", "Under", line, 1 - p_over)]
 
     def _prices(
         self,
-        fair: list[tuple[str, str, float | None, float]],
+        fair: _Fair,
         book: _Book,
         scope: str,
         market: str,
@@ -803,10 +1113,17 @@ class SyntheticProvider:
             for (key, name, line, _), q in zip(fair, noisy, strict=True)
         ]
 
-    def _quote(self, core: _EventCore, market: str, book: _Book, at: datetime) -> list[OddsOutcome]:
-        state = self._state(core, at)
+    def _priced(self, core: _EventCore, market: str, book: _Book, at: datetime) -> _Priced:
+        """The book's prices at ``at`` and whether the market was already decided then."""
+        fair = self._fair(core, market, book, self._state(core, at))
         bucket = int(at.timestamp() // book.update_interval)
-        return self._prices(self._fair(core, market, book, state), book, core.id, market, bucket)
+        return _Priced(
+            outcomes=self._prices(fair, book, core.id, market, bucket),
+            decided=max(p for *_, p in fair) > _DECIDED_PROBABILITY,
+        )
+
+    def _quote(self, core: _EventCore, market: str, book: _Book, at: datetime) -> list[OddsOutcome]:
+        return self._priced(core, market, book, at).outcomes
 
     def _offer_status(
         self, scope: str, market: str, book: _Book, status: str, now: datetime
@@ -830,12 +1147,21 @@ class SyntheticProvider:
             return core.start
         jitter = self._u("age", scope, market, book.key, int(now.timestamp() // 15))
         if book.stale:
-            age = 1500 + 1500 * jitter
-        elif now >= core.start:
-            age = 5 + 70 * jitter
-        else:
-            age = 20 + 400 * jitter
-        return now - timedelta(seconds=age)
+            return now - timedelta(seconds=1500 + 1500 * jitter)
+        if now < core.start:
+            return now - timedelta(seconds=20 + 400 * jitter)
+        # In play a book's pricing model requotes every few seconds, so an in-play price
+        # is at most a few seconds behind the game.
+        lag = timedelta(seconds=0.5 + 2.5 * jitter)
+        changed = self._state(core, now).score_updated_at or core.start
+        # After the score changes (the start counts) a book needs a moment to requote.
+        # Until it has, its quote is its last one from before the change.
+        reaction = timedelta(
+            seconds=1 + 5 * self._u("react", scope, market, book.key, changed.timestamp())
+        )
+        if now < changed + reaction:
+            return changed - lag
+        return max(now - lag, changed + reaction)
 
     def get_odds(self, event_id: str, market: str) -> list[OddsSnapshot]:
         core = self._core_by_id(event_id)
@@ -862,6 +1188,10 @@ class SyntheticProvider:
                 continue
             updated = self._last_updated(core.id, market, book, core, now)
             quote_at = core.start - timedelta(seconds=1) if status == "closed" else updated
+            priced = self._priced(core, market, book, quote_at)
+            if status == "open" and priced.decided:
+                # The book has taken the market down: the result is all but settled.
+                status = "suspended"
             snapshots.append(
                 OddsSnapshot(
                     event_id=core.id,
@@ -869,7 +1199,7 @@ class SyntheticProvider:
                     sportsbook_id=book.key,
                     status=status,  # type: ignore[arg-type]
                     last_updated=updated,
-                    outcomes=self._quote(core, market, book, quote_at),
+                    outcomes=priced.outcomes,
                     **self._prov(record_id, now),
                 )
             )

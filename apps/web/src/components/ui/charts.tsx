@@ -43,22 +43,36 @@ export function Sparkline({
   );
 }
 
-export type Series = { name: string; points: { t: number; v: number }[]; emphasis?: boolean };
+/** `label` is the text shown for a point: in its tooltip and, for the latest point, next to the series name. */
+export type Series = { name: string; points: { t: number; v: number; label?: string }[]; emphasis?: boolean };
 
 const SERIES_DASH = ["", "5 3", "2 3", "8 3 2 3", "1 4", "10 4"];
 
-/** Multi-series step chart for line movement. Series are told apart by dash pattern and a legend, not color alone. */
+/** The label of a series' most recent point, if its points carry labels. */
+function latestLabel(series: Series): string | undefined {
+  return series.points.reduce<Series["points"][number] | undefined>((latest, p) => (!latest || p.t >= latest.t ? p : latest), undefined)?.label;
+}
+
+/**
+ * Multi-series step chart for line movement. Series are told apart by dash pattern and a legend, not color alone.
+ *
+ * The vertical axis is linear in `v`, so `v` must be a quantity that is meaningful on a straight
+ * scale (a probability, a line in points). Text that is not on such a scale, an American price
+ * for example, goes in each point's `label`. `axisTitle` says in words what the axis shows.
+ */
 export function LineHistoryChart({
   series,
   formatValue,
   formatTime,
   summary,
+  axisTitle,
   height = 220,
 }: {
   series: Series[];
   formatValue: (v: number) => string;
   formatTime: (t: number) => string;
   summary: string;
+  axisTitle?: string;
   height?: number;
 }) {
   const all = series.flatMap((s) => s.points);
@@ -80,14 +94,16 @@ export function LineHistoryChart({
   const y = (v: number) => padT + (1 - (v - v0) / (v1 - v0)) * (height - padT - padB);
   const ticks = [0, 0.5, 1].map((f) => v0 + (v1 - v0) * f);
   const timeTicks = [0, 0.5, 1].map((f) => t0 + (t1 - t0) * f);
+  const stroke = (s: Series, i: number) => (s.emphasis ? "var(--ov-accent)" : i % 2 ? "var(--ov-second)" : "var(--ov-muted)");
 
   return (
     <figure>
+      {axisTitle ? <p className="mb-2 px-1 text-xs text-muted">{axisTitle}</p> : null}
       <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full" role="img" aria-label={summary}>
         {ticks.map((tick) => (
           <g key={tick}>
             <line x1={padL} x2={width - padR} y1={y(tick)} y2={y(tick)} stroke="var(--ov-grid)" strokeWidth="1" />
-            <text x={padL - 8} y={y(tick) + 4} textAnchor="end" fontSize="11" fill="var(--ov-muted)" className="num">
+            <text x={padL - 8} y={y(tick) + 4} textAnchor="end" fontSize="11" fill="var(--ov-muted)" className="num" data-axis="value">
               {formatValue(tick)}
             </text>
           </g>
@@ -114,13 +130,25 @@ export function LineHistoryChart({
               key={s.name}
               d={`${d} H${x(t1).toFixed(1)}`}
               fill="none"
-              stroke={s.emphasis ? "var(--ov-accent)" : i % 2 ? "var(--ov-second)" : "var(--ov-muted)"}
+              stroke={stroke(s, i)}
               strokeWidth={s.emphasis ? 2.25 : 1.4}
               strokeDasharray={s.emphasis ? "" : SERIES_DASH[i % SERIES_DASH.length]}
               strokeLinejoin="round"
             />
           );
         })}
+        {/* A mark on every labelled point. Hovering it shows the label; the wider clear circle is the hover target. */}
+        {series.map((s, i) =>
+          s.points.map((p) =>
+            p.label ? (
+              <g key={`${s.name}-${p.t}`}>
+                <title>{`${s.name}: ${p.label}, ${formatTime(p.t)}`}</title>
+                <circle cx={x(p.t)} cy={y(p.v)} r="7" fill="transparent" pointerEvents="all" />
+                <circle cx={x(p.t)} cy={y(p.v)} r={s.emphasis ? 2.75 : 2.25} fill={stroke(s, i)} />
+              </g>
+            ) : null,
+          ),
+        )}
       </svg>
       <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted">
         {series.map((s, i) => (
@@ -131,12 +159,13 @@ export function LineHistoryChart({
                 x2="22"
                 y1="3"
                 y2="3"
-                stroke={s.emphasis ? "var(--ov-accent)" : i % 2 ? "var(--ov-second)" : "var(--ov-muted)"}
+                stroke={stroke(s, i)}
                 strokeWidth={s.emphasis ? 2.25 : 1.4}
                 strokeDasharray={s.emphasis ? "" : SERIES_DASH[i % SERIES_DASH.length]}
               />
             </svg>
-            {s.name}
+            <span>{s.name}</span>
+            {latestLabel(s) ? <span className="num text-ink">{latestLabel(s)}</span> : null}
           </span>
         ))}
       </figcaption>

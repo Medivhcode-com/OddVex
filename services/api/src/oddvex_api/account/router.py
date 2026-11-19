@@ -3,28 +3,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from sqlalchemy import select
+from fastapi.responses import StreamingResponse
 
-from ..alerts import service as alerts_service
-from ..auth.schemas import UserOut
-from ..bets import service as bets_service
-from ..community import service as community_service
-from ..db import (
-    AlertRule,
-    AuditLog,
-    Bet,
-    Notification,
-    SyncConnection,
-    SyncImportRun,
-    WatchlistItem,
-    utcnow,
-)
-from ..deps import BoardDep, DataRightsUserDep, DbDep, write_audit
-from ..errors import AUTH_ERROR_RESPONSES
-from ..notifications import service as notifications_service
-from ..sync import service as sync_service
-from ..watchlist import service as watchlist_service
-from .schemas import AccountExportOut, ExportAuditEntryOut
+from ..deps import DataRightsUserDep, DbDep, write_audit
+from ..errors import AUTH_ERROR_RESPONSES, RATE_LIMIT_RESPONSE
+from ..ratelimit import enforce_user_limit, take_user_stream_slot
+from . import export
+from .schemas import AccountExportOut
 
 router = APIRouter(tags=["auth"])
 
@@ -40,85 +25,36 @@ router = APIRouter(tags=["auth"])
         "your own audit entries, plus your community data (profile, picks, comments, who "
         "you follow, likes, blocks and reports you made). It never contains the password "
         "hash. The export itself is recorded in the audit log. A suspended account can "
-        "still call this route."
+        "still call this route.\n\n"
+        "The document is streamed: bets, import runs and audit entries are read in batches "
+        "and sent as they are read, so the response has no `Content-Length`. It is still one JSON "
+        "document of this schema; read it to the end and parse it once. Limited per user "
+        "(`ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`, default 10 an hour), and it counts as one "
+        "of the streamed responses an account can have in progress at the same moment "
+        "(`ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE`, default 8, shared with the bet list): "
+        "over either limit this answers 429 `rate_limited` with `Retry-After`."
     ),
-    responses=AUTH_ERROR_RESPONSES,
+    responses={**AUTH_ERROR_RESPONSES, **RATE_LIMIT_RESPONSE},
 )
-def export_my_data(
-    user: DataRightsUserDep, db: DbDep, board: BoardDep, request: Request
-) -> AccountExportOut:
-    write_audit(
-        db,
-        request,
-        "account.export",
-        user_id=user.id,
-        entity_type="user",
-        entity_id=user.id,
-        details={"account_status": "suspended"} if user.status == "suspended" else None,
-    )
-    db.commit()
-
-    bets = db.scalars(select(Bet).where(Bet.user_id == user.id).order_by(Bet.placed_at, Bet.id))
-    watchlist = db.scalars(
-        select(WatchlistItem)
-        .where(WatchlistItem.user_id == user.id)
-        .order_by(WatchlistItem.created_at, WatchlistItem.id)
-    )
-    connections = list(
-        db.scalars(
-            select(SyncConnection)
-            .where(SyncConnection.user_id == user.id)
-            .order_by(SyncConnection.created_at, SyncConnection.id)
+def export_my_data(user: DataRightsUserDep, db: DbDep, request: Request) -> StreamingResponse:
+    user_id = user.id
+    # Called directly, not as dependencies: this route takes the user that may be
+    # suspended, and a refused export must not be audited as an export. The slot is
+    # taken first, so a request refused for want of one does not count as an export.
+    release = take_user_stream_slot(request, user_id)
+    try:
+        enforce_user_limit(request, "export", user_id)
+        write_audit(
+            db,
+            request,
+            "account.export",
+            user_id=user_id,
+            entity_type="user",
+            entity_id=user_id,
+            details={"account_status": "suspended"} if user.status == "suspended" else None,
         )
-    )
-    runs = db.scalars(
-        select(SyncImportRun)
-        .join(SyncConnection, SyncImportRun.connection_id == SyncConnection.id)
-        .where(SyncConnection.user_id == user.id)
-        .order_by(SyncImportRun.started_at, SyncImportRun.id)
-    )
-    audit = db.scalars(
-        select(AuditLog)
-        .where(AuditLog.user_id == user.id)
-        .order_by(AuditLog.created_at, AuditLog.id)
-    )
-    alerts = db.scalars(
-        select(AlertRule)
-        .where(AlertRule.user_id == user.id)
-        .order_by(AlertRule.created_at, AlertRule.id)
-    )
-    notifications = db.scalars(
-        select(Notification)
-        .where(Notification.user_id == user.id)
-        .order_by(Notification.created_at, Notification.id)
-    )
-    registry = request.app.state.sync_registry
-    return AccountExportOut(
-        exported_at=utcnow(),
-        format_version=1,
-        user=UserOut.model_validate(user),
-        bets=[bets_service.bet_out(bet) for bet in bets],
-        watchlist=[watchlist_service.item_out(board, item) for item in watchlist],
-        sync_connections=[
-            sync_service.connection_out(db, c, registry.get(c.provider)) for c in connections
-        ],
-        sync_runs=[sync_service.run_out(run) for run in runs],
-        audit_log=[
-            ExportAuditEntryOut(
-                id=row.id,
-                created_at=row.created_at,
-                action=row.action,
-                entity_type=row.entity_type,
-                entity_id=row.entity_id,
-                ip=row.ip,
-                request_id=row.request_id,
-                details=row.details,
-            )
-            for row in audit
-        ],
-        alerts=[alerts_service.rule_out(board, rule) for rule in alerts],
-        notifications=[notifications_service.notification_out(row) for row in notifications],
-        notification_preferences=notifications_service.preferences_out(db, user.id),
-        stake_reminder=notifications_service.stake_reminder_out(db, user.id, board.now),
-        community=community_service.export_out(db, user.id, board.provider.data_mode),
-    )
+        db.commit()
+        return export.export_response(request.app, user_id, release)
+    except BaseException:
+        release()
+        raise

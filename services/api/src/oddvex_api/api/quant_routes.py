@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from ..errors import ERROR_RESPONSES
 from ..quant import (
     ParlayLeg,
+    ProbabilityStatus,
     closing_line_value,
     combine_parlay,
     decimal_to_american,
@@ -263,13 +264,47 @@ class ParlayResponse(BaseModel):
     profit: float | None = None
     combined_probability: float | None = Field(
         description=(
-            "Only computed when every active leg has a win probability and all legs are from "
-            "distinct events. Assumes independence."
+            "Only computed when every active leg has a win probability and the active legs "
+            "are from distinct known events (a single active leg needs no `event_id`). "
+            "Assumes independence. `probability_status` says why it is null."
         )
     )
-    probability_note: str
-    correlation_warnings: list[str]
-    steps: list[str]
+    probability_status: ProbabilityStatus = Field(
+        description=(
+            "Why `combined_probability` is or is not there, as a fixed value a client can "
+            "map to its own wording. `computed`: every active leg had a `win_probability` "
+            "and the active legs are from distinct known events, so the probabilities were "
+            "multiplied (assumes independence). A single active leg has nothing to be "
+            "correlated with, so it counts as distinct with or without an `event_id`. "
+            "`needs_leg_probabilities`: the same holds for the events, but at least one "
+            "active leg has no `win_probability`. `same_event_legs`: two or more active "
+            "legs share an `event_id`, so their results are correlated. `unverified_legs`: "
+            "there are several active legs and at least one has no `event_id`, so "
+            "independence cannot be checked. `no_active_legs`: every leg pushed or was voided. "
+            "`combined_probability` is a number only for `computed` and null for every other "
+            "value. Precedence when several apply: `no_active_legs`, then `same_event_legs`, "
+            "then `unverified_legs`, then `needs_leg_probabilities`, then `computed`."
+        )
+    )
+    probability_note: str = Field(
+        description=(
+            "The same reason as a sentence, kept for older clients. New clients should "
+            "choose their wording from `probability_status`."
+        )
+    )
+    correlation_warnings: list[str] = Field(
+        description=(
+            "One sentence per reason the legs may be correlated: an `event_id` shared by "
+            "several active legs, or active legs without an `event_id`. Empty otherwise."
+        )
+    )
+    steps: list[str] = Field(
+        description=(
+            "The worked calculation, one line per step: each leg, the combined decimal, the "
+            "payout when a stake was given, and the combined probability only when one was "
+            "computed (`probability_status` is `computed`)."
+        )
+    )
 
 
 @router.post(
@@ -322,8 +357,8 @@ def quant_parlay(body: ParlayRequest) -> ParlayResponse:
             )
             + f" = {_pct(result.combined_probability)} (assumes independence)"
         )
-    else:
-        steps.append(f"Combined probability: {result.probability_note}")
+    # Without a combined probability the working ends here: the reason is in
+    # ``probability_status`` and ``probability_note``, not in a step that computes nothing.
     return ParlayResponse(
         legs=[
             ParlayLegOut(
@@ -347,6 +382,7 @@ def quant_parlay(body: ParlayRequest) -> ParlayResponse:
             if result.combined_probability is not None
             else None
         ),
+        probability_status=result.probability_status,
         probability_note=result.probability_note,
         correlation_warnings=result.correlation_warnings,
         steps=steps,

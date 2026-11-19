@@ -12,13 +12,14 @@ import { currentUser } from "@/lib/session";
 import { getWatchlist, watchId } from "@/lib/watchlist";
 import { Freshness } from "@/components/app/freshness";
 import { OddsTable } from "@/components/app/odds-table";
-import { LineHistoryChart, type Series } from "@/components/ui/charts";
+import { LineHistoryChart } from "@/components/ui/charts";
 import { Notice, Panel, PanelHeader, Segmented } from "@/components/ui/primitives";
 import { api, apiOrNull } from "@/lib/api";
 import { getMyProfile } from "@/lib/community";
 import { flagOn, getFlags } from "@/lib/flags";
-import { formatAmerican, formatLine } from "@/lib/format";
+import { formatLine } from "@/lib/format";
 import { getLeagues, leagueLabel, MARKETS, pick } from "@/lib/leagues";
+import { lineMovementChart } from "@/lib/line-history";
 import type { EventDetail, LineHistory, OddsComparison } from "@/lib/types";
 
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ market?: string }> };
@@ -26,22 +27,6 @@ type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ market?:
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const event = await apiOrNull<EventDetail>(`/v1/events/${encodeURIComponent((await params).id)}`).catch(() => null);
   return { title: event ? `${event.away_team.name} at ${event.home_team.name}` : "Game" };
-}
-
-function historySeries(history: LineHistory, market: string, bestBooks: Set<string>): { series: Series[]; unit: "price" | "line"; outcome: string } | null {
-  const first = history.series[0];
-  if (!first) return null;
-  // Chart one outcome so the lines are comparable: the first outcome the API lists.
-  const chosen = history.series.filter((s) => s.outcome_key === first.outcome_key);
-  const unit = market === "moneyline" ? "price" : "line";
-  const series = chosen.map((s) => ({
-    name: s.sportsbook.name,
-    emphasis: bestBooks.has(`${s.sportsbook.key}:${s.outcome_key}`),
-    points: s.points
-      .map((p) => ({ t: new Date(p.timestamp).getTime(), v: unit === "price" ? p.price.american : (p.line ?? Number.NaN) }))
-      .filter((p) => Number.isFinite(p.v)),
-  }));
-  return { series: series.filter((s) => s.points.length), unit, outcome: first.outcome_name };
 }
 
 export default async function GamePage({ params, searchParams }: Props) {
@@ -74,7 +59,7 @@ export default async function GamePage({ params, searchParams }: Props) {
     return [{ outcomeKey: best.outcome_key, label: `${name}${lineText}${market === "moneyline" ? " ML" : ""}`, line, american: best.price.american, sportsbook: book }];
   });
   const bestBooks = new Set((odds?.best ?? []).map((b) => `${b.sportsbook_key}:${b.outcome_key}`));
-  const chart = history ? historySeries(history, market, bestBooks) : null;
+  const chart = history ? lineMovementChart(history, market, bestBooks) : null;
   const span = chart ? Math.max(...chart.series.flatMap((s) => s.points.map((p) => p.t))) : 0;
 
   return (
@@ -206,14 +191,21 @@ export default async function GamePage({ params, searchParams }: Props) {
             <PanelHeader
               id="history-heading"
               title="Line movement"
-              description={chart ? `${chart.outcome}, ${chart.unit === "price" ? "price" : "line"} by book over the last 48 hours` : undefined}
+              description={
+                chart
+                  ? chart.unit === "probability"
+                    ? `${chart.outcome}: each book's price over the last 48 hours. The legend gives the latest American price; point at a mark for an earlier one.`
+                    : `${chart.outcome}, line by book over the last 48 hours`
+                  : undefined
+              }
             />
             <div className="p-4 sm:p-5">
               {chart && chart.series.length ? (
                 <LineHistoryChart
                   series={chart.series}
-                  summary={`Line movement for ${chart.outcome} across ${chart.series.length} sportsbooks`}
-                  formatValue={(v) => (chart.unit === "price" ? formatAmerican(v) : formatLine(Math.round(v * 2) / 2, { signed: market === "spread" }))}
+                  summary={chart.summary}
+                  axisTitle={chart.axisTitle}
+                  formatValue={chart.formatValue}
                   formatTime={(t) => {
                     const hours = Math.round((span - t) / 3600000);
                     return hours <= 0 ? "Latest" : `${hours}h earlier`;

@@ -492,12 +492,20 @@ export interface paths {
         /**
          * Your bets, newest first
          * @description Filters combine with AND. `market` matches bets with at least one leg in that market. `sort` takes a field name, prefixed with `-` for descending; bets without a profit (pending) sort last either way.
+         *
+         *     The page is one JSON array, as documented, but it is streamed: the bets are read and sent a batch at a time, so the response has no `Content-Length`. Read it to the end and parse it once. Which bets are on the page, and their order, is decided when the request starts. One account can have `ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE` (default 8) streamed responses in progress at the same moment, this list and the data export together: one more answers 429 `rate_limited` with `Retry-After`.
          */
         get: operations["list_bets"];
         put?: never;
         /**
          * Record a bet you placed elsewhere
          * @description OddVex never places wagers. This only records a bet for tracking. If you set a weekly staking reminder and this bet takes the week's total to or past it, a `stake_reminder` notification is created; the bet is saved either way.
+         *
+         *     The bet is checked completely before anything is saved. Prices are stored as decimal odds with six decimal places and stakes in cents: a price that would be stored as 1.000000 or less (`invalid_decimal_odds`), a price or combined parlay price above 9999999999.999999 (`odds_out_of_range`), a stake that would be stored as 0.00 (`invalid_stake`) and a stake and price whose payout is above 999999999999.99 (`payout_out_of_range`) are each a 422, and a 422 never saves anything.
+         *
+         *     **Retrying safely.** Send `client_request_id` (8 to 64 characters from `A-Z a-z 0-9 _ -`, for example a UUID made once per filled-in form) and send the same value again when you retry a create whose answer you did not receive. The first request stores the bet and answers 201. Every later request from the same account with the same id answers **200** with the bet that was stored the first time: no second bet, no second audit entry and no second staking reminder. The stored bet is returned even if the repeated body differs, so use a new id for a new or edited bet. This also holds when the retry arrives while the first request is still running. An id is only compared within one account, and is free again once that bet is deleted.
+         *
+         *     An account holds at most `ODDVEX_MAX_BETS_PER_USER` bets (default 5,000), imported bets included: at the cap this answers 409 `bet_limit_reached` with `details.max_bets`. Bet writes are limited per user (120 a minute and 2,000 a day by default): over the limit this answers 429 `rate_limited` with `Retry-After`.
          */
         post: operations["create_bet"];
         delete?: never;
@@ -537,7 +545,7 @@ export interface paths {
         put?: never;
         /**
          * Settle your pending bets from final scores
-         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new. Each settled bet also creates a `bet_settled` notification.
+         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new. Each settled bet also creates a `bet_settled` notification. One call settles at most 200 bets, oldest first; when it stops there with pending bets left unexamined, the response carries `has_more: true` and calling again continues (the field is left out otherwise). Counts towards the per-user write limit, and one account runs one auto-settle at a time: a call that arrives while another of the same account is still running is not started (both are 429 `rate_limited` with `Retry-After`).
          */
         post: operations["auto_settle_bets"];
         delete?: never;
@@ -578,7 +586,10 @@ export interface paths {
         delete: operations["delete_bet"];
         options?: never;
         head?: never;
-        /** Edit a bet */
+        /**
+         * Edit a bet
+         * @description Stake, legs, odds and bet type can only change while the bet is pending. The changed bet is checked as a whole before anything is saved, with the same rules as a create (`invalid_decimal_odds`, `odds_out_of_range`, `invalid_stake`, `payout_out_of_range`, all 422): a refused update changes nothing. Editing never adds a bet, so it works at the bet cap. Counts towards the per-user write limit (429 `rate_limited` with `Retry-After`).
+         */
         patch: operations["update_bet"];
         trace?: never;
     };
@@ -593,7 +604,7 @@ export interface paths {
         put?: never;
         /**
          * Grade a bet
-         * @description Settling an already settled bet overwrites the earlier result (for corrections). The change is recorded in the audit log.
+         * @description Settling an already settled bet overwrites the earlier result (for corrections). The change is recorded in the audit log. A result whose payout is above 999999999999.99 is refused with 422 `payout_out_of_range` and the bet is left as it was. Counts towards the per-user write limit (429 `rate_limited` with `Retry-After`).
          */
         post: operations["settle_bet"];
         delete?: never;
@@ -1024,7 +1035,7 @@ export interface paths {
         };
         /**
          * Odds comparison across sportsbooks for one market
-         * @description `is_best` and `best` only consider books that are open and not stale. For spread and total, prices are only compared between books quoting the consensus (most common) line. `consensus` is the mean no-vig probability of those same books. Markets of finished events are reported as `unavailable`.
+         * @description `is_best` and `best` only consider books that are open and not stale. A quote is stale (`is_stale`) when it is older than `stale_after_seconds`, has no timestamp, carries a timestamp from the future, or, for a live event, was last updated before the latest score change. A stale quote is still listed but is never marked best and does not count in `consensus`. For spread and total, prices are only compared between books quoting the consensus (most common) line. `consensus` is the mean no-vig probability of those same books. Markets of finished events are reported as `unavailable`.
          */
         get: operations["get_event_odds"];
         put?: never;
@@ -1123,6 +1134,8 @@ export interface paths {
         /**
          * Download everything stored about your account
          * @description One JSON document with your profile, bets, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs and your own audit entries, plus your community data (profile, picks, comments, who you follow, likes, blocks and reports you made). It never contains the password hash. The export itself is recorded in the audit log. A suspended account can still call this route.
+         *
+         *     The document is streamed: bets, import runs and audit entries are read in batches and sent as they are read, so the response has no `Content-Length`. It is still one JSON document of this schema; read it to the end and parse it once. Limited per user (`ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`, default 10 an hour), and it counts as one of the streamed responses an account can have in progress at the same moment (`ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE`, default 8, shared with the bet list): over either limit this answers 429 `rate_limited` with `Retry-After`.
          */
         get: operations["export_my_data"];
         put?: never;
@@ -1373,7 +1386,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Prop board: consensus line, best over/under and last-10 hit rate */
+        /**
+         * Prop board: consensus line, best over/under and last-10 hit rate
+         * @description `league` must be a supported league key; any other value is a 422. `market` is a prop market key from `prop_markets` of `GET /v1/leagues`, matched exactly. A `market` that is not a prop market of the chosen league (of any league when `league` is not given) matches no row, so the answer is an empty list. A blank `market` means no market filter. Best over and best under follow the same rules as the odds comparison: open, non-stale offers on the consensus line.
+         */
         get: operations["list_props"];
         put?: never;
         post?: never;
@@ -1515,7 +1531,7 @@ export interface paths {
         post?: never;
         /**
          * Disconnect an account
-         * @description Removes the connection and its import history. With `delete_data=true` the bets imported through it are deleted too; otherwise they are kept as tracked bets.
+         * @description Removes the connection and its import history. With `delete_data=true` the bets imported through it are deleted too; otherwise they are kept as tracked bets. Counts towards the per-user write limit.
          */
         delete: operations["delete_sync_connection"];
         options?: never;
@@ -1552,6 +1568,8 @@ export interface paths {
         /**
          * Import bets from a connection
          * @description Idempotent: bets are de-duplicated on provider + external bet id, so running this again never creates duplicates. Retryable provider errors are retried up to `ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded with status `failed` and this returns 502 with `details.run_id` and `details.retryable`. Either way a `sync_finished` notification is created, and imported bets count towards the weekly staking reminder.
+         *
+         *     Imported bets count against the same cap as `POST /v1/bets` (`ODDVEX_MAX_BETS_PER_USER`, default 5,000). The import takes the provider's bets in order and stops adding when the account is full; a bet whose price, stake or amount cannot be recorded is left out too. The run still succeeds and its `error_message` says how many bets were left out and why (the number is also `fetched_count - imported_count - duplicate_count`). Bets left out for room are offered again by a later import, once bets have been deleted. Counts towards the per-user write limit (429 `rate_limited` with `Retry-After`).
          */
         post: operations["run_sync"];
         delete?: never;
@@ -1586,7 +1604,7 @@ export interface paths {
         };
         /**
          * Market discrepancies: best price against the consensus of the other books
-         * @description Outcomes of live and upcoming events whose best open, non-stale price is longer than the no-vig consensus of the other open, non-stale sportsbooks at the same line. The sportsbook with the best price is excluded from its own consensus and at least 2 other sportsbooks are required, otherwise the outcome is skipped. Sorted by `edge`, largest first. A price above the consensus is not proof of an edge and this is not a prediction; read `caveat`. Behind the `value_screen` flag.
+         * @description Outcomes of upcoming events whose best open, non-stale price is longer than the no-vig consensus of the other open, non-stale sportsbooks at the same line. Events in progress and finished events are never listed: in play, prices move with the score, so quotes taken moments apart are not comparable. The sportsbook with the best price is excluded from its own consensus and at least 2 other sportsbooks are required, otherwise the outcome is skipped. Sorted by `edge`, largest first. A price above the consensus is not proof of an edge and this is not a prediction; read `caveat`. `league` and `market` must be supported keys; any other value is a 422. Behind the `value_screen` flag.
          */
         get: operations["list_value"];
         put?: never;
@@ -2164,6 +2182,12 @@ export interface components {
              * @description Pending bets examined.
              */
             checked: number;
+            /**
+             * Has More
+             * @description Present, and true, only when the call stopped at the most bets one call settles (200) and pending bets were left unexamined: call again to continue. Left out of the response otherwise, so read a missing value as false.
+             * @default false
+             */
+            has_more: boolean;
             /** Settled */
             settled: components["schemas"]["BetOut"][];
             /** Skipped */
@@ -2275,6 +2299,12 @@ export interface components {
              * @enum {string}
              */
             bet_type: "straight" | "parlay" | "sgp" | "future";
+            /**
+             * Client Request Id
+             * @description Optional id chosen by the client for this one create, 8 to 64 characters from `A-Z a-z 0-9 _ -` (a UUID fits). Send the same id when retrying a create whose answer was lost: the bet stored the first time is returned with status 200 and nothing is stored twice.
+             * @example 3f0c1f0a-6c1d-4f6e-9a55-2f1d7e0b9c11
+             */
+            client_request_id?: string | null;
             /** Legs */
             legs: components["schemas"]["BetLegIn"][];
             /** Notes */
@@ -2297,7 +2327,10 @@ export interface components {
             placed_at?: string | null;
             /** Sportsbook */
             sportsbook: string;
-            /** Stake */
+            /**
+             * Stake
+             * @description Rounded to cents. A stake that rounds to 0.00 is refused with 422.
+             */
             stake: number;
         };
         /** BetLegIn */
@@ -2600,7 +2633,10 @@ export interface components {
             placed_at?: string | null;
             /** Sportsbook */
             sportsbook?: string | null;
-            /** Stake */
+            /**
+             * Stake
+             * @description Rounded to cents. A stake that rounds to 0.00 is refused with 422.
+             */
             stake?: number | null;
         };
         /** BlockEntryOut */
@@ -2637,7 +2673,10 @@ export interface components {
         };
         /** BookOddsOut */
         BookOddsOut: {
-            /** Is Stale */
+            /**
+             * Is Stale
+             * @description True when the quote is older than `stale_after_seconds`, has no timestamp, carries a timestamp from the future, or, for a live event, was last updated before the latest score change. A stale quote is never marked best and does not count in the consensus.
+             */
             is_stale: boolean;
             /** Last Updated */
             last_updated?: string | null;
@@ -3166,7 +3205,7 @@ export interface components {
             market: "moneyline" | "spread" | "total";
             /**
              * Stale After Seconds
-             * @description Quotes older than this are flagged stale and excluded from best price.
+             * @description Quotes older than this are flagged stale and excluded from best price. A quote can be stale before that; see `is_stale`.
              */
             stale_after_seconds: number;
         };
@@ -3957,10 +3996,13 @@ export interface components {
             combined_price: components["schemas"]["PriceOut"] | null;
             /**
              * Combined Probability
-             * @description Only computed when every active leg has a win probability and all legs are from distinct events. Assumes independence.
+             * @description Only computed when every active leg has a win probability and the active legs are from distinct known events (a single active leg needs no `event_id`). Assumes independence. `probability_status` says why it is null.
              */
             combined_probability: number | null;
-            /** Correlation Warnings */
+            /**
+             * Correlation Warnings
+             * @description One sentence per reason the legs may be correlated: an `event_id` shared by several active legs, or active legs without an `event_id`. Empty otherwise.
+             */
             correlation_warnings: string[];
             /** Dropped Legs */
             dropped_legs: number;
@@ -3968,13 +4010,25 @@ export interface components {
             legs: components["schemas"]["ParlayLegOut"][];
             /** Payout */
             payout?: number | null;
-            /** Probability Note */
+            /**
+             * Probability Note
+             * @description The same reason as a sentence, kept for older clients. New clients should choose their wording from `probability_status`.
+             */
             probability_note: string;
+            /**
+             * Probability Status
+             * @description Why `combined_probability` is or is not there, as a fixed value a client can map to its own wording. `computed`: every active leg had a `win_probability` and the active legs are from distinct known events, so the probabilities were multiplied (assumes independence). A single active leg has nothing to be correlated with, so it counts as distinct with or without an `event_id`. `needs_leg_probabilities`: the same holds for the events, but at least one active leg has no `win_probability`. `same_event_legs`: two or more active legs share an `event_id`, so their results are correlated. `unverified_legs`: there are several active legs and at least one has no `event_id`, so independence cannot be checked. `no_active_legs`: every leg pushed or was voided. `combined_probability` is a number only for `computed` and null for every other value. Precedence when several apply: `no_active_legs`, then `same_event_legs`, then `unverified_legs`, then `needs_leg_probabilities`, then `computed`.
+             * @enum {string}
+             */
+            probability_status: "computed" | "needs_leg_probabilities" | "same_event_legs" | "unverified_legs" | "no_active_legs";
             /** Profit */
             profit?: number | null;
             /** Stake */
             stake?: number | null;
-            /** Steps */
+            /**
+             * Steps
+             * @description The worked calculation, one line per step: each leg, the combined decimal, the payout when a stake was given, and the combined probability only when one was computed (`probability_status` is `computed`).
+             */
             steps: string[];
         };
         /** PasswordChangeRequest */
@@ -4370,7 +4424,10 @@ export interface components {
             is_best_over: boolean;
             /** Is Best Under */
             is_best_under: boolean;
-            /** Is Stale */
+            /**
+             * Is Stale
+             * @description Same rule as the event markets: too old, no timestamp, a timestamp from the future, or, during a live game, last updated before the latest score change. A stale offer is never marked best.
+             */
             is_stale: boolean;
             /** Last Updated */
             last_updated?: string | null;
@@ -4657,7 +4714,10 @@ export interface components {
              * @description Bets skipped because they were already imported.
              */
             duplicate_count: number;
-            /** Error Message */
+            /**
+             * Error Message
+             * @description For a failed run: what went wrong. For a succeeded run that left bets out: how many and why, for example because the account already held the most bets it can (`ODDVEX_MAX_BETS_PER_USER`) or because the provider sent a price, stake or amount that cannot be recorded. The number left out is also `fetched_count - imported_count - duplicate_count`. Null otherwise.
+             */
             error_message?: string | null;
             /** Fetched Count */
             fetched_count: number;
@@ -6340,6 +6400,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     create_bet: {
@@ -6355,6 +6424,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A repeat of an earlier create with the same `client_request_id`: the bet stored the first time. Nothing new was saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetOut"];
+                };
+            };
             /** @description Successful Response */
             201: {
                 headers: {
@@ -6373,8 +6451,26 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The account holds the most bets it can */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6460,6 +6556,15 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6601,6 +6706,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     update_bet: {
@@ -6663,6 +6777,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     settle_bet: {
@@ -6709,6 +6832,15 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8373,6 +8505,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_notification_preferences: {
@@ -8952,6 +9093,7 @@ export interface operations {
         parameters: {
             query?: {
                 league?: ("nba" | "nfl" | "mlb" | "nhl" | "soccer") | null;
+                /** @description A prop market key. Unknown: empty list. Blank: no market filter. */
                 market?: string | null;
             };
             header?: never;
@@ -9252,6 +9394,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     delete_sync_connection: {
@@ -9296,6 +9447,15 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9403,6 +9563,15 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

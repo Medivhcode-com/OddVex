@@ -85,9 +85,16 @@ break-even = 1 / decimal_best`}</Formula>
         <h2>Parlays</h2>
         <p>
           The combined price of a parlay is the product of its legs&rsquo; decimal odds, with pushed or voided legs
-          removed. A combined probability is only shown when every leg is from a different event, and it is labelled as
-          assuming independence. For legs from the same event OddVex shows a correlation warning and no probability,
-          because multiplying dependent probabilities gives a wrong answer.
+          removed. The parlay tool shows the combined price, the payout and the break-even rate.
+        </p>
+        <Formula>{`combined decimal = decimal_1 × decimal_2 × … × decimal_n
+payout           = stake × combined decimal
+break-even       = 1 / combined decimal`}</Formula>
+        <p>
+          The break-even rate is how often the parlay has to win for the price to pay for itself. It does not show a
+          chance that every leg wins. For legs from the same event OddVex shows a correlation warning, because
+          multiplying dependent probabilities gives a wrong answer. A fair price for a parlay, built from the no-vig
+          prices of its legs, is planned and not built.
         </p>
         <h2>Settlement</h2>
         <p>

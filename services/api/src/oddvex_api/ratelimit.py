@@ -12,16 +12,32 @@ never reveals that.
 
 The community has limiters with their own windows (picks per day; comments, reports and
 follows per hour), counted per user: :func:`check_user_quota` and :func:`use_user_quota`.
+
+Routes that write or export a user's own data are limited per user id, whatever the
+address: :func:`user_rate_limit` is the dependency and :func:`enforce_user_limit` the
+call behind it. Each bucket in :data:`USER_LIMITS` has one or more ceilings (bet and sync
+writes: per minute and per day; the export: per hour), each one a setting.
+
+Those count requests over time. Two things are also limited by how many one user has in
+progress at the same moment, because each one holds memory for as long as it runs:
+streamed responses (:func:`take_user_stream_slot`, :class:`UserStreamResponse`) and
+auto-settlement (:func:`user_exclusive`).
 """
 
 from __future__ import annotations
 
 import threading
 import time
+import weakref
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any
 
-from fastapi import Request
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
 
 from .errors import ApiError
 
@@ -45,7 +61,9 @@ class SlidingWindowRateLimiter:
                 return False, max(0.0, hits[0] + self.window_seconds - now)
             hits.append(now)
             if len(self._hits) > 10_000:
-                for stale_key in [k for k, v in self._hits.items() if not v]:
+                # Keys are only pruned when they are used again, so compare the newest
+                # hit with the window: a key nobody has used since is dropped here.
+                for stale_key in [k for k, v in self._hits.items() if not v or v[-1] <= cutoff]:
                     del self._hits[stale_key]
             return True, 0.0
 
@@ -80,6 +98,82 @@ class SlidingWindowRateLimiter:
     def forget(self, key: str) -> None:
         with self._lock:
             self._hits.pop(key, None)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._hits.clear()
+
+
+class CoarseWindowCounter:
+    """A sliding window counted in fixed buckets, for long windows with high ceilings.
+
+    :class:`SlidingWindowRateLimiter` keeps one timestamp per hit, which is fine for ten
+    hits a minute and wasteful for thousands a day. This keeps one integer per bucket
+    (24 hourly buckets for a day), so a key costs the same however many hits it has. The
+    price is precision: a hit leaves the window when its bucket does, up to one bucket
+    length early. Same ``check`` contract as the sliding limiter.
+    """
+
+    def __init__(
+        self,
+        window_seconds: float,
+        buckets: int = 24,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.window_seconds = window_seconds
+        self._buckets = max(1, buckets)
+        self._bucket_seconds = window_seconds / self._buckets
+        self._clock = clock
+        self._lock = threading.Lock()
+        #: key -> {bucket number: hits in it}
+        self._hits: dict[str, dict[int, int]] = {}
+
+    def _live(self, key: str, current: int) -> dict[int, int]:
+        """The key's buckets still inside the window ending in bucket ``current``."""
+        counts = self._hits.get(key)
+        if counts is None:
+            return {}
+        oldest = current - self._buckets + 1
+        for bucket in [b for b in counts if b < oldest]:
+            del counts[bucket]
+        return counts
+
+    def check(self, key: str, limit: int) -> tuple[bool, float]:
+        """Record a hit. Returns ``(allowed, retry_after_seconds)``. A refused hit is not
+        recorded."""
+        now = self._clock()
+        current = int(now // self._bucket_seconds)
+        with self._lock:
+            counts = self._live(key, current)
+            total = sum(counts.values())
+            if total >= limit:
+                # Wait until enough of the oldest buckets have left the window.
+                excess = total - limit + 1
+                leaves = current
+                for bucket in sorted(counts):
+                    excess -= counts[bucket]
+                    leaves = bucket
+                    if excess <= 0:
+                        break
+                gone_at = (leaves + self._buckets) * self._bucket_seconds
+                return False, max(0.0, gone_at - now)
+            if not counts:
+                counts = self._hits.setdefault(key, {})
+            counts[current] = counts.get(current, 0) + 1
+            if len(self._hits) > 10_000:
+                oldest = current - self._buckets + 1
+                for stale in [k for k, v in self._hits.items() if not v or max(v) < oldest]:
+                    del self._hits[stale]
+            return True, 0.0
+
+    def size(self) -> int:
+        """Keys with at least one hit inside the window."""
+        current = int(self._clock() // self._bucket_seconds)
+        with self._lock:
+            for key in list(self._hits):
+                if not self._live(key, current):
+                    del self._hits[key]
+            return len(self._hits)
 
     def reset(self) -> None:
         with self._lock:
@@ -189,3 +283,202 @@ def check_user_quota(request: Request, limiter_name: str, user_id: str, limit: i
 def use_user_quota(request: Request, limiter_name: str, user_id: str) -> None:
     if request.app.state.settings.rate_limit_enabled:
         getattr(request.app.state, limiter_name).hit(user_id)
+
+
+# ------------------------------------------------- per user, writes and export
+@dataclass(frozen=True, slots=True)
+class UserCeiling:
+    """One ceiling of a per-user bucket: ``setting`` requests per ``window_seconds``."""
+
+    #: Name of the ``Settings`` field that holds the ceiling.
+    setting: str
+    window_seconds: float
+    #: Count in buckets (:class:`CoarseWindowCounter`) instead of one timestamp per hit.
+    coarse: bool = False
+
+
+#: The per-user buckets. ``writes`` is shared by the bet write routes and the sync write
+#: routes; ``export`` belongs to ``GET /v1/me/export``.
+USER_LIMITS: dict[str, tuple[UserCeiling, ...]] = {
+    "writes": (
+        UserCeiling("rate_limit_user_writes_per_minute", 60),
+        UserCeiling("rate_limit_user_writes_per_day", 86_400, coarse=True),
+    ),
+    "export": (UserCeiling("rate_limit_export_per_hour", 3_600),),
+}
+
+_user_limiters_lock = threading.Lock()
+
+
+def _user_limiter(
+    app: FastAPI, bucket: str, ceiling: UserCeiling
+) -> SlidingWindowRateLimiter | CoarseWindowCounter:
+    """The app's counter for one ceiling, created the first time it is needed.
+
+    Kept on ``app.state`` like the other limiters, so each app (each test) has its own.
+    """
+    limiters: dict[str, Any] | None = getattr(app.state, "user_limiters", None)
+    name = f"{bucket}:{ceiling.setting}"
+    if limiters is None or name not in limiters:
+        with _user_limiters_lock:
+            limiters = getattr(app.state, "user_limiters", None)
+            if limiters is None:
+                limiters = {}
+                app.state.user_limiters = limiters
+            if name not in limiters:
+                limiters[name] = (
+                    CoarseWindowCounter(ceiling.window_seconds)
+                    if ceiling.coarse
+                    else SlidingWindowRateLimiter(ceiling.window_seconds)
+                )
+    limiter: SlidingWindowRateLimiter | CoarseWindowCounter = limiters[name]
+    return limiter
+
+
+def enforce_user_limit(request: Request, bucket: str, user_id: str) -> None:
+    """Count one request of ``user_id`` in ``bucket``; 429 with ``Retry-After`` over a ceiling.
+
+    Keyed on the user id, so it holds from any address and does not affect other users
+    behind the same address. Every request counts, whether or not it goes on to succeed.
+    A request refused by one ceiling is not counted by the ceilings after it.
+    """
+    settings = request.app.state.settings
+    if not settings.rate_limit_enabled:
+        return
+    for ceiling in USER_LIMITS[bucket]:
+        limiter = _user_limiter(request.app, bucket, ceiling)
+        allowed, retry_after = limiter.check(user_id, int(getattr(settings, ceiling.setting)))
+        if not allowed:
+            raise too_many_requests(retry_after)
+
+
+def user_rate_limit(
+    bucket: str, user_dependency: Callable[..., Any] | None = None
+) -> Callable[..., None]:
+    """FastAPI dependency enforcing the per-user ceilings of ``bucket`` (:data:`USER_LIMITS`).
+
+    The user comes from ``user_dependency``, by default the signed-in user every other
+    route uses; FastAPI resolves it once per request, so adding this to a route that
+    already depends on the user costs no second lookup. Use as
+    ``dependencies=[Depends(user_rate_limit("writes"))]``.
+    """
+    if bucket not in USER_LIMITS:
+        raise ValueError(f"unknown per-user rate limit bucket {bucket!r}")
+    if user_dependency is None:
+        from .deps import get_current_user  # imported here: deps.py imports this module
+
+        user_dependency = get_current_user
+
+    # The user is declared as a default value, not in the annotation: annotations in this
+    # module are strings, and FastAPI could not resolve a name that only exists here.
+    def dependency(request: Request, user: Any = Depends(user_dependency)) -> None:
+        enforce_user_limit(request, bucket, user.id)
+
+    return dependency
+
+
+# ------------------------------------------------ per user, in progress at once
+class InProgressCounter:
+    """How many of something each key has in progress right now."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active: dict[str, int] = {}
+
+    def enter(self, key: str, limit: int) -> bool:
+        """Take a slot of ``key`` unless ``limit`` are already taken."""
+        with self._lock:
+            active = self._active.get(key, 0)
+            if active >= limit:
+                return False
+            self._active[key] = active + 1
+            return True
+
+    def leave(self, key: str) -> None:
+        with self._lock:
+            active = self._active.get(key, 0)
+            if active <= 1:
+                self._active.pop(key, None)
+            else:
+                self._active[key] = active - 1
+
+    def active(self, key: str) -> int:
+        with self._lock:
+            return self._active.get(key, 0)
+
+
+def _in_progress(app: FastAPI, name: str) -> InProgressCounter:
+    """The app's counter ``name``, created the first time it is needed (see
+    :func:`_user_limiter`)."""
+    counters: dict[str, InProgressCounter] | None = getattr(app.state, "user_in_progress", None)
+    if counters is None or name not in counters:
+        with _user_limiters_lock:
+            counters = getattr(app.state, "user_in_progress", None)
+            if counters is None:
+                counters = {}
+                app.state.user_in_progress = counters
+            counters.setdefault(name, InProgressCounter())
+    return counters[name]
+
+
+def _take_slot(request: Request, name: str, user_id: str, limit: int) -> Callable[[], None]:
+    """Take one of the user's ``limit`` slots of ``name``; 429 when all are in use.
+
+    Returns the call that gives the slot back. Calling it more than once gives the slot
+    back once. With rate limiting off nothing is counted.
+    """
+    if not request.app.state.settings.rate_limit_enabled:
+        return lambda: None
+    counter = _in_progress(request.app, name)
+    if not counter.enter(user_id, limit):
+        raise too_many_requests(1)
+    once = threading.Lock()
+
+    def release() -> None:
+        if once.acquire(blocking=False):
+            counter.leave(user_id)
+
+    return release
+
+
+def take_user_stream_slot(request: Request, user_id: str) -> Callable[[], None]:
+    """Count one more streamed response in progress for ``user_id``.
+
+    A streamed response holds one batch of rows for as long as the client takes to read
+    it, so a client that opens many and reads none would otherwise hold many batches.
+    Over ``rate_limit_user_streams_at_once`` the answer is the standard 429. Returns the
+    call that gives the slot back: pass it to :class:`UserStreamResponse`, or call it
+    when no response is going to be sent after all.
+    """
+    limit = int(request.app.state.settings.rate_limit_user_streams_at_once)
+    return _take_slot(request, "streams", user_id, limit)
+
+
+@contextmanager
+def user_exclusive(request: Request, name: str, user_id: str) -> Iterator[None]:
+    """Run the block for ``user_id`` only if no other request of that user is inside a
+    block of the same ``name``; otherwise 429 with ``Retry-After``."""
+    release = _take_slot(request, name, user_id, 1)
+    try:
+        yield
+    finally:
+        release()
+
+
+class UserStreamResponse(StreamingResponse):
+    """A streamed response that gives its slot back when it ends, however it ends:
+    sent in full, cut short by the client, failed part-way, or never sent at all."""
+
+    def __init__(
+        self, content: Iterator[bytes], release: Callable[[], None], media_type: str
+    ) -> None:
+        super().__init__(content, media_type=media_type)
+        # Runs ``release`` once: when the response has ended, or, for a response that is
+        # dropped without ever being sent, when it is discarded.
+        self._give_back = weakref.finalize(self, release)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._give_back()

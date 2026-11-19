@@ -61,6 +61,8 @@ def auto_settle(client: TestClient, headers: Headers) -> dict[str, Any]:
     response = client.post("/v1/bets/auto-settle", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
+    # ``has_more`` is only sent when a call stops at the per-call bound on settled bets
+    # (tests/test_audit_bets_limits.py covers that case).
     assert set(body) == {"checked", "settled", "skipped"}
     return body
 

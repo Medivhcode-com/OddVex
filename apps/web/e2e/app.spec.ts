@@ -2,6 +2,8 @@ import { expect, test } from "./fixtures";
 import { adminSignIn, signUp } from "./helpers";
 
 const API = "http://localhost:8210";
+const HELPLINE = "1-800-MY-RESET (1-800-697-3738)";
+const SHORT_LINE = `21+. OddVex does not take wagers. Gambling problem? Call ${HELPLINE}.`;
 
 test.describe("research screens (signed out)", () => {
   test("dashboard labels synthetic data and lists games", async ({ page }) => {
@@ -21,6 +23,60 @@ test.describe("research screens (signed out)", () => {
     await expect(table.getByText("Best").first()).toBeVisible();
     await expect(table.getByText("No-vig consensus")).toBeVisible();
     await expect(page.getByRole("img", { name: /line movement/i })).toBeVisible();
+  });
+
+  test("moneyline line movement is drawn by implied probability and labelled with American prices", async ({ page, request }) => {
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    const event = events[0];
+    const history = await (await request.get(`${API}/v1/events/${event.id}/line-history?market=moneyline`)).json();
+    await page.goto(`/app/games/${event.id}`);
+    const panel = page.getByRole("region", { name: "Line movement" });
+    await expect(panel.getByText("Implied probability of each price, bookmaker margin included. Higher on the chart is a shorter price.")).toBeVisible();
+    const chart = panel.getByRole("img", { name: /line movement/i });
+    // The axis carries percentages. An American price on a straight axis can land between −100 and +100, where no price exists.
+    const ticks = await chart.locator('text[data-axis="value"]').allTextContents();
+    expect(ticks).toHaveLength(3);
+    for (const tick of ticks) expect(tick).toMatch(/^\d{1,2}\.\d%$/);
+    // Every charted point is labelled with the American price the API sent for it.
+    const first = history.series[0];
+    const charted = history.series.filter((s: { outcome_key: string }) => s.outcome_key === first.outcome_key);
+    const american = (value: number) => (value > 0 ? `+${value}` : `−${Math.abs(value)}`);
+    const titles = await chart.locator("title").allTextContents();
+    expect(titles).toHaveLength(charted.reduce((count: number, s: { points: unknown[] }) => count + s.points.length, 0));
+    for (const series of charted) {
+      const latest = series.points.reduce((a: { timestamp: string }, b: { timestamp: string }) => (b.timestamp >= a.timestamp ? b : a));
+      expect(titles.some((title) => title.startsWith(`${series.sportsbook.name}: ${american(latest.price.american)}, `))).toBe(true);
+      await expect(panel.locator("figcaption")).toContainText(`${series.sportsbook.name}${american(latest.price.american)}`);
+    }
+    // The spread chart still plots the line.
+    const detail = await (await request.get(`${API}/v1/events/${event.id}`)).json();
+    if (detail.available_markets.includes("spread")) {
+      await page.goto(`/app/games/${event.id}?market=spread`);
+      const spread = page.getByRole("region", { name: "Line movement" });
+      await expect(spread.getByText("Spread, in points.")).toBeVisible();
+      for (const tick of await spread.locator('text[data-axis="value"]').allTextContents()) expect(tick).toMatch(/^([+−]\d+(\.5)?|PK)$/);
+    }
+  });
+
+  test("the app shell shows the 21+ line and the helpline at every width", async ({ page }) => {
+    for (const path of ["/app", "/app/odds", "/app/tracker", "/app/settings"]) {
+      await page.goto(path);
+      const wide = (page.viewportSize()?.width ?? 0) >= 1024;
+      const shown = page.getByTestId(wide ? "shell-help-sidebar" : "shell-help-footer");
+      const hidden = page.getByTestId(wide ? "shell-help-footer" : "shell-help-sidebar");
+      await expect(shown, path).toBeVisible();
+      await expect(hidden, path).toBeHidden();
+      await expect(shown).toContainText(SHORT_LINE);
+      await expect(shown.getByRole("link", { name: HELPLINE })).toHaveAttribute("href", "tel:+18006973738");
+      await expect(shown.getByRole("link", { name: "Help and limits" })).toHaveAttribute("href", "/responsible-gambling");
+      if (!wide) {
+        // The fixed bottom bar must not sit on top of the line once the page is scrolled to its end.
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        const line = await shown.boundingBox();
+        const bar = await page.getByRole("navigation", { name: "App" }).boundingBox();
+        expect(line && bar && line.y + line.height <= bar.y, `${path}: the line is clear of the bottom bar`).toBe(true);
+      }
+    }
   });
 
   test("best price is never on a stale or closed book", async ({ page, request }) => {
@@ -293,6 +349,93 @@ test.describe("accounts and tracking", () => {
     const settled = page.getByRole("region", { name: "Settled bets" });
     // With the pushed leg removed it pays as a single +100 bet: 10 profit, not 30.
     await expect(settled.getByText("+$10.00", { exact: true })).toBeVisible();
+  });
+
+  test("settled bets are paged: every one can be reached, edited and deleted, and open bets never fall out", async ({ page }) => {
+    test.setTimeout(120_000);
+    await signUp(page, "paging");
+    const DAY = 86_400_000;
+    const start = Date.now() - 400 * DAY;
+    const leg = (selection: string) => ({ selection, market: "moneyline", odds: "+100", odds_format: "american" });
+    // One open bet placed before everything else, then 55 settled bets a day apart: "Paged bet 01" is the oldest.
+    const open = await page.request.post("/api/ov/v1/bets", { data: { bet_type: "straight", stake: 5, sportsbook: "Northline", placed_at: new Date(start - DAY).toISOString(), legs: [leg("Oldest open bet")] } });
+    expect(open.status()).toBe(201);
+    for (let i = 1; i <= 55; i += 1) {
+      const name = `Paged bet ${String(i).padStart(2, "0")}`;
+      const created = await page.request.post("/api/ov/v1/bets", { data: { bet_type: "straight", stake: 10, sportsbook: "Northline", placed_at: new Date(start + i * DAY).toISOString(), legs: [leg(name)] } });
+      expect(created.status(), name).toBe(201);
+      const settled = await page.request.post(`/api/ov/v1/bets/${(await created.json()).id}/settle`, { data: { result: i % 2 ? "won" : "lost" } });
+      expect(settled.ok(), `${name} settled`).toBe(true);
+    }
+
+    await page.goto("/app/tracker");
+    const settled = page.getByRole("region", { name: "Settled bets" });
+    const openBets = page.getByRole("region", { name: "Open bets" });
+    // Counts come from the summary, and the open bet is listed although 55 newer bets exist.
+    await expect(page.getByRole("region", { name: "Performance" })).toContainText("55 settled bets");
+    await expect(openBets).toContainText("1 open");
+    await expect(openBets.getByText("Oldest open bet", { exact: true })).toBeVisible();
+    await expect(settled).toContainText("Showing 1 to 50 of 55, most recently placed first");
+    await expect(settled.getByRole("listitem").filter({ hasText: /^Paged bet \d\d/ })).toHaveCount(50);
+    await expect(settled.getByText("Paged bet 55", { exact: true })).toBeVisible();
+    await expect(settled.getByText("Paged bet 06", { exact: true })).toBeVisible();
+    await expect(settled.getByText("Paged bet 05", { exact: true })).toHaveCount(0);
+    const pages = settled.getByRole("navigation", { name: "Pages of settled bets" });
+    await expect(pages).toContainText("Page 1 of 2");
+    await expect(pages.getByRole("link", { name: "Newer bets" })).toHaveCount(0);
+
+    // The second page holds the five oldest.
+    await pages.getByRole("link", { name: "Older bets" }).click();
+    await expect(page).toHaveURL(/\/app\/tracker\?page=2(#settled)?$/);
+    await expect(settled).toContainText("Showing 51 to 55 of 55, most recently placed first");
+    await expect(settled.getByRole("listitem").filter({ hasText: /^Paged bet \d\d/ })).toHaveCount(5);
+    for (const n of ["01", "02", "03", "04", "05"]) await expect(settled.getByText(`Paged bet ${n}`, { exact: true })).toBeVisible();
+    await expect(openBets.getByText("Oldest open bet", { exact: true })).toBeVisible();
+
+    // Editing an old bet keeps the place.
+    await settled.getByRole("button", { name: "Edit Paged bet 03" }).click();
+    await settled.getByLabel("Notes").fill("Reached on page two");
+    await settled.getByRole("button", { name: "Save changes" }).click();
+    await expect(settled.getByText("Note: Reached on page two")).toBeVisible();
+    await expect(page).toHaveURL(/\/app\/tracker\?page=2(#settled)?$/);
+    await expect(settled).toContainText("Showing 51 to 55 of 55");
+
+    // So does deleting one; the total follows.
+    await settled.getByRole("button", { name: "Delete Paged bet 01" }).click();
+    await settled.getByRole("button", { name: "Delete bet" }).click();
+    await expect(settled).toContainText("Showing 51 to 54 of 54, most recently placed first");
+    await expect(settled.getByText("Paged bet 01", { exact: true })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/app\/tracker\?page=2(#settled)?$/);
+
+    // A page past the end goes to the last page that exists; a value that is no page number goes to the first.
+    await page.goto("/app/tracker?page=9");
+    await expect(page).toHaveURL(/\/app\/tracker\?page=2$/);
+    await expect(settled).toContainText("Showing 51 to 54 of 54");
+    await page.goto("/app/tracker?page=abc");
+    await expect(page).toHaveURL(/\/app\/tracker$/);
+    await expect(settled).toContainText("Showing 1 to 50 of 54");
+  });
+
+  test("the tracker and the sportsbook sync panel each carry a help link", async ({ page }) => {
+    await signUp(page, "helplink");
+    for (const id of ["tracker-help", "sync-help"]) {
+      const line = page.getByTestId(id);
+      await expect(line).toContainText(SHORT_LINE);
+      await expect(line.getByRole("link", { name: HELPLINE })).toHaveAttribute("href", "tel:+18006973738");
+      await expect(line.getByRole("link", { name: "Help and limits" })).toHaveAttribute("href", "/responsible-gambling");
+    }
+    await expect(page.getByRole("region", { name: "Log a bet" }).getByTestId("tracker-help")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Sportsbook sync" }).getByTestId("sync-help")).toBeVisible();
+  });
+
+  test("settings gives the helpline, the text line and the responsible gambling page", async ({ page }) => {
+    await page.goto("/app/settings");
+    const panel = page.getByRole("main").locator("section").filter({ hasText: "Play within your limits" });
+    await expect(panel).toContainText(`the National Problem Gambling Helpline is confidential and answers 24 hours a day, every day. Call ${HELPLINE} or text 800GAM (800426)`);
+    await expect(panel.getByRole("link", { name: HELPLINE })).toHaveAttribute("href", "tel:+18006973738");
+    await expect(panel.getByRole("link", { name: "800GAM" })).toHaveAttribute("href", "sms:800426");
+    await expect(panel.getByRole("link", { name: "responsible gambling page" })).toHaveAttribute("href", "/responsible-gambling");
+    await expect(panel).not.toContainText(/\bfree\b/i);
   });
 
   test("one account cannot see another account's bets", async ({ browser }) => {
@@ -580,7 +723,9 @@ test.describe("alerts and notifications", () => {
     await page.getByRole("button", { name: "Save bet" }).click();
     await expect(page.getByText("Bet saved.")).toBeVisible(); // the bet is still logged: this is not a limit
     await expect(page.getByText("You've reached your weekly staking reminder")).toBeVisible();
-    await expect(page.getByRole("link", { name: "1-800-GAMBLER" }).first()).toBeVisible();
+    const notice = page.getByRole("note").filter({ hasText: "You've reached your weekly staking reminder" });
+    await expect(notice.getByRole("link", { name: HELPLINE })).toHaveAttribute("href", "tel:+18006973738");
+    await expect(notice).toContainText(`confidential help is available at ${HELPLINE}.`);
 
     await page.goto("/app/alerts");
     const notifications = page.getByRole("region", { name: "Notifications" });

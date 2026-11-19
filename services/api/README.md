@@ -106,6 +106,11 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
 | `ODDVEX_SYNC_MAX_ATTEMPTS` | `3` | Fetch attempts per import run |
+| `ODDVEX_MAX_BETS_PER_USER` | `5000` | Most bets one account can hold, manual and imported together. At the cap `POST /v1/bets` answers `409 bet_limit_reached` and an import stops adding |
+| `ODDVEX_RATE_LIMIT_USER_WRITES_PER_MINUTE` | `120` | Bet and sync writes one user can make in a minute, from any address |
+| `ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY` | `2000` | The same, in 24 hours (counted in hourly buckets) |
+| `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR` | `10` | `GET /v1/me/export` requests one user can make in an hour |
+| `ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE` | `8` | Streamed responses (`GET /v1/bets` and the export) one user can have in progress at the same moment |
 | `ODDVEX_ALERT_EVAL_MIN_SECONDS` | `30` | Minimum seconds between two alert evaluations triggered by one user reading their notifications. `0` evaluates on every read (tests) |
 | `ODDVEX_COMMUNITY_PICKS_PER_DAY` | `20` | Community picks one user can post in 24 hours |
 | `ODDVEX_COMMUNITY_COMMENTS_PER_HOUR` | `30` | Community comments one user can post in an hour |
@@ -190,6 +195,41 @@ Behaviour worth knowing:
 - **Best price.** `is_best` and `best` only consider books that are `open` and not stale. For
   spread and total, prices are only compared between books on the consensus (most common)
   line. The consensus is the mean no-vig probability of those same books.
+- **Stale quotes.** One rule (`Board.is_stale`) decides it for event markets, prop offers,
+  the best moneyline in event lists and the best price used by alerts and community picks. A
+  quote is stale when it is older than the threshold (`ODDVEX_STALE_PREGAME_SECONDS`,
+  `ODDVEX_STALE_LIVE_SECONDS`), has no timestamp, has a timestamp more than 60 seconds in the
+  future, or, in a live game, was last updated before the score last changed (the provider
+  reports that time as `Event.score_updated_at`; without it only the age rule applies). A stale
+  quote is still listed with `is_stale: true`, but it is never marked best and never counts
+  in a consensus.
+- **Prop board filters.** `GET /v1/props?league=&market=`: an unknown `league` is a 422. A
+  `market` that is not a prop market of the chosen league (of any league without `league`) is
+  answered with an empty list; a blank `market` means no filter. The board is cached for 10
+  seconds per filter combination, keyed on the validated values, and nothing is cached for a
+  value that does not exist.
+- **Parlay calculator.** `POST /v1/quant/parlay` always returns the combined price. A combined
+  probability is only computed when every active leg carries a `win_probability` and the
+  active legs are from distinct known events (a single active leg needs no `event_id`).
+  `probability_status` says which case applies, as one of `computed`,
+  `needs_leg_probabilities`, `same_event_legs`, `unverified_legs`,
+  `no_active_legs` (when several apply: `no_active_legs`, then `same_event_legs`, then
+  `unverified_legs`, then `needs_leg_probabilities`). `probability_note` is the same reason
+  as a sentence. `steps` ends with a combined-probability line only when one was computed.
+- **Vendor payloads.** `providers/normalize.py` is the seam for a future data vendor; no feed
+  is connected to it. It rejects a payload instead of guessing: a priced quote without
+  `updatedAt`, a timestamp more than 60 seconds after the fetch time, a line or statistic
+  that is not a finite number in plain decimal form, sides that do not fit the market, spread
+  lines that are not mirrored, total lines that differ or are not above 0, negative or
+  fractional scores, an identifier that is not a short text or a whole number, a text with
+  control or invisible characters, a league the API does not serve, the same team on both
+  sides, two keys for the same statistic, and values far outside any real range (a price
+  beyond +/-1,000,000, a line or score beyond 1,000, a statistic beyond 100,000). A number
+  sent as text may have 40 characters, a timestamp 64, and an identifier, a label or the
+  clock of a live event 200; a longer one is rejected without being parsed, so a field of
+  any size is refused at once. Rejections are counted per provider, record type and reason
+  (`rejection_counts()`) and logged as `provider_payload_rejected` with those three values,
+  never with the payload.
 - **Finished events.** Their markets are reported as `unavailable` with no outcomes. Line
   history still runs up to the close.
 - **Hit rate.** Historical frequency with a Wilson 95% interval. Games that land exactly on the
@@ -197,10 +237,67 @@ Behaviour worth knowing:
 - **Bets.** `status` is `pending` or `settled`; `result` carries the outcome. Odds are accepted
   as American, decimal or fractional and stored as decimal. Every bet query is filtered by the
   authenticated user, so another user's bet id returns 404.
+- **What a bet can hold.** Prices are stored with six decimal places and at most ten digits
+  before the point, money in cents with at most twelve. A bet is rounded to that and checked
+  completely before anything is written, on create, update, settle and import: a price (of a
+  leg, of the bet, or a closing price) that would be stored as 1.000000 or less is
+  `422 invalid_decimal_odds`; a price or a combined parlay price above 9999999999.999999 is
+  `422 odds_out_of_range`; a stake that would be stored as 0.00 is `422 invalid_stake` (0.005
+  still rounds up to 0.01); a stake and price, or a settlement, that would pay more than
+  999999999999.99 is `422 payout_out_of_range`. Every write route builds its answer before it
+  commits, so a request that ends in an error has stored nothing. A row written before these
+  checks (a price of exactly 1.000000 or a stake of 0.00) still loads in the list, the
+  summary, the analytics and the export: its price is read as the shortest price there is,
+  1.000001 (shown as `decimal: 1.0`, `american: -100000000`), a stake of 0 has a potential
+  payout and profit of 0, and no CLV is computed from such a price. It cannot be settled as
+  it is (422); it can be edited or deleted. The rules are in `bets/storage.py`.
+- **Bet cap.** An account holds at most `ODDVEX_MAX_BETS_PER_USER` bets (default 5,000), manual
+  and imported together. At the cap `POST /v1/bets` answers `409 bet_limit_reached` with
+  `details.max_bets`, like the watchlist and alert caps. Editing, settling and deleting still
+  work. An import takes the provider's bets in order and stops adding at the cap: the run
+  succeeds, its `error_message` says how many bets were left out and why (the number is also
+  `fetched_count - imported_count - duplicate_count`), and a later import is offered them
+  again. Creates and imports of one account that arrive together wait for each other on a
+  row lock, so the cap is exact on PostgreSQL. SQLite (development) has no row locks: there,
+  requests that arrive together can each see room and pass the cap by a few bets.
+- **Repeating a create safely.** `POST /v1/bets` takes an optional `client_request_id` (8 to 64
+  characters from `A-Z a-z 0-9 _ -`). The first request with an id stores the bet and answers
+  201. A later request from the same account with the same id answers 200 with the bet stored
+  the first time: no second bet, audit entry or staking reminder, even if the repeated body
+  differs and even when the retry arrives while the first request is still running (a unique
+  index on `bets (user_id, client_request_id)` decides). That includes the case where the
+  first request takes the account's last free place: the retry is answered with the stored
+  bet, not with `409 bet_limit_reached`. The id is not part of the response and is free again
+  once the bet is deleted. Imported bets have none.
+- **Write and export limits.** Bet writes (create, edit, delete, settle, auto-settle) and sync
+  writes (connect, import, disconnect) share a limit per user id, whatever the address:
+  `ODDVEX_RATE_LIMIT_USER_WRITES_PER_MINUTE` and `ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY`.
+  `GET /v1/me/export` has its own, `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`. Over a limit the answer
+  is `429 rate_limited` with `Retry-After`. A request that passes the limit counts whether
+  or not it then succeeds (a 422 or a 404 counts); a request the limit itself refuses does
+  not. In memory, per process, and off with `ODDVEX_RATE_LIMIT_ENABLED=false`, like the other
+  limiters. The dependency is `ratelimit.user_rate_limit("writes")`. These limits cover the
+  bet and sync routes only: the other routes that write for a signed-in user (watchlist,
+  alert rules, notifications, the staking reminder) have their caps on stored items but no
+  per-user write limit yet.
+- **In progress at once.** Two things are also limited by how many one account has running at
+  the same moment, because each holds memory for as long as it runs. Streamed responses
+  (`GET /v1/bets` and `GET /v1/me/export` together): at most
+  `ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE` (default 8); a response counts from its start
+  until it has been sent in full or the client has gone. Auto-settle: one per account; a call
+  that arrives while another is still running is not started. Both answer
+  `429 rate_limited` with `Retry-After: 1`. In memory, per process, and off with
+  `ODDVEX_RATE_LIMIT_ENABLED=false` (`ratelimit.take_user_stream_slot`,
+  `ratelimit.user_exclusive`).
 - **Bet list.** `GET /v1/bets` takes `status`, `sport`, `market` (any leg), `sportsbook` (exact,
   case-insensitive for any script: see "Case-insensitive matching" below), `bet_type`, `sort` (`placed_at`, `stake`, `profit`, each with a `-` prefix
   for descending; default `-placed_at`), `limit` (1 to 1000, default 500) and `offset`. Pending
-  bets have no profit and sort last either way. An unknown `sort` is a 422.
+  bets have no profit and sort last either way. An unknown `sort` is a 422. The page is
+  streamed: one statement decides which bets are on it and in what order (their ids), then
+  the bets are read and sent 50 at a time, each batch in a database session of its own. The
+  response is still one JSON array of `BetOut`, without a `Content-Length`. A request holds
+  one batch in memory, not the page, and no database connection while the client reads. A
+  bet deleted while its page is being sent is left out of that page.
 - **Structured legs.** A leg may carry `outcome_key` (`home`, `away`, `draw`, `over`, `under`)
   next to `event_id`, `market` and, for spread and total, `line`. A spread `line` is the handicap
   of the selected side. Such a leg is validated when the bet is created or its legs are replaced:
@@ -215,7 +312,14 @@ Behaviour worth knowing:
   are `"user"`; bets imported already settled have `null`). Everything else is returned under
   `skipped` with `not_gradeable`, `event_not_final`, `event_unavailable` or
   `manual_result_required` (a bet with its own price where a leg pushed). Calling it again
-  settles nothing new. Rules: `docs/QUANT_METHODOLOGY.md`.
+  settles nothing new. One call settles at most 200 bets, oldest first, reading pending bets
+  100 at a time; when it stops there with pending bets left unexamined the response carries
+  `has_more: true` and the next call continues (the field is left out otherwise). One account
+  runs one auto-settle at a time (see "In progress at once"). Rules:
+  `docs/QUANT_METHODOLOGY.md`.
+- **Summary and analytics.** `GET /v1/bets/summary` and `GET /v1/bets/analytics` read a few
+  columns per bet and per leg (`bets.service.load_bet_facts`), never the mapped bets with
+  their notes and selections, so their memory grows with the number of bets only.
 - **Watchlist.** Teams, players and events, at most 200 per user. Adding validates the id
   against the provider (`404 not_found`), and adding the same thing twice returns the existing
   item with 200 instead of 201. Items embed the current `team`, `player` or `event`; when the
@@ -282,9 +386,11 @@ Behaviour worth knowing:
   saved.** At most one reminder per user and week, even if the threshold changes or the
   notification is deleted.
 - **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
-  (public, flag `value_screen`). For every outcome of every live or upcoming event, the best
+  (public, flag `value_screen`). For every outcome of every upcoming event, the best
   open, non-stale price is compared with the mean no-vig probability of the **other** open,
-  non-stale books quoting the same line. The book with the best price is left out of its own
+  non-stale books quoting the same line. Live and finished events are never listed: in play
+  each price follows the score, so two quotes taken moments apart are not comparable and their
+  difference would be listed as an edge. The book with the best price is left out of its own
   consensus, and an outcome with fewer than 2 other books is skipped. `edge` is the quant
   engine's EV per unit staked at the best price if the consensus probability were true
   (`quant.value` on top of `quant.ev`); rows with `edge` above 0 and at least `min_edge`
@@ -292,9 +398,9 @@ Behaviour worth knowing:
   `books_in_consensus`, `breakeven_probability`, `last_updated` and `stale_after_seconds`.
   The response carries `as_of`, `data_mode`, `method` and a `caveat`: a price above the
   consensus is not proof of an edge, the consensus can be wrong, limits and availability vary,
-  and it is not a prediction. On the synthetic data the screen is often short or empty
-  (typically 0 to 6 rows, mostly live games where the simulated books update at different
-  moments); the synthetic model gives no book a real edge.
+  and it is not a prediction. On the synthetic data the screen is often short or empty and
+  every edge on it is small (a few percent at most): the rows come from the simulated margin
+  and noise, and the synthetic model gives no book a real edge.
 - **Tracker analytics.** `GET /v1/bets/analytics` (flag `tracker_analytics`) is computed only
   from the caller's settled bets: `by_odds_band` (-200 or shorter, -199 to -110, -109 to
   +100, +101 to +200, longer than +200, by the bet's rounded American price), `by_weekday`
@@ -399,12 +505,26 @@ Behaviour worth knowing:
   liked pick ids, handles blocked and reports made; present with empty lists for an account
   that never used the community, and whether or not the flag is on). The profile includes
   `plan` and `email_verified`. It never contains the password hash, email tokens or outbox
-  emails. Each export is itself audited.
+  emails. Each export is itself audited. The document is streamed (`account/export.py`): bets
+  are read 50 at a time and import runs and audit entries 1,000 at a time and written as
+  they are read, and no database connection is held while the client is reading. The
+  response therefore has no `Content-Length`; it is still one JSON document of the
+  `AccountExportOut` schema, with the keys in the same order, to be read to the end and
+  parsed once. If the connection breaks part-way the text is not valid JSON, so a partial
+  export cannot be mistaken for a whole one. The batches are separate reads, not one
+  snapshot: a bet whose `placed_at` is edited while its own account is being exported can be
+  in that document twice or not at all. Limited to `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`
+  requests per user, and counted among the streamed responses one account can have in
+  progress (see "In progress at once").
 - **Sync.** Re-running an import never duplicates a bet: bets are keyed on user + provider +
   external bet id. A provider failure that survives the retries is recorded as a failed run and
   returned as `502 sync_failed` with `details.run_id` and `details.retryable`. Two imports of
   the same account at the same moment cannot both write: the one that loses the race gets
   `409 sync_conflict` (`details.retryable: true`), writes nothing, and can simply be retried.
+  Imported bets count against the bet cap and are checked like bets entered by hand: a bet
+  the provider sends with a price, stake or amount no column can hold, with no legs or more
+  than twenty, or with an unknown type or result is left out and counted in the run's
+  `error_message` (see "Bet cap" above).
 - **Request size.** Bodies over `ODDVEX_MAX_BODY_BYTES` are refused with `413 payload_too_large`
   in the usual envelope, whether the size is declared or the body is streamed.
 - **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
@@ -560,9 +680,9 @@ src/oddvex_api/
   entitlements/      plan catalog, require_entitlement, GET /v1/me/entitlements. No billing
   mailer/            EmailSender protocol, OutboxEmailSender, ResendEmailSender stub, email
                      templates (all wording), hashed single-use tokens, dev outbox route
-  account/           data export
-  bets/              tracker: schemas, service (settlement, auto-settlement, summary),
-                     analytics, routes
+  account/           data export (export.py streams the document)
+  bets/              tracker: schemas, storage (what the columns can hold), service
+                     (settlement, auto-settlement, summary), analytics, routes
   watchlist/         watched teams, players and events
   alerts/            alert rules: schemas, pure evaluator, service (provider facts, state), throttle, routes
   notifications/     templates (all wording), NotificationChannel + InAppChannel, preferences,
@@ -580,7 +700,8 @@ alembic/             migrations (0001: users, bets, bet_legs, sync_connections, 
                      users.plan/status/last_login_at/email_verified_at;
                      0005: community_profiles, community_picks, community_comments,
                      community_follows, community_likes, community_blocks, community_reports,
-                     users.search_key, bets.sportsbook_key)
+                     users.search_key, bets.sportsbook_key;
+                     0006: bets.client_request_id and its unique index)
 scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py
 docs/QUANT_METHODOLOGY.md
 ```
@@ -593,7 +714,7 @@ docs/QUANT_METHODOLOGY.md
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
   security headers, CORS allowlist, request body size limit, in-memory sliding-window rate
   limits (per IP, per account for failed logins and emails, and per user for community
-  picks, comments, reports and follows), audit log for auth events including logout,
+  picks, comments, reports and follows, bet and sync writes and the data export), audit log for auth events including logout,
   email verification, password resets, every admin change, admin reads, role grants and
   removals, community posts, follows, blocks, reports and moderation decisions, password changes, bet create/settle/auto-settle/delete,
   watchlist changes, alert rule changes and firings, notification deletion, preference and
@@ -604,8 +725,8 @@ docs/QUANT_METHODOLOGY.md
 | Thing | Status |
 | --- | --- |
 | Leagues, teams, players, sportsbooks, events, scores | Synthetic. Fictional names, seeded, relative to the current time so there are always live, upcoming and final events |
-| Odds, lines, line history, prop offers, game logs | Synthetic. A simple internally consistent model with a margin and noise. No book or prop has a real edge |
-| Stale / suspended / unavailable books | Simulated on purpose. One book (`oldmill`) is always stale |
+| Odds, lines, line history, prop offers, game logs | Synthetic. One scoring model produces both the results and the prices: each side scores as a Poisson process, a fair price is the exact probability of the final result given the score and the time left, and final scores are drawn from the same model (`tests/test_audit_board_calibration.py` checks that every side wins as often as its price says, before the start and in play). Book prices add a margin and noise. No book or prop has a real edge |
+| Stale / suspended / unavailable books | Simulated on purpose. One book (`oldmill`) is always stale. In a live game a book is stale for a few seconds after each score change, until it requotes, and it suspends a market once one outcome is more than 98% likely |
 | Sportsbook sync | `MockSyncProvider` only: a fictional account with a fixed bet history and a simulated failure switch. No credentials, no real sportsbook |
 | Assistant | Keyword/regex intent router and templates. **No language model is connected** |
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
@@ -664,8 +785,23 @@ docs/QUANT_METHODOLOGY.md
   serves expires on its next evaluation.
 - The watchlist stores provider ids. A watched event the provider no longer serves stays on the
   list as `available: false` until the user removes it.
-- The data export is built in memory in one response; fine for a personal bet history, not
-  designed for very large accounts.
+- The data export is streamed and bounded in memory, but its size still grows with the
+  account: the bet cap bounds the bets (about 115 MB of JSON for 5,000 bets of the largest
+  size), while nothing bounds how many audit entries and import runs an account
+  accumulates. Import runs, and the audit entries written by bet and sync routes, can only
+  grow as fast as the per-user write limit allows (`ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY`
+  a day). Audit entries are also written by the watchlist, alert, notification,
+  staking-reminder and sign-in routes, which that limit does not cover: one account can
+  add those as fast as it can send requests, and they stay in the database and in its
+  export.
+- Nothing limits how many requests are in progress across accounts, or how many
+  connections the server accepts. The per-account ceilings above bound what one account
+  can hold in memory; many accounts together are bounded only by the registration limit
+  and by whatever sits in front of the API.
+- The bet cap and the write limits are per account. They do not limit how many accounts one
+  person creates; that is the registration limit's job (per IP).
+- A sync import still holds the bets of one run in memory until it commits. The mock provider
+  has twelve; a real provider would need to page.
 - Age is a self-attestation checkbox (`age_confirmed`), not verification.
 - Odds are not persisted; they are generated on request. The `providers` contract is where an
   `odds_snapshots` table would attach.

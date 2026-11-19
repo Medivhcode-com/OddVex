@@ -17,6 +17,7 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import DateTime, bindparam, func, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 
 from oddvex_api.auth.security import hash_password
 from oddvex_api.community.content_rules import check_text
@@ -799,6 +800,196 @@ def test_upgrade_from_0004_with_existing_data_then_downgrade(
             text("SELECT count(*) FROM users WHERE search_key IS NULL")
         ).scalar()
         assert missing == 0
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+    command.check(config)
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0005_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0006.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0005")
+    engine = make_engine(url)
+    assert "client_request_id" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+    assert "uq_bets_user_client_request" not in {
+        index["name"] for index in inspect(engine).get_indexes("bets")
+    }
+
+    # Rows written by the 0005 release: one user with three bets and their legs. One of
+    # the bets holds what that release could store and the current one refuses: a price
+    # rounded to exactly 1.000000 and a stake rounded to 0.00.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    bets = (
+        ("a" * 32, "Northline", "10", "2.0"),
+        ("b" * 32, "Harbor", "25", "1.909091"),
+        ("c" * 32, "Rounded", "0", "1.000000"),
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, "
+                "is_active, age_confirmed_at, created_at, token_version, plan, status, "
+                "search_key) VALUES (:id, :email, :hash, 'Old', 'user', :active, :at, :at, 0, "
+                "'free', 'active', :key)"
+            ).bindparams(at),
+            {
+                "id": "u" * 32,
+                "email": "old@example.test",
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+                "key": "old@example.test\nold",
+            },
+        )
+        for bet_id, sportsbook, stake, odds in bets:
+            connection.execute(
+                text(
+                    "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, "
+                    "sportsbook_key, stake, odds_decimal, odds_source, placed_at, source, "
+                    "created_at, updated_at) VALUES (:id, :user, 'straight', 'pending', 'nba', "
+                    ":sportsbook, :key, :stake, :odds, 'legs', :at, 'manual', :at, :at)"
+                ).bindparams(at),
+                {
+                    "id": bet_id,
+                    "user": "u" * 32,
+                    "sportsbook": sportsbook,
+                    "key": sportsbook.lower(),
+                    "stake": stake,
+                    "odds": odds,
+                    "at": stamp,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO bet_legs (id, bet_id, position, selection, market, "
+                    "odds_decimal) VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', :odds)"
+                ),
+                {"id": bet_id.upper(), "bet": bet_id, "odds": odds},
+            )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    columns = {c["name"]: c for c in inspect(engine).get_columns("bets")}
+    assert columns["client_request_id"]["nullable"] is True
+    indexes = {index["name"]: index for index in inspect(engine).get_indexes("bets")}
+    assert indexes["uq_bets_user_client_request"]["column_names"] == [
+        "user_id",
+        "client_request_id",
+    ]
+    assert bool(indexes["uq_bets_user_client_request"]["unique"]) is True
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Nothing existing was touched: every old bet is still there, without an id.
+        rows = connection.execute(
+            text("SELECT id, sportsbook, client_request_id FROM bets ORDER BY id")
+        ).all()
+        assert [tuple(row) for row in rows] == [(b[0], b[1], None) for b in bets]
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 3
+    command.check(config)  # `alembic check`: models and migrations agree
+
+    # The index does its job in the database itself: one bet per user and id, any number
+    # of bets without one.
+    duplicate = text(
+        "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, stake, "
+        "odds_decimal, odds_source, placed_at, source, created_at, updated_at, "
+        "client_request_id) VALUES (:id, :user, 'straight', 'pending', 'nba', 'Dup', 10, 2.0, "
+        "'legs', :at, 'manual', :at, :at, :request)"
+    ).bindparams(at)
+    with engine.begin() as connection:
+        connection.execute(
+            duplicate, {"id": "d" * 32, "user": "u" * 32, "at": stamp, "request": "request-0001"}
+        )
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            duplicate, {"id": "e" * 32, "user": "u" * 32, "at": stamp, "request": "request-0001"}
+        )
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM bets WHERE id = :id"), {"id": "d" * 32})
+    engine.dispose()
+
+    # The current app on the upgraded data: the old account's bets load everywhere,
+    # including the one this release would refuse, and a create can be repeated safely.
+    app = make_app(database_url=url, env="production", jwt_secret="k" * 48)
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        listed = client.get("/v1/bets", headers=headers)
+        assert listed.status_code == 200, listed.text
+        by_book = {b["sportsbook"]: b for b in listed.json()}
+        assert set(by_book) == {"Northline", "Harbor", "Rounded"}
+        assert by_book["Rounded"]["stake"] == 0 and by_book["Rounded"]["potential_payout"] == 0
+        assert by_book["Rounded"]["combined_price"]["american"] == -100000000
+        assert client.get("/v1/bets/summary", headers=headers).status_code == 200
+        assert client.get("/v1/bets/analytics", headers=headers).status_code == 200
+        export = client.get("/v1/me/export", headers=headers)
+        assert export.status_code == 200 and len(export.json()["bets"]) == 3
+
+        body = {
+            "bet_type": "straight",
+            "stake": 10,
+            "sportsbook": "Northline",
+            "legs": [{"selection": "x", "market": "moneyline", "odds": -110}],
+            "client_request_id": "after-upgrade-0001",
+        }
+        first = client.post("/v1/bets", json=body, headers=headers)
+        again = client.post("/v1/bets", json=body, headers=headers)
+        assert (first.status_code, again.status_code) == (201, 200), (first.text, again.text)
+        assert again.json() == first.json()
+        assert len(client.get("/v1/bets", headers=headers).json()) == 4
+        # The old bet that could not be stored today can still be corrected or deleted.
+        assert (
+            client.delete(f"/v1/bets/{by_book['Rounded']['id']}", headers=headers).status_code
+            == 204
+        )
+        assert client.get("/health").json()["database"] == "ok"
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0006 added; every bet, old and new, is kept.
+    command.downgrade(config, "0005")
+    engine = make_engine(url)
+    assert "client_request_id" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+    assert "uq_bets_user_client_request" not in {
+        index["name"] for index in inspect(engine).get_indexes("bets")
+    }
+    assert set(inspect(engine).get_table_names()) >= TABLES_0005
+    with engine.connect() as connection:
+        books = connection.execute(text("SELECT sportsbook FROM bets ORDER BY sportsbook"))
+        assert list(books.scalars()) == ["Harbor", "Northline", "Northline"]
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 3
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0005"
+        )
+    engine.dispose()
+
+    # Up again: the column comes back empty and the models and migrations agree.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        with_id = connection.execute(
+            text("SELECT count(*) FROM bets WHERE client_request_id IS NOT NULL")
+        ).scalar()
+        assert with_id == 0
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 3
         diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
         assert diff == [], diff
     command.check(config)

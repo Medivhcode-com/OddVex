@@ -146,7 +146,12 @@ def test_stale_suspended_and_unavailable_books_are_never_best(
 def test_stale_threshold_is_tighter_for_live_events(
     scripted: ScriptedProvider, board: Board
 ) -> None:
-    live = scripted.list_events(league="nba", status="live")[0]
+    # This test is about the age threshold alone, so the live game reports no score-change
+    # time. The rule for quotes made before a score change is tested in
+    # test_audit_board_freshness.py.
+    live = scripted.list_events(league="nba", status="live")[0].model_copy(
+        update={"score_updated_at": None}
+    )
     upcoming = scripted.list_events(league="nba", status="upcoming")[0]
     scripted.quotes = [
         ("northline", "open", 100, ml(-150, 130)),

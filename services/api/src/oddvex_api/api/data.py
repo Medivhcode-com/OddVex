@@ -168,10 +168,14 @@ def get_event(event_id: str, board: BoardDep) -> EventDetailOut:
     tags=["events"],
     summary="Odds comparison across sportsbooks for one market",
     description=(
-        "`is_best` and `best` only consider books that are open and not stale. For spread and "
-        "total, prices are only compared between books quoting the consensus (most common) "
-        "line. `consensus` is the mean no-vig probability of those same books. Markets of "
-        "finished events are reported as `unavailable`."
+        "`is_best` and `best` only consider books that are open and not stale. A quote is "
+        "stale (`is_stale`) when it is older than `stale_after_seconds`, has no timestamp, "
+        "carries a timestamp from the future, or, for a live event, was last updated before "
+        "the latest score change. A stale quote is still listed but is never marked best "
+        "and does not count in `consensus`. For spread and total, prices are only compared "
+        "between books quoting the consensus (most common) line. `consensus` is the mean "
+        "no-vig probability of those same books. Markets of finished events are reported "
+        "as `unavailable`."
     ),
     responses={**NOT_FOUND_RESPONSE, **ERROR_RESPONSES},
 )
@@ -274,14 +278,29 @@ def get_player_props(
     operation_id="list_props",
     tags=["players"],
     summary="Prop board: consensus line, best over/under and last-10 hit rate",
+    description=(
+        "`league` must be a supported league key; any other value is a 422. `market` is a "
+        "prop market key from `prop_markets` of `GET /v1/leagues`, matched exactly. A "
+        "`market` that is not a prop market of the chosen league (of any league when "
+        "`league` is not given) matches no row, so the answer is an empty list. A blank "
+        "`market` means no market filter. Best over and best under follow the same rules as "
+        "the odds comparison: open, non-stale offers on the consensus line."
+    ),
     responses=ERROR_RESPONSES,
 )
 def list_props(
     board: BoardDep,
     league: Annotated[LeagueKey | None, Query()] = None,
-    market: Annotated[str | None, Query(max_length=40)] = None,
+    market: Annotated[
+        str | None,
+        Query(
+            max_length=40,
+            description="A prop market key. Unknown: empty list. Blank: no market filter.",
+        ),
+    ] = None,
 ) -> list[PropBoardRowOut]:
-    return board.props_board(league, market)
+    # The board builds its cache key from these values, so they are normalised first.
+    return board.props_board(league, market if market and market.strip() else None)
 
 
 # --------------------------------------------------------------- value screen
@@ -292,12 +311,15 @@ def list_props(
     tags=["value"],
     summary="Market discrepancies: best price against the consensus of the other books",
     description=(
-        "Outcomes of live and upcoming events whose best open, non-stale price is longer "
-        "than the no-vig consensus of the other open, non-stale sportsbooks at the same "
-        "line. The sportsbook with the best price is excluded from its own consensus and "
-        "at least 2 other sportsbooks are required, otherwise the outcome is skipped. "
-        "Sorted by `edge`, largest first. A price above the consensus is not proof of an "
-        "edge and this is not a prediction; read `caveat`. Behind the `value_screen` flag."
+        "Outcomes of upcoming events whose best open, non-stale price is longer than the "
+        "no-vig consensus of the other open, non-stale sportsbooks at the same line. Events "
+        "in progress and finished events are never listed: in play, prices move with the "
+        "score, so quotes taken moments apart are not comparable. The sportsbook with the "
+        "best price is excluded from its own consensus and at least 2 other sportsbooks are "
+        "required, otherwise the outcome is skipped. Sorted by `edge`, largest first. A "
+        "price above the consensus is not proof of an edge and this is not a prediction; "
+        "read `caveat`. `league` and `market` must be supported keys; any other value is a "
+        "422. Behind the `value_screen` flag."
     ),
     dependencies=[Depends(require_flag("value_screen"))],
     responses={
