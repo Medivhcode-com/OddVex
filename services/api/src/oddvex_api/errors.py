@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .auth.security import PasswordHashBusy
 from .quant import QuantError
 
 logger = logging.getLogger("oddvex.errors")
@@ -103,6 +104,20 @@ def install_error_handlers(app: FastAPI) -> None:
             envelope(exc.code, exc.message, exc.details),
             status_code=exc.status_code,
             headers=exc.headers,
+        )
+
+    @app.exception_handler(PasswordHashBusy)
+    async def _password_hash_busy(request: Request, exc: PasswordHashBusy) -> JSONResponse:
+        # Same status, code, details and header as a rate-limited request, so clients
+        # need no new case. Imported here because ratelimit.py imports this module.
+        from .ratelimit import too_many_requests
+
+        logger.warning("password_hash_busy", extra={"path": request.url.path})
+        shed = too_many_requests(exc.retry_after_seconds)
+        return JSONResponse(
+            envelope(shed.code, shed.message, shed.details),
+            status_code=shed.status_code,
+            headers=shed.headers,
         )
 
     @app.exception_handler(QuantError)

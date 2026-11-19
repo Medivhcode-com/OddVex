@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     #: Verification or password-reset emails one address can request inside the window.
     email_requests_per_window: int = Field(default=3, ge=1)
 
+    #: argon2 operations (login, sign-up, password change and reset) that may run at once
+    #: in this process. Each one holds about 64 MiB while it runs, on top of about 85 MiB
+    #: idle: the default of 2 peaks near 235 MiB under load. Size it to the container's
+    #: memory limit: about ten slots reach 768 MB.
+    password_hash_concurrency: int = Field(default=2, ge=1, le=32)
+    #: Seconds a request waits for one of those slots before it gets 429 with
+    #: ``Retry-After``. 0 never waits. A shed request is not counted as a failed login.
+    password_hash_wait_seconds: float = Field(default=1.0, ge=0, le=30)
+
     #: ``outbox`` writes emails to the ``email_outbox`` table and sends nothing.
     #: ``resend`` is a stub that refuses to start: real email needs Founder approval.
     email_provider: Literal["outbox", "resend"] = "outbox"

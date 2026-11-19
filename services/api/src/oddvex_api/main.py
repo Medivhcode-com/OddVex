@@ -18,6 +18,7 @@ from .alerts.throttle import EvaluationThrottle
 from .api import admin, data, quant_routes
 from .assistant import router as assistant_router
 from .auth import router as auth_router
+from .auth.security import configure_password_hashing
 from .bets import router as bets_router
 from .cache import InMemoryTTLCache
 from .community import admin_router as community_admin_router
@@ -170,6 +171,10 @@ def create_app(
     settings = settings or get_settings()
     settings.validate_for_startup()
     configure_logging(settings.log_level)
+    # Process-wide, not per app: bounds the memory argon2 can hold at once (auth/security.py).
+    configure_password_hashing(
+        settings.password_hash_concurrency, settings.password_hash_wait_seconds
+    )
 
     engine = make_engine(settings.database_url)
 
