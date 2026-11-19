@@ -39,6 +39,10 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "medivhcode"
+    "extra": {
+      "eas": {
+        "projectId": "e1023991-d90d-446e-ad08-64280426b84f"
+      }
+    }
   }
 }

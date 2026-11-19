@@ -117,8 +117,12 @@ Deployed 2026-11-18 from commit `d5749e0` with `infrastructure/hostinger/ops.sh`
 - One marked block for `preview.oddvex.com` (password-protected) and `api-preview.oddvex.com` was appended to the
   server's shared Caddyfile. Caddy validated the file and reloaded without error. The previous file is kept at
   `/opt/oddvex/Caddyfile.before-oddvex-20261118T074444Z` on the server.
-- The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works. Whether the server's other
-  sites still answer after the reload was not checked by the build session, whose network cannot reach them.
+- The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works.
+- A check run on the server itself at 2026-11-18 07:45 UTC, right after the reload, got: `preview.oddvex.com` 401
+  without the password and 200 with it (home page and `/app/games`), with the `X-Robots-Tag: noindex, nofollow`
+  header; `api-preview.oddvex.com/health` and `/v1/meta` 200; and every other site on the shared proxy answering
+  (tickettoss.io, fleetsort.com, medivhboost.com, replyhub.site, n8n, office and myoffice 200; app.fleetsort.com and
+  rentex.fleetsort.com 307, their normal redirect).
 - Added after that first deploy, and not yet running on the server until the next deploy: a `worker` container
   (alert evaluation and pick grading every two minutes) and a `backup` container (one database dump a day, 14 kept).
 - Not configured: real email, off-server backups. `oddvex.com` itself is unchanged.
