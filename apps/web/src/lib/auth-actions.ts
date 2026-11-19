@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { api, ApiError, ApiUnavailableError, sessionToken } from "@/lib/api";
-import { clearSession, safeNext, setSession } from "@/lib/session";
+import { safeNext } from "@/lib/safe-next";
+import { clearSession, setSession } from "@/lib/session";
 import type { AuthResponse } from "@/lib/types";
 
 export type AuthState = { error?: string; fields?: Record<string, string>; values?: Record<string, string>; suspended?: boolean };
@@ -30,7 +31,7 @@ export async function loginAction(_: AuthState, form: FormData): Promise<AuthSta
     return { error: describe(error, "That email and password don't match an account."), values };
   }
   await setSession(auth.access_token, auth.expires_in);
-  redirect(safeNext(String(form.get("next") ?? "")));
+  redirect(safeNext(form.get("next")));
 }
 
 export async function signupAction(_: AuthState, form: FormData): Promise<AuthState> {
@@ -55,7 +56,7 @@ export async function signupAction(_: AuthState, form: FormData): Promise<AuthSt
     return { error: describe(error, "The account could not be created."), values };
   }
   await setSession(auth.access_token, auth.expires_in);
-  redirect(safeNext(String(form.get("next") ?? "")));
+  redirect(safeNext(form.get("next")));
 }
 
 /**

@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies, headers as incomingHeaders } from "next/headers";
-import { API_URL, SESSION_COOKIE } from "@/lib/config";
+import { apiUnavailableDigest } from "@/lib/app-error";
+import { API_TIMEOUT_MS, API_URL, SESSION_COOKIE } from "@/lib/config";
 import { isRequestId, upstreamMetaHeaders } from "@/lib/request-meta";
 
 export { API_URL, SESSION_COOKIE };
@@ -26,19 +27,36 @@ export class ApiError extends Error {
   }
 }
 
-/** Thrown when the API cannot be reached at all, as opposed to answering with an error. */
+/**
+ * Thrown when the API cannot be reached at all, as opposed to answering with an error.
+ *
+ * The digest is the only field of a server error that reaches the browser in a production
+ * build, so it carries a fixed marker and the request id (`lib/app-error.ts`). That is how
+ * `app/app/error.tsx` can say "OddVex can't reach its data service"; the message below stays
+ * on the server.
+ */
 export class ApiUnavailableError extends Error {
-  digest?: string;
+  digest: string;
 
   constructor(public requestId?: string) {
     super("The OddVex API is not reachable.");
     this.name = "ApiUnavailableError";
-    if (requestId) this.digest = requestId;
+    this.digest = apiUnavailableDigest(requestId);
   }
 }
 
 export async function sessionToken(): Promise<string | undefined> {
   return (await cookies()).get(SESSION_COOKIE)?.value;
+}
+
+/**
+ * Drops the session cookie if this request is allowed to change cookies, which is the case in
+ * a server action or a route handler. While a page renders it is not, and nothing happens.
+ */
+async function forgetSession(): Promise<void> {
+  try {
+    (await cookies()).delete(SESSION_COOKIE);
+  } catch {}
 }
 
 type Query = Record<string, string | number | boolean | null | undefined>;
@@ -82,6 +100,11 @@ export async function parseError(response: Response, requestId?: string): Promis
  * Reading request headers makes the calling route dynamic, so `api()` may only be called from
  * request-scoped code (the `/app` tree, auth pages, server actions), never at module scope
  * and never from a marketing page, which must stay static.
+ *
+ * When the API answers that the token it was sent is no longer valid (`401 invalid_token`:
+ * logged out or password changed on another device), the session cookie is dropped right
+ * here if the call comes from a server action. A page render cannot change cookies; pages
+ * go through `currentUser()`, which sends the visitor to `SESSION_ENDED_PATH` instead.
  */
 export async function api<T>(
   path: string,
@@ -90,9 +113,11 @@ export async function api<T>(
   const meta = upstreamMetaHeaders(await incomingHeaders());
   const headers: Record<string, string> = { accept: "application/json", ...meta.headers };
   if (options.body !== undefined) headers["content-type"] = "application/json";
+  let sentToken = false;
   if (options.auth) {
     const token = await sessionToken();
     if (token) headers.authorization = `Bearer ${token}`;
+    sentToken = Boolean(token);
   }
   let response: Response;
   try {
@@ -101,12 +126,16 @@ export async function api<T>(
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: "no-store",
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
   } catch {
     throw new ApiUnavailableError(meta.requestId);
   }
-  if (!response.ok) throw await parseError(response, meta.requestId);
+  if (!response.ok) {
+    const error = await parseError(response, meta.requestId);
+    if (sentToken && error.status === 401 && error.code === "invalid_token") await forgetSession();
+    throw error;
+  }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

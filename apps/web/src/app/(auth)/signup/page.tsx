@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { SignupForm } from "@/components/app/auth-forms";
-import { safeNext } from "@/lib/session";
+import { safeNext } from "@/lib/safe-next";
 
 export const metadata: Metadata = { title: "Create your account", robots: { index: false } };
 

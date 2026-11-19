@@ -7,6 +7,10 @@ import { SITE } from "@/lib/site";
 
 type Props = { params: Promise<{ slug: string }> };
 
+// Only the posts listed below exist. Any other slug is a 404 from the prerendered not-found
+// page: it is not rendered on request, so nothing is added to the cache or written to disk.
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return POSTS.map((post) => ({ slug: post.slug }));
 }

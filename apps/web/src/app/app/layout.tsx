@@ -20,7 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Feature flags that can't be read count as off, so a flagged entry point never shows by accident.
   const [user, format, meta, flags] = await Promise.all([
     currentUser().catch((error) => {
-      unstable_rethrow(error); // a suspended account is redirected to be signed out
+      unstable_rethrow(error); // a suspended account or a dead session token is redirected to have its cookie cleared
       return null;
     }),
     oddsFormat(),
