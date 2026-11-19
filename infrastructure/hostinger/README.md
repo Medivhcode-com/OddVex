@@ -37,8 +37,9 @@ DNS: `A` records `preview` and `api-preview` → `179.236.240.236`.
 
 - Memory is capped (about 1.8 GB in total) so OddVex cannot starve the other projects.
 - The build runs on the server and needs about 2 GB free while it runs.
-- No backups are configured for the OddVex database yet. Fine for a preview with synthetic data; not for launch.
-- Alerts are still only evaluated when a user opens the app (no scheduler).
+- A `backup` container writes one database dump a day to `/opt/oddvex/backups` and keeps 14 days. The dumps are on
+  the same disk as the database, so they do not protect against losing the server. A restore has not been rehearsed.
+- A `worker` container evaluates alert rules and grades community picks every two minutes. Delivery is in-app only.
 - Email stays in the outbox table; nothing is sent.
 - Going public (`oddvex.com` itself, no password) is a separate Founder decision.
 

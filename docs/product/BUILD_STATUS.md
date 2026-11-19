@@ -117,11 +117,11 @@ Deployed 2026-11-18 from commit `d5749e0` with `infrastructure/hostinger/ops.sh`
 - One marked block for `preview.oddvex.com` (password-protected) and `api-preview.oddvex.com` was appended to the
   server's shared Caddyfile. Caddy validated the file and reloaded without error. The previous file is kept at
   `/opt/oddvex/Caddyfile.before-oddvex-20261118T074444Z` on the server.
-- **Not verified:** that the two addresses answer over HTTPS from the public internet, and that the server's other
-  sites still answer after the reload. The build session's network cannot reach those hosts, and the Hostinger
-  connection signed out before the check's result could be read. The Founder should open `https://preview.oddvex.com`
-  and one of the other sites to confirm.
-- Not configured: database backups, a scheduler for alerts, real email. `oddvex.com` itself is unchanged.
+- The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works. Whether the server's other
+  sites still answer after the reload was not checked by the build session, whose network cannot reach them.
+- Added after that first deploy, and not yet running on the server until the next deploy: a `worker` container
+  (alert evaluation and pick grading every two minutes) and a `backup` container (one database dump a day, 14 kept).
+- Not configured: real email, off-server backups. `oddvex.com` itself is unchanged.
 
 ## Replay preview (internal only, decision D-015)
 

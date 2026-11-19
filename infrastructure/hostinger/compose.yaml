@@ -30,7 +30,7 @@ services:
     build: ../../services/api
     image: oddvex-api:${ODDVEX_RELEASE:-local}
     restart: unless-stopped
-    environment:
+    environment: &api-env
       ODDVEX_ENV: production
       DATABASE_URL: postgresql+psycopg://oddvex:${ODDVEX_DB_PASSWORD}@oddvex-db:5432/oddvex
       ODDVEX_JWT_SECRET: ${ODDVEX_JWT_SECRET:?set ODDVEX_JWT_SECRET}
@@ -46,6 +46,51 @@ services:
       default: {}
       edge: { aliases: [oddvex-api] }
     mem_limit: 768m
+
+  # Evaluates alert rules and grades community picks every two minutes, so an alert fires even
+  # when nobody has the app open. Delivery is still in-app only. A failed pass is logged and the
+  # loop carries on.
+  worker:
+    image: oddvex-api:${ODDVEX_RELEASE:-local}
+    restart: unless-stopped
+    environment: *api-env
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          python scripts/evaluate_alerts.py || echo "evaluate_alerts failed"
+          python scripts/grade_picks.py || echo "grade_picks failed"
+          sleep 120
+        done
+    healthcheck: { disable: true }
+    depends_on:
+      api: { condition: service_healthy }
+    mem_limit: 256m
+
+  # One compressed dump of the database every day, kept for 14 days in /opt/oddvex/backups on
+  # the server. The dumps stay on the same disk: they protect against a bad change, not against
+  # losing the server.
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${ODDVEX_DB_PASSWORD}
+    volumes: ["/opt/oddvex/backups:/backups"]
+    command:
+      - sh
+      - -c
+      - |
+        umask 077
+        while true; do
+          f=/backups/oddvex-$$(date -u +%Y%m%dT%H%M%SZ).dump
+          if pg_dump -h oddvex-db -U oddvex -Fc -f "$$f.part" oddvex; then mv "$$f.part" "$$f"; echo "wrote $$f"; else rm -f "$$f.part"; echo "backup failed"; fi
+          find /backups -name 'oddvex-*.dump' -mtime +14 -delete
+          sleep 86400
+        done
+    depends_on:
+      db: { condition: service_healthy }
+    mem_limit: 128m
 
   web:
     build:
