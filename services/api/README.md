@@ -250,7 +250,10 @@ Behaviour worth knowing:
   summary, the analytics and the export: its price is read as the shortest price there is,
   1.000001 (shown as `decimal: 1.0`, `american: -100000000`), a stake of 0 has a potential
   payout and profit of 0, and no CLV is computed from such a price. It cannot be settled as
-  it is (422); it can be edited or deleted. The rules are in `bets/storage.py`.
+  it is (422); it can be edited or deleted. The rules are in `bets/storage.py`. A bet with
+  its own price is not checked for the product of its leg prices; when that product (taken
+  or closing) is above 9999999999.999999 the bet has no CLV (`clv: null`) and is left out of
+  the CLV averages.
 - **Bet cap.** An account holds at most `ODDVEX_MAX_BETS_PER_USER` bets (default 5,000), manual
   and imported together. At the cap `POST /v1/bets` answers `409 bet_limit_reached` with
   `details.max_bets`, like the watchlist and alert caps. Editing, settling and deleting still
@@ -259,7 +262,8 @@ Behaviour worth knowing:
   `fetched_count - imported_count - duplicate_count`), and a later import is offered them
   again. Creates and imports of one account that arrive together wait for each other on a
   row lock, so the cap is exact on PostgreSQL. SQLite (development) has no row locks: there,
-  requests that arrive together can each see room and pass the cap by a few bets.
+  requests that arrive together can each see room, and the cap can be passed by as many
+  bets as there are requests in progress at that moment.
 - **Repeating a create safely.** `POST /v1/bets` takes an optional `client_request_id` (8 to 64
   characters from `A-Z a-z 0-9 _ -`). The first request with an id stores the bet and answers
   201. A later request from the same account with the same id answers 200 with the bet stored
@@ -274,8 +278,9 @@ Behaviour worth knowing:
   `ODDVEX_RATE_LIMIT_USER_WRITES_PER_MINUTE` and `ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY`.
   `GET /v1/me/export` has its own, `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`. Over a limit the answer
   is `429 rate_limited` with `Retry-After`. A request that passes the limit counts whether
-  or not it then succeeds (a 422 or a 404 counts); a request the limit itself refuses does
-  not. In memory, per process, and off with `ODDVEX_RATE_LIMIT_ENABLED=false`, like the other
+  or not it then succeeds (a 422 or a 404 counts). A request refused by a ceiling is not
+  counted by that ceiling; the per-minute ceiling is checked first, so a request the daily
+  ceiling refuses has been counted for its minute. In memory, per process, and off with `ODDVEX_RATE_LIMIT_ENABLED=false`, like the other
   limiters. The dependency is `ratelimit.user_rate_limit("writes")`. These limits cover the
   bet and sync routes only: the other routes that write for a signed-in user (watchlist,
   alert rules, notifications, the staking reminder) have their caps on stored items but no
@@ -297,7 +302,9 @@ Behaviour worth knowing:
   the bets are read and sent 50 at a time, each batch in a database session of its own. The
   response is still one JSON array of `BetOut`, without a `Content-Length`. A request holds
   one batch in memory, not the page, and no database connection while the client reads. A
-  bet deleted while its page is being sent is left out of that page.
+  bet deleted while its page is being sent is left out of that page. As with the export, a
+  page whose batches cannot all be read ends without its closing bracket and does not
+  parse; the status is already 200 by then.
 - **Structured legs.** A leg may carry `outcome_key` (`home`, `away`, `draw`, `over`, `under`)
   next to `event_id`, `market` and, for spread and total, `line`. A spread `line` is the handicap
   of the selected side. Such a leg is validated when the bet is created or its legs are replaced:
@@ -510,8 +517,10 @@ Behaviour worth knowing:
   they are read, and no database connection is held while the client is reading. The
   response therefore has no `Content-Length`; it is still one JSON document of the
   `AccountExportOut` schema, with the keys in the same order, to be read to the end and
-  parsed once. If the connection breaks part-way the text is not valid JSON, so a partial
-  export cannot be mistaken for a whole one. The batches are separate reads, not one
+  parsed once. The status is 200 as soon as the response starts. If the connection breaks
+  part-way, or a batch cannot be read (for example no database connection inside 30
+  seconds), the text ends there: the closing bracket is only sent last, so what arrived is
+  not valid JSON and a partial export cannot be mistaken for a whole one. The batches are separate reads, not one
   snapshot: a bet whose `placed_at` is edited while its own account is being exported can be
   in that document twice or not at all. Limited to `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`
   requests per user, and counted among the streamed responses one account can have in
@@ -787,17 +796,27 @@ docs/QUANT_METHODOLOGY.md
   list as `available: false` until the user removes it.
 - The data export is streamed and bounded in memory, but its size still grows with the
   account: the bet cap bounds the bets (about 115 MB of JSON for 5,000 bets of the largest
-  size), while nothing bounds how many audit entries and import runs an account
-  accumulates. Import runs, and the audit entries written by bet and sync routes, can only
-  grow as fast as the per-user write limit allows (`ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY`
-  a day). Audit entries are also written by the watchlist, alert, notification,
-  staking-reminder and sign-in routes, which that limit does not cover: one account can
-  add those as fast as it can send requests, and they stay in the database and in its
-  export.
+  size), while nothing bounds how many audit entries, import runs and community comments,
+  picks and reports an account accumulates over time. Import runs, and the audit entries
+  written by bet and sync routes, can only grow as fast as the per-user write limit allows
+  (`ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY` a day); community posts as fast as the community
+  limits allow (30 comments an hour by default). Audit entries are also written by the
+  watchlist, alert, notification and staking-reminder routes, which have no per-user
+  write limit: one account can add those as fast as it can send requests, and they stay
+  in the database and in its export. Sign-in routes write audit entries too and are
+  limited per address only.
 - Nothing limits how many requests are in progress across accounts, or how many
   connections the server accepts. The per-account ceilings above bound what one account
   can hold in memory; many accounts together are bounded only by the registration limit
   and by whatever sits in front of the API.
+- A request holds a database connection from the moment the signed-in user is looked up
+  until it has answered, and the pool has 15 (SQLAlchemy's default: 5 plus 10 overflow).
+  When more requests than that are in progress at once, from one account or from many,
+  the rest wait; one that has waited 30 seconds for a connection answers `500
+  internal_error`. Measured with one account sending 125 requests at the same moment
+  (summary, analytics, list, export, auto-settle; 5,000 bets of the largest size): 36 of
+  them answered 500 after 30 seconds, the process peaked at 228 MiB and answered normally
+  afterwards. The streamed responses give their connection back between batches.
 - The bet cap and the write limits are per account. They do not limit how many accounts one
   person creates; that is the registration limit's job (per IP).
 - A sync import still holds the bets of one run in memory until it commits. The mock provider

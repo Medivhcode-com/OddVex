@@ -44,6 +44,7 @@ from .schemas import (
     _check_leg_count,
 )
 from .storage import (
+    MAX_STORED_ODDS,
     check_money_fits,
     check_payout_fits,
     shown_odds,
@@ -489,6 +490,11 @@ def auto_settle(
 
 # ------------------------------------------------------------- serialisation
 def _clv(taken: Decimal, closing: Decimal) -> float | None:
+    """CLV as a fraction, or ``None`` when one of the two is not a price that could be
+    recorded. A bet with its own price is not checked for the product of its legs, so
+    that product can be far beyond the price column; no CLV is computed from it."""
+    if taken > MAX_STORED_ODDS or closing > MAX_STORED_ODDS:
+        return None
     try:
         return round(closing_line_value(taken, closing).clv_percent / 100, 6)
     except QuantError:
@@ -519,7 +525,8 @@ def bet_out(bet: Bet) -> BetOut:
     Never raises for a stored row. A row from before the storage checks can hold a price
     of 1.000000 or a stake of 0.00; its prices are read through
     :func:`storage.shown_odds`, a stake of 0 has a potential payout and profit of 0, and
-    no CLV is computed from a price that is not above 1.
+    no CLV is computed from a price that is not above 1 or from leg prices whose product
+    is beyond the price column.
     """
     odds = shown_odds(bet.odds_decimal)
     has_stake = bet.stake > 0

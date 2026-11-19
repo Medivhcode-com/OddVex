@@ -505,6 +505,55 @@ def test_a_price_longer_than_the_column_in_an_old_sqlite_row_still_loads(
     every_read_works(client, headers)
 
 
+def test_no_clv_is_computed_from_leg_prices_whose_product_is_not_a_price(
+    client: TestClient, headers: Headers
+) -> None:
+    """A bet with its own price is not checked for the product of its legs. Twenty legs at
+    the longest price multiply to a number of two hundred digits: that is not a price the
+    tracker could record, so it gives no CLV for the bet and none for the averages."""
+    longest = {"odds": MAX_ODDS, "odds_format": "decimal", "closing_odds": "2.0"}
+    made = client.post(
+        "/v1/bets",
+        json=parlay(2, -110, odds=250, legs=[leg(**longest) for _ in range(20)]),
+        headers=headers,
+    )
+    assert made.status_code == 201, made.text
+    bet = made.json()
+    assert bet["clv"] is None
+    assert all(item["clv"] is not None for item in bet["legs"])  # each leg has a real price
+    # The other way round: closing prices whose product is beyond the column.
+    other = client.post(
+        "/v1/bets",
+        json=parlay(
+            2,
+            -110,
+            odds=250,
+            legs=[leg(odds="2.0", odds_format="decimal", closing_odds=MAX_ODDS) for _ in range(20)],
+        ),
+        headers=headers,
+    )
+    assert other.status_code == 201, other.text
+    assert other.json()["clv"] is None
+    # An ordinary parlay next to them still has one, and it alone makes the average.
+    usual = client.post(
+        "/v1/bets",
+        json=parlay(2, 150, legs=[leg(odds=150, closing_odds=140) for _ in range(2)]),
+        headers=headers,
+    ).json()
+    assert usual["clv"] is not None
+    for made_bet in (bet, other.json(), usual):
+        settled = client.post(
+            f"/v1/bets/{made_bet['id']}/settle", json={"result": "lost"}, headers=headers
+        )
+        assert settled.status_code == 200, settled.text
+    totals = client.get("/v1/bets/summary", headers=headers).json()["totals"]
+    assert totals["clv_sample"] == 1 and totals["avg_clv"] == usual["clv"]
+    analytics = client.get("/v1/bets/analytics", headers=headers)
+    if analytics.status_code == 200:  # behind a flag
+        assert analytics.json()["clv"]["sample"] == 1
+    assert client.get(f"/v1/bets/{bet['id']}", headers=headers).json()["clv"] is None
+
+
 # ---------------------------------------------------------------- sync import
 class OddProvider:
     """A provider that sends bets a column cannot hold next to good ones."""

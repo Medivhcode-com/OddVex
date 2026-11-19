@@ -379,15 +379,39 @@ def user_rate_limit(
 
 # ------------------------------------------------ per user, in progress at once
 class InProgressCounter:
-    """How many of something each key has in progress right now."""
+    """How many of something each key has in progress right now.
+
+    :meth:`leave` never waits for the lock. It can be called by a finaliser (a streamed
+    response that was dropped without being sent), and a finaliser can run in the middle
+    of any code, including code of this class that holds the lock in the same thread:
+    waiting there would never end. A slot that is given back is noted first and taken off
+    the count by whichever call holds the lock next; ``enter`` and ``active`` do that
+    before they look at the count.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._active: dict[str, int] = {}
+        #: Keys whose slot was given back and is not yet taken off ``_active``.
+        self._given_back: deque[str] = deque()
+
+    def _settle(self) -> None:
+        """Take every slot given back off the count. Called with the lock held."""
+        while True:
+            try:
+                key = self._given_back.popleft()
+            except IndexError:
+                return
+            active = self._active.get(key, 0)
+            if active <= 1:
+                self._active.pop(key, None)
+            else:
+                self._active[key] = active - 1
 
     def enter(self, key: str, limit: int) -> bool:
         """Take a slot of ``key`` unless ``limit`` are already taken."""
         with self._lock:
+            self._settle()
             active = self._active.get(key, 0)
             if active >= limit:
                 return False
@@ -395,15 +419,17 @@ class InProgressCounter:
             return True
 
     def leave(self, key: str) -> None:
-        with self._lock:
-            active = self._active.get(key, 0)
-            if active <= 1:
-                self._active.pop(key, None)
-            else:
-                self._active[key] = active - 1
+        """Give a slot of ``key`` back. Returns at once, whoever holds the lock."""
+        self._given_back.append(key)
+        if self._lock.acquire(blocking=False):
+            try:
+                self._settle()
+            finally:
+                self._lock.release()
 
     def active(self, key: str) -> int:
         with self._lock:
+            self._settle()
             return self._active.get(key, 0)
 
 

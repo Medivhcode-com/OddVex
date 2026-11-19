@@ -24,7 +24,21 @@ from sqlalchemy import event, func, select, update
 from oddvex_api.account import export as account_export
 from oddvex_api.account.schemas import AccountExportOut
 from oddvex_api.bets import service as bets_service
-from oddvex_api.db import AuditLog, Bet, BetLeg, SyncConnection, SyncImportRun
+from oddvex_api.community import service as community_service
+from oddvex_api.db import (
+    AuditLog,
+    Bet,
+    BetLeg,
+    CommunityBlock,
+    CommunityComment,
+    CommunityFollow,
+    CommunityLike,
+    CommunityPick,
+    CommunityProfile,
+    CommunityReport,
+    SyncConnection,
+    SyncImportRun,
+)
 from oddvex_api.ratelimit import CoarseWindowCounter
 from oddvex_api.sync import (
     Authorization,
@@ -514,6 +528,160 @@ def test_the_export_reads_import_runs_in_batches_too(
     assert response.content.decode() == expected
 
 
+def _community_rows(app: FastAPI, user_id: str, other_id: str) -> None:
+    """Seven picks, seven comments and five reports of ``user_id``, all on one timestamp,
+    plus a like, a follow and a block. Written straight into the tables."""
+    moment = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    def pick(owner: str, number: int, **extra: Any) -> CommunityPick:
+        return CommunityPick(
+            user_id=owner,
+            event_id=f"event-{number}",
+            league="nba",
+            event_label="Harbor City Tides at Summit Peaks",
+            selection="Summit Peaks -3.5",
+            event_start_time=moment,
+            market="spread",
+            outcome_key="home",
+            line=Decimal("-3.5"),
+            price_decimal=Decimal("1.909091"),
+            sportsbook_key="northline",
+            sportsbook_name="Northline",
+            analysis=f'analysis {number} éè "quoted" </script>',
+            posted_at=moment,
+            **extra,
+        )
+
+    with app.state.session_factory() as db:
+        db.add(CommunityProfile(user_id=user_id, handle="ada_l", bio="bio", is_public=True))
+        db.add(CommunityProfile(user_id=other_id, handle="grace_h", is_public=True))
+        mine = [pick(user_id, number) for number in range(7)]
+        mine[2].moderation_status = "hidden"
+        mine[3].status, mine[3].result, mine[3].graded_at = "graded", "won", moment
+        mine[3].home_score, mine[3].away_score = 101, 99
+        theirs = pick(other_id, 100)
+        db.add_all([*mine, theirs])
+        db.flush()
+        for number in range(7):
+            db.add(
+                CommunityComment(
+                    pick_id=(theirs if number % 2 else mine[0]).id,
+                    user_id=user_id,
+                    body=f"comment {number}",
+                    created_at=moment,
+                    moderation_status="removed" if number == 4 else "visible",
+                )
+            )
+        db.add(CommunityComment(pick_id=mine[0].id, user_id=other_id, body="theirs"))
+        for number in range(5):
+            db.add(
+                CommunityReport(
+                    reporter_id=user_id,
+                    target_type="pick",
+                    target_id=theirs.id,
+                    target_user_id=other_id,
+                    reason="spam",
+                    details=f"report {number}",
+                    created_at=moment,
+                )
+            )
+        db.add(CommunityLike(pick_id=theirs.id, user_id=user_id))
+        db.add(CommunityLike(pick_id=mine[0].id, user_id=other_id))
+        db.add(CommunityFollow(follower_id=user_id, followed_id=other_id))
+        db.add(CommunityBlock(blocker_id=user_id, blocked_id=other_id))
+        db.commit()
+
+
+def test_the_export_reads_community_picks_comments_and_reports_in_batches(
+    client: TestClient, headers: Headers, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Comments (30 an hour), picks and reports keep growing with an account as long as
+    it is used, like bets and audit entries. 100,000 comments read in one go cost one
+    export about 370 MiB. They are read and sent in batches too, and the document is the
+    one the community's own ``export_out`` describes."""
+    for name in ("PICK_BATCH", "COMMENT_BATCH", "REPORT_BATCH"):
+        monkeypatch.setattr(account_export, name, 2)
+    user_id = client.get("/v1/me", headers=headers).json()["id"]
+    other = auth_headers(client, "grace@example.test")
+    other_id = client.get("/v1/me", headers=other).json()["id"]
+    _community_rows(app, user_id, other_id)
+
+    limits: dict[str, list[int | None]] = {"picks": [], "comments": [], "reports": []}
+    whole_rows = {
+        "community_picks.analysis": "picks",
+        "community_comments.body": "comments",
+        "community_reports.details": "reports",
+    }
+
+    def record(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
+        text = " ".join(statement.split())
+        for column, name in whole_rows.items():
+            if text.startswith("SELECT") and column in text:
+                limits[name].append(row_limit(text, parameters))
+
+    event.listen(app.state.engine, "before_cursor_execute", record)
+    try:
+        response = client.get("/v1/me/export", headers=headers)
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", record)
+    assert response.status_code == 200, response.text
+    # No statement read whole picks, comments or reports without a row limit, and none
+    # more than a batch: seven, seven and five rows, two at a time.
+    for name, least in (("picks", 4), ("comments", 4), ("reports", 3)):
+        assert len(limits[name]) >= least, (name, limits)
+        assert all(limit is not None and limit <= 2 for limit in limits[name]), (name, limits)
+
+    body = response.json()
+    community = body["community"]
+    with app.state.session_factory() as db:
+        expected = community_service.export_out(db, user_id, "synthetic")
+        pick_ids = list(
+            db.scalars(
+                select(CommunityPick.id)
+                .where(CommunityPick.user_id == user_id)
+                .order_by(CommunityPick.id)
+            )
+        )
+        comment_ids = list(
+            db.scalars(
+                select(CommunityComment.id)
+                .where(CommunityComment.user_id == user_id)
+                .order_by(CommunityComment.id)
+            )
+        )
+    # Every row once, in the order of (time, id): all share one time here, so the id
+    # alone decides where a batch ends. Nobody else's rows.
+    assert [p["id"] for p in community["picks"]] == pick_ids and len(pick_ids) == 7
+    assert [c["id"] for c in community["comments"]] == comment_ids and len(comment_ids) == 7
+    assert len(community["reports"]) == 5
+    assert community["following"] == ["grace_h"] and community["blocks"] == ["grace_h"]
+    assert len(community["likes"]) == 1 and community["profile"]["handle"] == "ada_l"
+    # The same document the community's own export describes ...
+    assert community == expected.model_dump(mode="json")
+    # The counts on a pick are worked out batch by batch: one pick has three visible
+    # comments (the removed one and the blocked author's are not counted) and one like.
+    assert sorted(p["comment_count"] for p in community["picks"]) == [0] * 6 + [3]
+    assert sorted(p["like_count"] for p in community["picks"]) == [0] * 6 + [1]
+    # ... and exactly the text the response model serialises to.
+    document = AccountExportOut.model_validate(body)
+    text = json.dumps(document.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+    assert response.content.decode() == text
+    assert list(community) == list(type(expected).model_fields)
+
+    # An account that never used the community: the same keys, empty.
+    stranger = auth_headers(client, "linus@example.test")
+    empty = client.get("/v1/me/export", headers=stranger).json()["community"]
+    assert empty == {
+        "profile": None,
+        "picks": [],
+        "comments": [],
+        "following": [],
+        "likes": [],
+        "blocks": [],
+        "reports": [],
+    }
+
+
 def test_rows_that_share_a_timestamp_are_exported_once_where_batches_meet(
     client: TestClient, headers: Headers, app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -713,6 +881,73 @@ def test_a_page_of_the_bet_list_is_decided_by_one_statement(
     assert client.delete(f"/v1/bets/{ids[3]}", headers=headers).status_code == 204
     document = json.loads(first + b"".join(stream))
     assert [b["id"] for b in document] == [ids[0], ids[1], ids[2], ids[4]]
+
+
+def test_a_streamed_response_that_fails_part_way_is_never_a_whole_document(
+    client: TestClient, headers: Headers, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once a streamed response has started its status is 200, whatever happens next. If a
+    batch then cannot be read (no database connection in time, say) the text stops there.
+    The closing bracket is only ever sent last, so what arrived cannot be parsed and a
+    part of a page or of an export is never taken for the whole."""
+    from oddvex_api.bets import router as bets_router
+
+    monkeypatch.setattr(bets_router, "LIST_BATCH", 2)
+    for name in ("BET_BATCH", "RUN_BATCH", "AUDIT_BATCH"):
+        monkeypatch.setattr(account_export, name, 2)
+    _fill(client, headers, 5)
+    connection = client.post("/v1/sync/connections", json={}, headers=headers).json()
+    client.post(f"/v1/sync/connections/{connection['id']}/sync", headers=headers)
+    user_id = client.get("/v1/me", headers=headers).json()["id"]
+    ids = [b["id"] for b in client.get("/v1/bets", headers=headers).json()]
+
+    def fails_at(module: Any, name: str, number: int) -> None:
+        """Make the ``number``-th call of ``module.name`` fail from now on."""
+        real = getattr(module, name)
+        calls = [0]
+
+        def flaky(*args: Any, **kwargs: Any) -> Any:
+            calls[0] += 1
+            if calls[0] == number:
+                raise TimeoutError("no database connection")
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, flaky)
+
+    def collect(chunks: Any) -> tuple[bytes, bool]:
+        got = b""
+        try:
+            for chunk in chunks:
+                got += chunk
+        except TimeoutError:
+            return got, False
+        return got, True
+
+    def every_failure_point(module: Any, name: str, stream: Any) -> int:
+        """Fail at the first batch, then the second, and so on until the stream gets
+        through: each part that arrived must not parse. Returns how many were tried."""
+        real = getattr(module, name)
+        tried = 0
+        while True:
+            fails_at(module, name, tried + 1)
+            text, whole = collect(stream())
+            monkeypatch.setattr(module, name, real)
+            if whole:
+                json.loads(text)
+                return tried
+            tried += 1
+            with pytest.raises(ValueError):
+                json.loads(text)
+
+    factory = app.state.session_factory
+    page_batches = every_failure_point(
+        bets_router, "_batch_json", lambda: bets_router.page_chunks(factory, user_id, ids)
+    )
+    assert page_batches >= 3  # at least five bets, two at a time
+    export_batches = every_failure_point(
+        account_export, "_read_batch", lambda: account_export.stream_export(app, user_id)
+    )
+    assert export_batches >= 6  # bets, import runs and audit entries, each in batches
 
 
 def test_one_user_can_have_only_so_many_streamed_responses_at_once(
@@ -1020,3 +1255,32 @@ def test_the_sliding_limiter_forgets_keys_nobody_has_used_inside_the_window() ->
 
     with pytest.raises(ValueError, match="unknown per-user rate limit bucket"):
         user_rate_limit("no-such-bucket")
+
+
+def test_giving_a_slot_back_never_waits_for_the_counters_lock() -> None:
+    """A slot can be given back by a finaliser (a streamed response that was dropped
+    without being sent), and a finaliser can run in the middle of the counter's own code,
+    in the thread that holds its lock. Giving back must not wait for that lock: it would
+    wait for ever, and the next response to end would stop the server with it."""
+    from oddvex_api.ratelimit import InProgressCounter
+
+    counter = InProgressCounter()
+    assert counter.enter("ada", 2) and counter.enter("ada", 2) and counter.enter("grace", 1)
+    assert not counter.enter("ada", 2)
+    with counter._lock:  # what such a finaliser meets
+        giving_back = threading.Thread(target=counter.leave, args=("ada",))
+        giving_back.start()
+        giving_back.join(timeout=5)
+        returned = not giving_back.is_alive()
+    giving_back.join(timeout=5)
+    assert returned, "leave() waited for the lock"
+    # The slot is back for the next call that looks, and only that one slot.
+    assert counter.active("ada") == 1 and counter.active("grace") == 1
+    assert counter.enter("ada", 2) and not counter.enter("ada", 2)
+    assert not counter.enter("grace", 1)
+    for _ in range(2):
+        counter.leave("ada")
+    counter.leave("grace")
+    counter.leave("grace")  # one too many changes nothing
+    assert counter.active("ada") == 0 and counter.active("grace") == 0
+    assert counter.enter("grace", 1)
