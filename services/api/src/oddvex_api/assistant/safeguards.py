@@ -300,6 +300,8 @@ _CRISIS_RE = _any(
     r"\bstanding on (?:a|the) (?:bridge|ledge|roof|edge)\b|\bon (?:the|a) ledge\b",
     r"\b(?:pills|rope|gun|noose|blade|razor) (?:is |are )(?:ready|loaded|in my hand|next to "
     r"me|right here)\b",
+    r"\b(?:have|got) (?:the|my) (?:pills|rope|gun|noose|blade|razor) (?:ready|loaded|here|with "
+    r"me)\b",
     r"\b(?:take|took|taking|swallow\w*) every (?:\w+ )?pill\b",
     r"\b(?:going to|gonna|want to|wanna|about to|might|will|ill) od\b",
     r"\b(?:rope|belt|noose|cord) around my neck\b",
