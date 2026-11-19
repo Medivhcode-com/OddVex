@@ -194,7 +194,7 @@ export default async function GamePage({ params, searchParams }: Props) {
               description={
                 chart
                   ? chart.unit === "probability"
-                    ? `${chart.outcome}: each book's price over the last 48 hours. The legend gives the latest American price; point at a mark for an earlier one.`
+                    ? `${chart.outcome}: each book's price over the last 48 hours. The legend gives each book's latest American price. With a mouse, point at a mark to see an earlier one.`
                     : `${chart.outcome}, line by book over the last 48 hours`
                   : undefined
               }
@@ -206,6 +206,7 @@ export default async function GamePage({ params, searchParams }: Props) {
                   summary={chart.summary}
                   axisTitle={chart.axisTitle}
                   formatValue={chart.formatValue}
+                  valueAxis={chart.valueAxis}
                   formatTime={(t) => {
                     const hours = Math.round((span - t) / 3600000);
                     return hours <= 0 ? "Latest" : `${hours}h earlier`;

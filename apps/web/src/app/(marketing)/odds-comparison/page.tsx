@@ -20,7 +20,7 @@ export default function Page() {
           { title: "Freshness on every cell", body: "Prices carry the time they were last updated. Past a threshold they are labelled stale and no longer count toward best price or consensus." },
           { title: "Suspended and unavailable, said plainly", body: "If a book has pulled a market or doesn't offer it, the cell says so. An empty cell never means \"we don't know\"." },
           { title: "Line movement", body: "A history chart per market shows where each book opened and how it moved, with the best current price emphasized." },
-          { title: "American or decimal", body: "Switch formats once and the whole app follows. Fractional odds are accepted anywhere you type a price." },
+          { title: "American or decimal", body: "Switch formats once and prices in the odds tables and boards follow. Fractional odds are accepted anywhere you type a price." },
         ],
         limits: [
           "The preview runs on synthetic data with fictional teams and sportsbooks. Licensed feeds have not been connected yet.",

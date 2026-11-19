@@ -162,6 +162,8 @@ export default async function TrackerPage({ searchParams }: { searchParams: Prom
   // A page that no longer exists (the last bet on it was deleted) goes to the last page that does.
   if (!paging.canonical) redirect(trackerHref(paging.page));
   const settled = await api<Bet[]>("/v1/bets", { auth: true, query: { status: "settled", limit: paging.limit, offset: paging.offset } });
+  // The count was read a moment before the page. If a bet left the last page in between, step back a page.
+  if (settled.length === 0 && paging.page > 1) redirect(trackerHref(paging.page - 1));
   const timeline = summary.timeline.map((point) => ({ t: new Date(point.date).getTime(), v: point.cumulative_profit }));
 
   return (

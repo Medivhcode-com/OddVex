@@ -28,7 +28,6 @@ test.describe("research screens (signed out)", () => {
   test("moneyline line movement is drawn by implied probability and labelled with American prices", async ({ page, request }) => {
     const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
     const event = events[0];
-    const history = await (await request.get(`${API}/v1/events/${event.id}/line-history?market=moneyline`)).json();
     await page.goto(`/app/games/${event.id}`);
     const panel = page.getByRole("region", { name: "Line movement" });
     await expect(panel.getByText("Implied probability of each price, bookmaker margin included. Higher on the chart is a shorter price.")).toBeVisible();
@@ -37,17 +36,27 @@ test.describe("research screens (signed out)", () => {
     const ticks = await chart.locator('text[data-axis="value"]').allTextContents();
     expect(ticks).toHaveLength(3);
     for (const tick of ticks) expect(tick).toMatch(/^\d{1,2}\.\d%$/);
-    // Every charted point is labelled with the American price the API sent for it.
-    const first = history.series[0];
-    const charted = history.series.filter((s: { outcome_key: string }) => s.outcome_key === first.outcome_key);
-    const american = (value: number) => (value > 0 ? `+${value}` : `−${Math.abs(value)}`);
+    // Every charted point is labelled with an American price: book, price, time.
+    // Only the page is read here. Prices move every few seconds, so a second read of the API
+    // would not match the one the page was built from. That each label is the API's own
+    // American price for the point is proved in src/lib/line-history.test.ts.
     const titles = await chart.locator("title").allTextContents();
-    expect(titles).toHaveLength(charted.reduce((count: number, s: { points: unknown[] }) => count + s.points.length, 0));
-    for (const series of charted) {
-      const latest = series.points.reduce((a: { timestamp: string }, b: { timestamp: string }) => (b.timestamp >= a.timestamp ? b : a));
-      expect(titles.some((title) => title.startsWith(`${series.sportsbook.name}: ${american(latest.price.american)}, `))).toBe(true);
-      await expect(panel.locator("figcaption")).toContainText(`${series.sportsbook.name}${american(latest.price.american)}`);
+    expect(titles.length).toBeGreaterThan(1);
+    expect(titles).toHaveLength(await chart.locator("g[data-mark]").count());
+    for (const title of titles) expect(title).toMatch(/^.+: [+−]\d{3,}, (Latest|\d+h earlier)$/);
+    // The legend names every charted book once, with the price of that book's latest point.
+    const legend = await panel.locator("figcaption [data-legend]").evaluateAll((entries) =>
+      entries.map((entry) => ({ name: entry.querySelector(":scope > span")?.textContent ?? "", price: entry.querySelector(":scope > span.num")?.textContent ?? "" })),
+    );
+    expect(legend.length).toBeGreaterThan(0);
+    expect(new Set(legend.map((entry) => entry.name)).size).toBe(legend.length);
+    for (const entry of legend) {
+      expect(entry.price, entry.name).toMatch(/^[+−]\d{3,}$/);
+      const own = titles.filter((title) => title.startsWith(`${entry.name}: `));
+      expect(own.length, entry.name).toBeGreaterThan(0);
+      expect(own[own.length - 1].startsWith(`${entry.name}: ${entry.price}, `), `${entry.name}: the legend gives the latest point's price`).toBe(true);
     }
+    expect(titles.every((title) => legend.some((entry) => title.startsWith(`${entry.name}: `)))).toBe(true);
     // The spread chart still plots the line.
     const detail = await (await request.get(`${API}/v1/events/${event.id}`)).json();
     if (detail.available_markets.includes("spread")) {

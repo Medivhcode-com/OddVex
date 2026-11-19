@@ -41,6 +41,7 @@ export function trackerHref(page: number, anchor?: string): string {
 export function settledDescription(paging: SettledPaging, shown: number, total: number): string {
   if (total <= 1) return `${total} settled`;
   if (paging.pages === 1) return `${total} settled, most recently placed first`;
+  if (shown === 1) return `Showing bet ${paging.offset + 1} of ${total}, most recently placed first`;
   return `Showing ${paging.offset + 1} to ${paging.offset + shown} of ${total}, most recently placed first`;
 }
 

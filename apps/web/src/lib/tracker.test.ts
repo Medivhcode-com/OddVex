@@ -48,6 +48,7 @@ describe("settledDescription", () => {
     expect(settledDescription(settledPaging(undefined, 37), 37, 37)).toBe("37 settled, most recently placed first");
     expect(settledDescription(settledPaging(undefined, 120), 50, 120)).toBe("Showing 1 to 50 of 120, most recently placed first");
     expect(settledDescription(settledPaging("3", 120), 20, 120)).toBe("Showing 101 to 120 of 120, most recently placed first");
+    expect(settledDescription(settledPaging("2", 51), 1, 51)).toBe("Showing bet 51 of 51, most recently placed first");
   });
 });
 

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { LineHistoryChart } from "@/components/ui/charts";
+import { LineHistoryChart, valueRange } from "@/components/ui/charts";
 import { lineMovementChart } from "@/lib/line-history";
 import type { LineHistory } from "@/lib/types";
 
@@ -62,6 +62,7 @@ function render(chart: NonNullable<ReturnType<typeof lineMovementChart>>): strin
       summary: chart.summary,
       axisTitle: chart.axisTitle,
       formatValue: chart.formatValue,
+      valueAxis: chart.valueAxis,
       formatTime: (t: number) => `${Math.round((T0 + 48 * HOUR - t) / HOUR)}h earlier`,
     }),
   );
@@ -126,11 +127,107 @@ describe("moneyline line movement when the price crosses even money", () => {
     expect(chart.summary).toBe("Line movement for Harbor City Tides across 2 sportsbooks. Latest price: Northline +113, Cardinal +120.");
   });
 
+  it("draws two points that share a time in one series, each with its own mark", () => {
+    const twice = lineMovementChart(
+      history("moneyline", [book("northline", "Northline", [{ hour: 0, price: P.m104 }, { hour: 0, price: P.p103 }, { hour: 2, price: P.p113 }])]),
+      "moneyline",
+      new Set(),
+    )!;
+    const html = render(twice);
+    expect(html.match(/<title>/g)).toHaveLength(3);
+    expect(html).toContain("<title>Northline: −104, 48h earlier</title>");
+    expect(html).toContain("<title>Northline: +103, 48h earlier</title>");
+  });
+
   it("takes both figures from the API and converts nothing", () => {
     // A price whose two formats do not agree stays as sent: the chart position is the API's
     // implied probability and the label is the API's American price.
     const odd = lineMovementChart(history("moneyline", [book("northline", "Northline", [{ hour: 0, price: price(-116, 1.862069, 0.6) }, { hour: 10, price: price(120, 2.2, 0.4) }])]), "moneyline", new Set())!;
     expect(odd.series[0].points.map((p) => [p.v, p.label])).toEqual([[0.6, "−116"], [0.4, "+120"]]);
+  });
+});
+
+describe("moneyline line movement when the price barely moves", () => {
+  const m110 = price(-110, 1.909091, 0.52381);
+  /** The axis labels as numbers of percent. */
+  const percents = (labels: string[]) => labels.map((label) => (/^\d{1,3}\.\d%$/.test(label) ? Number(label.slice(0, -1)) : Number.NaN));
+
+  it("keeps a flat history on an axis of probabilities that can exist", () => {
+    // Two books hold −110 for the whole window. Widening the flat range by one whole unit,
+    // as the chart does for a line in points, put −47.6% and 152.4% on the axis.
+    const flat = lineMovementChart(
+      history("moneyline", [book("northline", "Northline", [{ hour: 0, price: m110 }, { hour: 24, price: m110 }]), book("cardinal", "Cardinal", [{ hour: 0, price: m110 }])]),
+      "moneyline",
+      new Set(),
+    )!;
+    const labels = axisLabels(render(flat));
+    expect(labels).toEqual(["51.4%", "52.4%", "53.4%"]);
+    for (const value of percents(labels)) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("stays between 0% and 100% when a flat price sits at either end", () => {
+    const short = price(-100000, 1.001, 0.999001);
+    const long = price(100000, 1001, 0.000999);
+    for (const [held, expected] of [
+      [short, ["98.0%", "99.0%", "100.0%"]],
+      [long, ["0.0%", "1.0%", "2.0%"]],
+    ] as const) {
+      const chart = lineMovementChart(history("moneyline", [book("northline", "Northline", [{ hour: 0, price: held }, { hour: 24, price: held }])]), "moneyline", new Set())!;
+      expect(axisLabels(render(chart))).toEqual(expected);
+    }
+  });
+
+  it("gives every tick its own label when the move is a fraction of a point", () => {
+    // +10000 to +11000 is under a tenth of a point of probability. Stretched to the full
+    // height of the chart, two of the three ticks read 0.9%.
+    const chart = lineMovementChart(
+      history("moneyline", [book("northline", "Northline", [{ hour: 0, price: price(10000, 101, 0.009901) }, { hour: 24, price: price(11000, 111, 0.009009) }])]),
+      "moneyline",
+      new Set(),
+    )!;
+    const labels = axisLabels(render(chart));
+    expect(new Set(labels).size).toBe(3);
+    expect(labels).toEqual(["0.0%", "1.0%", "2.0%"]);
+  });
+
+  it("leaves a wider range exactly as the prices set it", () => {
+    const chart = lineMovementChart(CROSSING, "moneyline", new Set())!;
+    expect(axisLabels(render(chart))).toEqual(["45.5%", "49.6%", "53.7%"]);
+  });
+});
+
+describe("the ends of the chart's value axis", () => {
+  const probability = { minSpan: 0.02, min: 0, max: 1 };
+
+  it("widens a narrow range to the least width, around its middle", () => {
+    const [low, high] = valueRange([0.5, 0.51], probability);
+    expect(low).toBeCloseTo(0.495, 10);
+    expect(high).toBeCloseTo(0.515, 10);
+  });
+
+  it("leaves a range that is wide enough alone", () => {
+    expect(valueRange([0.4, 0.6], probability)).toEqual([0.4, 0.6]);
+    expect(valueRange([-3.5, -2.5])).toEqual([-3.5, -2.5]);
+  });
+
+  it("slides a widened range inside the limits and keeps its width", () => {
+    const [low, high] = valueRange([0.995], probability);
+    expect(low).toBeCloseTo(0.98, 10);
+    expect(high).toBe(1);
+    expect(valueRange([0.001, 0.001], probability)).toEqual([0, 0.02]);
+  });
+
+  it("never cuts off a value it was given, even one outside the limits", () => {
+    const [low, high] = valueRange([1.2, 1.2], probability);
+    expect(low).toBeLessThan(1.2);
+    expect(high).toBe(1.2);
+  });
+
+  it("gives values that are all the same one unit each way when no axis is described", () => {
+    expect(valueRange([-110, -110])).toEqual([-111, -109]);
   });
 });
 
@@ -154,6 +251,11 @@ describe("spread and total line movement", () => {
     expect(axisLabels(render(spread))).toEqual(["−3.5", "−3", "−2.5"]);
     expect(spread.axisTitle).toBe("Spread, in points.");
     expect(spread.summary).toBe("Line movement for Harbor City Tides across 2 sportsbooks. Latest line: Northline −2.5, Cardinal −3.");
+  });
+
+  it("widens a line that never moved by a point each way", () => {
+    const flat = lineMovementChart(history("spread", [book("northline", "Northline", [{ hour: 0, price: P.m104, line: -3 }, { hour: 24, price: P.m116, line: -3 }])]), "spread", new Set())!;
+    expect(axisLabels(render(flat))).toEqual(["−4", "−3", "−2"]);
   });
 
   it("leaves out a point that has no line", () => {
