@@ -1,0 +1,32 @@
+# Hostinger Docker Manager project "oddvex-ops". One-shot: it fetches the public OddVex repository
+# to /opt/oddvex/repo at REF, then runs infrastructure/hostinger/ops.sh with ACTION
+# (status | deploy | caddy | stop). The build session sends this file through the Hostinger API;
+# the owner can also start it from the Docker Manager page. It idles (ACTION=status) by default.
+name: oddvex-ops
+services:
+  ops:
+    image: docker:29.9.2-cli
+    restart: "no"
+    environment:
+      ACTION: "${ACTION:-status}"
+      REF: "${REF:-main}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/oddvex:/opt/oddvex
+      - /opt/medivh/n8n:/opt/medivh/n8n
+    configs:
+      - source: boot
+        target: /boot.sh
+    entrypoint: ["sh", "/boot.sh"]
+configs:
+  boot:
+    content: |
+      set -eu
+      apk add --no-cache git >/dev/null
+      R=/opt/oddvex/repo
+      git config --global --add safe.directory "$$R"
+      if [ ! -d "$$R/.git" ]; then git clone -q https://github.com/Medivhcode-com/OddVex.git "$$R"; fi
+      git -C "$$R" fetch -q origin "$$REF"
+      git -C "$$R" checkout -q --detach FETCH_HEAD
+      echo "[boot] at $$(git -C "$$R" log -1 --format='%h %s' | cut -c1-100)"
+      exec sh "$$R/infrastructure/hostinger/ops.sh"

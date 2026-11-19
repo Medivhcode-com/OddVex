@@ -107,6 +107,22 @@ email (verification, password reset), historical odds storage against a real fee
 - Accessibility has automated checks only. No screen reader or keyboard-only walkthrough has been done.
 - Competitor and provider research relied on search extracts, not direct page visits. Re-check every price.
 
+## Private preview on the Hostinger VPS (decision D-016)
+
+Deployed 2026-11-18 from commit `d5749e0` with `infrastructure/hostinger/ops.sh`:
+
+- Three containers (`oddvex-db-1`, `oddvex-api-1`, `oddvex-web-1`) were running on the server; the database and API
+  reported healthy through the Hostinger API. The API runs in production mode on synthetic data.
+- DNS `A` records `preview` and `api-preview` for `oddvex.com` point at the server.
+- One marked block for `preview.oddvex.com` (password-protected) and `api-preview.oddvex.com` was appended to the
+  server's shared Caddyfile. Caddy validated the file and reloaded without error. The previous file is kept at
+  `/opt/oddvex/Caddyfile.before-oddvex-20261118T074444Z` on the server.
+- The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works. Whether the server's other
+  sites still answer after the reload was not checked by the build session, whose network cannot reach them.
+- Added after that first deploy, and not yet running on the server until the next deploy: a `worker` container
+  (alert evaluation and pick grading every two minutes) and a `backup` container (one database dump a day, 14 kept).
+- Not configured: real email, off-server backups. `oddvex.com` itself is unchanged.
+
 ## Replay preview (internal only, decision D-015)
 
 `ODDVEX_DATA_PROVIDER=replay` serves the real 2024 NFL season shifted 104 weeks forward: real teams, players, results,
