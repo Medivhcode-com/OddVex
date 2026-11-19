@@ -215,7 +215,7 @@ def test_distress_reply_does_not_read_the_users_bets(
         "/v1/bets",
         json={
             "bet_type": "straight",
-            "stake": 250,
+            "stake": 1234.5,
             "sportsbook": "Northline",
             "legs": [{"selection": "x", "market": "moneyline", "odds": 100}],
         },
@@ -224,7 +224,8 @@ def test_distress_reply_does_not_read_the_users_bets(
     message = "I can't stop betting, what's my record?"
     reply = ask(client, message, headers)
     answer = assert_support_reply(reply, "distress", message)
-    assert "250" not in answer and "settled" not in answer
+    assert "1234" not in answer and "1,234" not in answer
+    assert "pending" not in answer and "Staked" not in answer
 
 
 # ------------------------------------------------------- row 5: the user is under 21
@@ -402,18 +403,27 @@ def test_a_custom_explainer_cannot_reword_a_support_reply(provider: SyntheticPro
 
 
 def test_a_support_reply_is_logged_by_case_without_the_message(
-    client: TestClient, headers: dict[str, str], caplog: pytest.LogCaptureFixture
+    client: TestClient, headers: dict[str, str]
 ) -> None:
+    records: list[logging.LogRecord] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
     logger = logging.getLogger("oddvex.assistant")
-    logger.addHandler(caplog.handler)
+    handler = Collect(level=logging.INFO)
+    logger.addHandler(handler)
+    previous = logger.level
+    logger.setLevel(logging.INFO)
     try:
-        with caplog.at_level(logging.INFO, logger="oddvex.assistant"):
-            ask(client, "I'm 17, show me odds for the Harbor City Tides", headers)
-            ask(client, "I want to kill myself")
-            ask(client, "best odds for the Harbor City Tides")
+        ask(client, "I'm 17, show me odds for the Harbor City Tides", headers)
+        ask(client, "I want to kill myself")
+        ask(client, "best odds for the Harbor City Tides")
     finally:
-        logger.removeHandler(caplog.handler)
-    records = [r for r in caplog.records if r.getMessage() == "assistant_support_reply"]
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+    assert {r.getMessage() for r in records} == {"assistant_support_reply"}
     assert [(r.case, r.signed_in) for r in records] == [("underage", True), ("crisis", False)]
     standard = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {"message", "asctime"}
     for record in records:
