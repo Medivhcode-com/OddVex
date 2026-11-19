@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Stand-in for the docker CLI in the ops.sh tests. There is no Docker daemon in the tests.
+
+Every call is appended to $DOCKER_STUB_DIR/calls.jsonl (arguments and the release, builder and
+build root in the environment). Answers come from $DOCKER_STUB_DIR/rules.json, a list of rules;
+the first rule that matches wins. A call that matches no rule prints nothing and exits 0.
+
+A rule may hold:
+  match      regular expression searched in the arguments joined by single spaces (required)
+  release    the rule applies only when ODDVEX_RELEASE has this value
+  times      the rule applies to this many calls, then it is skipped
+  until      regular expression: the rule is skipped once an earlier call that matches it has
+             succeeded (a container is listed until the call that removes it has worked)
+  stdout     text to print
+  stderr     text to print on standard error
+  exit       exit status (default 0)
+  stdin      true: read standard input and record how many bytes arrived
+  local      true: run the words that follow "db" in "exec -T db ..." as a local command
+             (used by the PostgreSQL rehearsal, where pg_dump and psql talk to a scratch server)
+  command    a local command to run in place of the call (the rehearsal's stand-in migration)
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+stub_dir = os.environ["DOCKER_STUB_DIR"]
+args = sys.argv[1:]
+line = " ".join(args)
+entry = {
+    "args": args,
+    "line": line,
+    "release": os.environ.get("ODDVEX_RELEASE"),
+    "build_root": os.environ.get("ODDVEX_BUILD_ROOT"),
+}
+
+rules_path = os.path.join(stub_dir, "rules.json")
+counts_path = os.path.join(stub_dir, "counts.json")
+calls_path = os.path.join(stub_dir, "calls.jsonl")
+rules = json.load(open(rules_path)) if os.path.exists(rules_path) else []
+counts = json.load(open(counts_path)) if os.path.exists(counts_path) else {}
+earlier = [json.loads(text) for text in open(calls_path)] if os.path.exists(calls_path) else []
+
+
+def happened(pattern):
+    return any(re.search(pattern, call["line"]) and call.get("exit", 0) == 0 for call in earlier)
+
+
+chosen = None
+for index, rule in enumerate(rules):
+    if not re.search(rule["match"], line):
+        continue
+    if "release" in rule and rule["release"] != entry["release"]:
+        continue
+    used = counts.get(str(index), 0)
+    if "times" in rule and used >= rule["times"]:
+        continue
+    if "until" in rule and happened(rule["until"]):
+        continue
+    counts[str(index)] = used + 1
+    chosen = rule
+    entry["rule"] = index
+    break
+
+with open(counts_path, "w") as handle:
+    json.dump(counts, handle)
+
+status = 0
+if chosen is not None:
+    if chosen.get("local"):
+        words = args[args.index("db") + 1 :]
+        status = subprocess.run(words).returncode
+    elif chosen.get("command"):
+        status = subprocess.run(chosen["command"]).returncode
+    else:
+        if chosen.get("stdin"):
+            entry["stdin_bytes"] = len(sys.stdin.buffer.read())
+        sys.stdout.write(chosen.get("stdout", ""))
+        sys.stderr.write(chosen.get("stderr", ""))
+        status = chosen.get("exit", 0)
+    entry["exit"] = status
+
+with open(calls_path, "a") as handle:
+    handle.write(json.dumps(entry) + "\n")
+sys.exit(status)

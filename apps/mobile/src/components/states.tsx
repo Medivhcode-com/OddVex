@@ -12,6 +12,7 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 /**
  * The one button. `primary` is the filled accent action; `secondary` and `ghost` are quieter; `danger` deletes.
  * Disabled buttons say so to assistive technology and dim, and their label still reads the same.
+ * `accessibilityRole="link"` is for a button that leaves the app (a phone number, a website).
  */
 export function Button({
   label,
@@ -21,6 +22,7 @@ export function Button({
   compact = false,
   accessibilityLabel,
   accessibilityHint,
+  accessibilityRole = 'button',
   selected,
 }: {
   label: string;
@@ -31,6 +33,7 @@ export function Button({
   compact?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  accessibilityRole?: 'button' | 'link';
   selected?: boolean;
 }) {
   const theme = useTheme();
@@ -40,7 +43,7 @@ export function Button({
   const tone = variant === 'primary' ? 'accentInk' : variant === 'danger' ? 'error' : 'text';
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled, ...(selected === undefined ? null : { selected }) }}

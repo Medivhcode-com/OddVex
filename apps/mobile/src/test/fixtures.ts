@@ -449,7 +449,7 @@ export const guidelines: CommunityGuidelines = {
     { key: 'no_selling_or_links', title: 'Fixture rule two', text: 'No paid picks and no links of any kind.' },
   ],
   enforcement: 'Fixture enforcement: moderators can hide content.',
-  help: '21+. OddVex does not accept wagers. Gambling problem? Call 1-800-GAMBLER.',
+  help: 'Fixture help: 21+. OddVex does not take wagers.',
 };
 
 export const smallRecord: CommunityRecord = {

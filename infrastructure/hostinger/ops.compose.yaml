@@ -1,7 +1,21 @@
 # Hostinger Docker Manager project "oddvex-ops". One-shot: it fetches the public OddVex repository
 # to /opt/oddvex/repo at REF, then runs infrastructure/hostinger/ops.sh with ACTION
-# (status | deploy | caddy | stop). The build session sends this file through the Hostinger API;
-# the owner can also start it from the Docker Manager page. It idles (ACTION=status) by default.
+# (status | deploy | rollback | restore | setenv | admin | caddy | stop). The build session sends
+# this file through the Hostinger API; the owner can also start it from the Docker Manager page.
+# It idles (ACTION=status) by default.
+#
+# Variables an action reads (all empty unless sent):
+#   REF      deploy: the commit, branch or tag to build and run (default main). A commit from
+#            before the services were renamed is refused by the boot script below; it is started
+#            with rollback. rollback: the earlier commit, tag or release to run again (no
+#            default: it must be sent)
+#   OPS_REF  rollback only: where ops.sh itself comes from (default main), because the earlier
+#            commit's own ops.sh may not know the action
+#   KEY, VALUE     setenv: the one allow-listed setting to write to /opt/oddvex/.env
+#   EMAIL          admin: the administrator address to set a new password for
+#   DUMP, CONFIRM  restore: the dump file name, twice (to load the dump of the last restore
+#                  once more, CONFIRM is the value the action prints)
+#   ODDVEX_BUILD_LIMITS  "off" builds without the memory and CPU ceiling (default on)
 name: oddvex-ops
 services:
   ops:
@@ -9,7 +23,14 @@ services:
     restart: "no"
     environment:
       ACTION: "${ACTION:-status}"
-      REF: "${REF:-main}"
+      REF: "${REF:-}"
+      OPS_REF: "${OPS_REF:-main}"
+      KEY: "${KEY:-}"
+      VALUE: "${VALUE:-}"
+      EMAIL: "${EMAIL:-}"
+      DUMP: "${DUMP:-}"
+      CONFIRM: "${CONFIRM:-}"
+      ODDVEX_BUILD_LIMITS: "${ODDVEX_BUILD_LIMITS:-on}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/oddvex:/opt/oddvex
@@ -23,10 +44,26 @@ configs:
     content: |
       set -eu
       apk add --no-cache git >/dev/null
-      R=/opt/oddvex/repo
+      R="$${ODDVEX_ROOT:-/opt/oddvex}/repo"
       git config --global --add safe.directory "$$R"
       if [ ! -d "$$R/.git" ]; then git clone -q https://github.com/Medivhcode-com/OddVex.git "$$R"; fi
-      git -C "$$R" fetch -q origin "$$REF"
+      # A rollback runs the current ops.sh and compose file (OPS_REF) and hands REF to it as the
+      # release to return to. Every other action runs the files of REF itself.
+      T="$${REF:-main}"
+      if [ "$$ACTION" = "rollback" ]; then T="$${OPS_REF:-main}"; fi
+      git -C "$$R" fetch -q origin "$$T"
       git -C "$$R" checkout -q --detach FETCH_HEAD
       echo "[boot] at $$(git -C "$$R" log -1 --format='%h %s' | cut -c1-100)"
-      exec sh "$$R/infrastructure/hostinger/ops.sh"
+      # A commit from before the services were renamed must not be deployed by its own ops.sh:
+      # that script starts containers named api and web next to the running oddvex-api and
+      # oddvex-web and removes nothing. Such a commit is started with ACTION=rollback instead.
+      H="$$R/infrastructure/hostinger"
+      if [ "$$ACTION" = "deploy" ]; then
+        if ! grep -q '^  oddvex-api:' "$$H/compose.yaml" 2>/dev/null || ! grep -q '^#   ACTION=rollback' "$$H/ops.sh" 2>/dev/null; then
+          echo "[boot] STOP: the commit at REF '$$T' is from before the services were renamed to oddvex-api and oddvex-web."
+          echo "[boot] Its own ops.sh would start a second release next to the one that is running. Nothing was changed."
+          echo "[boot] To run that commit, send ACTION=rollback with REF=$$T (the current ops.sh then starts it, without applying migrations)."
+          exit 2
+        fi
+      fi
+      exec sh "$$H/ops.sh"

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { LoginForm } from "@/components/app/auth-forms";
-import { safeNext } from "@/lib/session";
+import { safeNext } from "@/lib/safe-next";
 
 export const metadata: Metadata = { title: "Log in", robots: { index: false } };
 

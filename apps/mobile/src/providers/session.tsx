@@ -3,6 +3,7 @@ import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, 
 
 import * as api from '@/api/client';
 import type { AuthResponse, User } from '@/api/types';
+import { dropDrafts, holdDrafts, releaseDrafts } from '@/session/drafts';
 import { clearSession, loadSession, saveSession } from '@/session/store';
 
 type Topic = 'bets' | 'watchlist' | 'alerts' | 'notifications' | 'reminder' | 'community';
@@ -58,6 +59,10 @@ export const SessionContext = createContext<SessionValue>(signedOut);
 /**
  * Holds who is logged in. The token is in memory (handed to the API client) and in SecureStore so it survives
  * a restart. When the API rejects the token, the session is cleared and the log in screen opens.
+ *
+ * It also decides what happens to unsaved form input (`src/session/drafts.ts`). A session the API ended
+ * (an expired or replaced token) keeps it, so the same person finds the form as they left it after logging in
+ * again. Logging out, deleting the account, a suspension and a log in by a different account discard it.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ status: SessionValue['status']; user: User | null }>({ status: 'loading', user: null });
@@ -65,9 +70,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [revision, setRevision] = useState<Record<Topic, number>>(NO_CHANGES);
   // Bumped whenever the session changes, so a slow launch-time check cannot overwrite a newer log in or log out.
   const epoch = useRef(0);
+  // Whose unsaved form input may be held. Not cleared when the API ends the session, so the next log in can be compared with it.
+  const lastUserId = useRef<string | null>(null);
 
-  const end = useCallback(async (reason?: 'suspended') => {
+  const end = useCallback(async (reason?: 'suspended' | 'expired') => {
     epoch.current += 1;
+    // Before the state change below takes the forms off the screen.
+    if (reason === 'expired') holdDrafts();
+    else dropDrafts();
     api.setAuthToken(null);
     setState({ status: 'signedOut', user: null });
     setSuspended(reason === 'suspended');
@@ -76,6 +86,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const begin = useCallback(async (auth: AuthResponse) => {
     epoch.current += 1;
+    if (lastUserId.current === auth.user.id) releaseDrafts();
+    else dropDrafts();
+    lastUserId.current = auth.user.id;
     api.setAuthToken(auth.access_token);
     setState({ status: 'signedIn', user: auth.user });
     setSuspended(false);
@@ -88,7 +101,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     api.setUnauthorizedHandler((error) => {
-      void end(api.isAccountSuspended(error) ? 'suspended' : undefined);
+      void end(api.isAccountSuspended(error) ? 'suspended' : 'expired');
       router.push('/login');
     });
     return () => api.setUnauthorizedHandler(null);
@@ -103,6 +116,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       api.setAuthToken(saved.token);
+      lastUserId.current = saved.user.id;
       setState({ status: 'signedIn', user: saved.user });
       // Confirm the token still works and pick up profile changes. A 401 here ends the session through the
       // handler above; any other failure (offline) leaves the saved session in place.

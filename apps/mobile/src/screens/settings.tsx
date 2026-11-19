@@ -7,6 +7,7 @@ import { API_URL } from '@/api/client';
 import type { Plan } from '@/api/types';
 import { Segmented } from '@/components/choice';
 import { ChangePasswordForm, DeleteAccountForm, EmailVerificationStatus, EntitlementsLine } from '@/components/account-forms';
+import { CouncilSite, CrisisCall, HelplineCall } from '@/components/help-link';
 import {
   NOTIFICATIONS_IN_APP_ONLY,
   NotificationPreferencesForm,
@@ -16,6 +17,7 @@ import {
 import { Screen } from '@/components/screen';
 import { Button, Panel, PanelHeading } from '@/components/states';
 import { Num, Txt } from '@/components/text';
+import { HELPLINE_ABOUT, HELPLINE_CHAT, HELPLINE_NOT_EMERGENCY, RESPONSIBLE_GAMBLING_LINE } from '@/helpline';
 import { useTheme } from '@/hooks/use-theme';
 import { isReplay, isSynthetic, useMeta } from '@/providers/meta';
 import { useOddsFormat } from '@/providers/odds-format';
@@ -28,14 +30,16 @@ const FORMATS: readonly { value: OddsFormat; label: string }[] = [
   { value: 'decimal', label: 'Decimal' },
 ];
 
-export const RESPONSIBLE_GAMBLING_LINE =
-  'For adults 21+. OddVex never takes wagers. Gambling problem? Call or text 1-800-GAMBLER.';
-
 function DataSource() {
   const theme = useTheme();
   const meta = useMeta();
+  // The read is repeated by itself after a failure (see MetaProvider). Once one has failed, this panel keeps
+  // saying so until an answer arrives, instead of going back to "Checking" for the length of every retry.
+  const [failed, setFailed] = useState(false);
+  if (meta.status === 'error' && !failed) setFailed(true);
+  if (meta.data && failed) setFailed(false);
 
-  if (meta.status === 'loading') {
+  if (meta.status === 'loading' && !failed) {
     return (
       <Txt variant="secondary" tone="muted">
         Checking the data source.
@@ -219,6 +223,18 @@ export function SettingsScreen() {
           <Txt variant="secondary" selectable>
             {RESPONSIBLE_GAMBLING_LINE}
           </Txt>
+          <HelplineCall />
+          <Txt variant="secondary" tone="muted" selectable>
+            {HELPLINE_ABOUT}
+          </Txt>
+          <Txt variant="secondary" tone="muted" selectable>
+            {HELPLINE_NOT_EMERGENCY}
+          </Txt>
+          <CrisisCall />
+          <Txt variant="secondary" tone="muted">
+            {HELPLINE_CHAT}
+          </Txt>
+          <CouncilSite />
         </View>
       </Panel>
 

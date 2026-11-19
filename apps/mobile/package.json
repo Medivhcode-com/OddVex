@@ -47,6 +47,9 @@
     "setupFiles": [
       "<rootDir>/jest.setup.js"
     ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.after-env.js"
+    ],
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/dist/",

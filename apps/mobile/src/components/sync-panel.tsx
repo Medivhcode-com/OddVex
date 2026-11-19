@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { createSyncConnection, deleteSyncConnection, describeError, runSync } from '@/api/client';
 import type { SyncConnection, SyncProvider } from '@/api/types';
 import { Badge } from '@/components/badge';
+import { HelpLine } from '@/components/help-link';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useTheme } from '@/hooks/use-theme';
@@ -14,7 +15,7 @@ type Message = { tone: 'accent' | 'error' | 'warn'; text: string };
 
 /**
  * Sportsbook sync against the API's mock provider. No real account is contacted, and the panel says so.
- * `onChanged` reloads the connections and the bets after every action.
+ * `onChanged` reloads the connections and the bets after every action. The panel ends with the helpline.
  */
 export function SyncPanel({
   providers,
@@ -121,6 +122,7 @@ export function SyncPanel({
         />
       ) : null}
       {message ? <Notice tone={message.tone} text={message.text} /> : null}
+      <HelpLine />
     </View>
   );
 }

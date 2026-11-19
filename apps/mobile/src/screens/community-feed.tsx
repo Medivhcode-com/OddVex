@@ -36,7 +36,7 @@ function Setup() {
       <Panel>
         <View style={styles.block}>
           <PanelHeading title="Create your profile" description="You can change the handle, the bio and who can see the profile later." />
-          <ProfileForm />
+          <ProfileForm draft="community-setup-profile" />
         </View>
       </Panel>
     </Screen>

@@ -13,6 +13,7 @@ import { Txt } from '@/components/text';
 import { useMyProfile } from '@/hooks/use-community';
 import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 import { formatAmerican } from '@/utils/format';
 
@@ -41,8 +42,11 @@ function existingPickId(error: unknown): string | null {
 function SharePickForm({ event, market, options }: { event: EventSummary; market: Market; options: readonly QuickBetOption[] }) {
   const router = useRouter();
   const { changed } = useSession();
-  const [choice, setChoice] = useState<string>(options[0]?.outcomeKey ?? '');
-  const [analysis, setAnalysis] = useState('');
+  // Drafts: the outcome and the reasoning come back if the session ends before the pick is posted.
+  const draft = `share-pick:${event.id}:${market}`;
+  const [choice, setChoice] = useDraft<string>(`${draft}:outcome`, options[0]?.outcomeKey ?? '');
+  const [analysis, setAnalysis] = useDraft(`${draft}:analysis`, '');
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(draft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickId, setPickId] = useState<string | null>(null);
@@ -51,6 +55,7 @@ function SharePickForm({ event, market, options }: { event: EventSummary; market
 
   async function submit() {
     setPosted(false);
+    dismissKeptNotice();
     if (!option) return setError('Choose an outcome.');
     if (tooLong(analysis, ANALYSIS_MAX)) return;
     setBusy(true);
@@ -59,6 +64,7 @@ function SharePickForm({ event, market, options }: { event: EventSummary; market
     try {
       const pick = await createCommunityPick(pickPayload(event, market, option, analysis));
       setAnalysis('');
+      draftSaved();
       setPickId(pick.id);
       setPosted(true);
       changed('community');
@@ -72,6 +78,7 @@ function SharePickForm({ event, market, options }: { event: EventSummary; market
 
   return (
     <View style={styles.form}>
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <Choice
         label="Outcome, at the best current price"
         options={options.map((item): { value: string; label: string } => ({

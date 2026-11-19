@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import clsx from "clsx";
 import { Freshness } from "@/components/app/freshness";
 import { WatchButton } from "@/components/app/watch-button";
@@ -46,7 +46,11 @@ export default async function PropAnalyzerPage({ params, searchParams }: Props) 
   const split = pick(query.split, SPLITS, "all");
   const data = await apiOrNull<PropAnalysis>(`/v1/players/${playerId}/props`, { query: { market: query.market, window, split } });
   if (!data) notFound();
-  const user = await currentUser().catch(() => null);
+  // The page still renders when the account cannot be read; a redirect that ends a dead session must get through.
+  const user = await currentUser().catch((error) => {
+    unstable_rethrow(error);
+    return null;
+  });
   const watchlist = await getWatchlist(Boolean(user));
   const market = data.market;
   const href = (next: { market?: string; window?: string; split?: string }) =>

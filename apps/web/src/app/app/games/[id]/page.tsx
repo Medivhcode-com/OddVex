@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import { StatusBadge } from "@/components/app/event-bits";
 import { AlertForm } from "@/components/app/alert-form";
 import { AutoRefresh } from "@/components/app/auto-refresh";
@@ -55,7 +55,11 @@ export default async function GamePage({ params, searchParams }: Props) {
     available.length ? api<OddsComparison>(`/v1/events/${id}/odds`, { query: { market } }) : null,
     available.length ? api<LineHistory>(`/v1/events/${id}/line-history`, { query: { market } }).catch(() => null) : null,
   ]);
-  const user = await currentUser().catch(() => null);
+  // The page still renders when the account cannot be read; a redirect that ends a dead session must get through.
+  const user = await currentUser().catch((error) => {
+    unstable_rethrow(error);
+    return null;
+  });
   const watchlist = await getWatchlist(Boolean(user));
   // Sharing a pick exists only while the community flag is on, and only on a game that has not started.
   const community = event.status === "upcoming" && flagOn(await getFlags(), "community");

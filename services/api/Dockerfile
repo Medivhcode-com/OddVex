@@ -19,4 +19,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"
 # Apply migrations, then serve. Migrations here are additive; see README for the approval rule.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn oddvex_api.main:app --host 0.0.0.0 --port 8000"]
+# uvicorn's access log is off: it would write every request a second time with its full query
+# string. The application logs one line per request itself, with the path and no query string.
+# A deployment that overrides this command (infrastructure/hostinger/compose.yaml runs the
+# migrations as a separate step) must keep --no-access-log.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn oddvex_api.main:app --host 0.0.0.0 --port 8000 --no-access-log"]

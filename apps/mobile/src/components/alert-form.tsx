@@ -9,6 +9,7 @@ import { quickBetOptions, type QuickBetOption } from '@/components/quick-bet';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useSession } from '@/providers/session';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 import { cleanOdds, formatAmerican } from '@/utils/format';
 
@@ -62,7 +63,9 @@ export function readMove(raw: string): { value: number } | { error: string } {
 /**
  * "Set an alert" on a game: a price reaching a threshold, a line move, a time before the start, or the final
  * score. The price and line alerts use the market chosen in the market switcher. Nothing is computed here:
- * the form sends what was picked and typed, and the API decides when the alert fires.
+ * the form sends what was picked and typed, and the API decides when the alert fires. The choices and the
+ * typed price and move are drafts: they come back if the session ends before the alert is saved, and not
+ * once it has been.
  */
 export function AlertForm({ event, odds }: { event: EventSummary; odds: OddsComparison }) {
   const router = useRouter();
@@ -78,12 +81,14 @@ export function AlertForm({ event, odds }: { event: EventSummary; odds: OddsComp
   const market = odds.market;
   const hasLine = market === 'spread' || market === 'total';
 
-  const [kind, setKind] = useState<AlertChoice>('price');
-  const [picked, setPicked] = useState<string>('');
+  const draft = `alert:${event.id}`;
+  const [kind, setKind] = useDraft<AlertChoice>(`${draft}:kind`, 'price');
+  const [picked, setPicked] = useDraft<string>(`${draft}:side`, '');
   // What was typed as the price, remembered only for the side and market it was typed for.
-  const [typed, setTyped] = useState<{ key: string; text: string } | null>(null);
-  const [move, setMove] = useState('1');
-  const [minutes, setMinutes] = useState<string>('30');
+  const [typed, setTyped] = useDraft<{ key: string; text: string } | null>(`${draft}:price`, null);
+  const [move, setMove] = useDraft(`${draft}:move`, '1');
+  const [minutes, setMinutes] = useDraft<string>(`${draft}:minutes`, '30');
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(draft);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -98,6 +103,7 @@ export function AlertForm({ event, odds }: { event: EventSummary; odds: OddsComp
   }));
 
   function reset() {
+    dismissKeptNotice();
     setFieldError(null);
     setError(null);
     setSaved(false);
@@ -127,10 +133,13 @@ export function AlertForm({ event, odds }: { event: EventSummary; odds: OddsComp
     };
   }
 
-  async function save(rule: AlertCreate) {
+  async function save(rule: AlertCreate, fromFields: boolean) {
     setBusy(true);
     try {
       await createAlert(rule);
+      // The form keeps what was saved on screen: it is no longer unsaved input. The team buttons send none of
+      // the fields, so a price or a move typed and not saved stays a draft after one of them is pressed.
+      if (fromFields) draftSaved();
       setSaved(true);
       session.changed('alerts');
     } catch (caught) {
@@ -146,12 +155,12 @@ export function AlertForm({ event, odds }: { event: EventSummary; odds: OddsComp
     const rule = build();
     if ('fieldError' in rule) return setFieldError(rule.fieldError);
     if ('error' in rule) return setError(rule.error);
-    void save(rule);
+    void save(rule, true);
   }
 
   function saveForTeam(team: Team) {
     reset();
-    void save({ kind: 'game_start', team_id: team.id, minutes_before: TEAM_ALERT_MINUTES });
+    void save({ kind: 'game_start', team_id: team.id, minutes_before: TEAM_ALERT_MINUTES }, false);
   }
 
   const noPrices = (
@@ -162,6 +171,7 @@ export function AlertForm({ event, odds }: { event: EventSummary; odds: OddsComp
 
   return (
     <View style={styles.form}>
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <Choice
         label="Alert me when"
         options={kinds}

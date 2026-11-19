@@ -155,6 +155,63 @@ jobs:
         if: failure()
         run: docker logs api; docker logs web
 
+  infra:
+    name: Infrastructure (ops script, compose files)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+      - name: Install the API (one test starts it to read what the container logs)
+        run: pip install -e services/api
+      - name: Shell syntax of ops.sh
+        run: |
+          sh -n infrastructure/hostinger/ops.sh
+          bash -n infrastructure/hostinger/ops.sh
+      - name: Shell syntax in the image the script runs in
+        run: |
+          image=$(sed -n 's/^ *image: *//p' infrastructure/hostinger/ops.compose.yaml)
+          docker run --rm -v "$PWD/infrastructure/hostinger:/work:ro" "$image" sh -n /work/ops.sh
+      - name: shellcheck (when the runner has it)
+        run: |
+          if command -v shellcheck >/dev/null; then
+            shellcheck --shell=sh --severity=warning infrastructure/hostinger/ops.sh
+          else
+            echo "::notice::shellcheck is not installed on this runner; the check was skipped"
+          fi
+      - name: Both compose files resolve with placeholder values
+        run: |
+          env_file=$(mktemp)
+          python infrastructure/hostinger/tests/placeholder_env.py > "$env_file"
+          docker compose -f infrastructure/hostinger/compose.yaml --env-file "$env_file" config -q
+          docker compose --profile ops -f infrastructure/hostinger/compose.yaml --env-file "$env_file" config -q
+          printf 'ACTION=status\nREF=main\n' > "$env_file"
+          docker compose -f infrastructure/hostinger/ops.compose.yaml --env-file "$env_file" config -q
+      - name: PostgreSQL server programs for the restore rehearsal (installed when the runner lacks them)
+        run: |
+          if ! command -v initdb >/dev/null && ! ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q postgresql
+          fi
+      - name: ops.sh, backup loop and document tests (stub docker, no daemon)
+        # A test that cannot run here (no docker CLI, no PostgreSQL, API not importable) fails
+        # instead of being skipped, so a missing tool cannot hide a check.
+        env:
+          OPS_TESTS_REQUIRE_ALL: "1"
+        run: python -m unittest discover -s infrastructure/hostinger/tests -v
+      - name: The ops.sh tests again with BusyBox sh, the shell of the ops container
+        run: |
+          if command -v busybox >/dev/null; then
+            OPS_TEST_SHELL="busybox sh" python -m unittest discover -s infrastructure/hostinger/tests -p "test_ops_*.py"
+            OPS_TEST_SHELL="busybox sh" python -m unittest discover -s infrastructure/hostinger/tests -p "test_backup_loop.py"
+            OPS_TEST_SHELL="busybox sh" python -m unittest discover -s infrastructure/hostinger/tests -p "test_shell.py"
+          else
+            echo "::notice::busybox is not installed on this runner; the check was skipped"
+          fi
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

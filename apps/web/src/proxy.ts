@@ -2,14 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { type NextRequest, NextResponse } from "next/server";
-import { API_URL, servedOverHttps, SESSION_COOKIE } from "@/lib/config";
+import { API_URL, PAGE_PATH_HEADER, servedOverHttps, SESSION_COOKIE } from "@/lib/config";
 import { buildCsp, HSTS_VALUE } from "@/lib/csp";
 import { requestIdFrom, upstreamMetaHeaders } from "@/lib/request-meta";
+import { pagePath } from "@/lib/safe-next";
 import { flagsForPath } from "@/lib/site";
 import { THEME_SCRIPT } from "@/lib/theme-script";
 
 /**
- * Runs in front of every page request (Node.js runtime). It does three things:
+ * Runs in front of every page request (Node.js runtime). It does four things:
  *
  * 1. Security headers that depend on the request or on runtime configuration: the
  *    Content-Security-Policy and, over https only, Strict-Transport-Security. The fixed
@@ -20,6 +21,11 @@ import { THEME_SCRIPT } from "@/lib/theme-script";
  *    and for a page behind a feature flag while that flag is off. The pages check again; the
  *    check here exists because the `/app` tree streams behind `loading.tsx`, and a response
  *    that has started streaming is already a 200 (bundled docs: loading.md, "Status codes").
+ *    If the admin check finds that the API no longer accepts the session token, the session
+ *    cookie is cleared on that 404.
+ * 4. It tells the page its own path and query in a request header (`PAGE_PATH_HEADER`).
+ *    `currentUser()` needs it to bring a visitor back to the same page after a dead session
+ *    cookie has been cleared (`lib/session.ts`).
  *
  * The proxy does not make a page dynamic: prerendered pages are still served from the build.
  */
@@ -64,22 +70,31 @@ function contentSecurityPolicy(pathname: string): { csp: string; nonce?: string 
   return { csp: buildCsp({ nonce, scriptHashes: [...new Set([THEME_HASH, ...(hashes?.[NOT_FOUND] ?? [])])], dev: isDev, https }), nonce };
 }
 
-/** False only when the API positively says this visitor is not an admin. */
-async function mayBeAdmin(request: NextRequest, requestHeaders: Headers): Promise<boolean> {
+type AdminCheck = {
+  /** False only when the API positively says this visitor is not an admin. */
+  allowed: boolean;
+  /** True when the API answered that the session token is no longer valid (`401 invalid_token`). */
+  deadToken: boolean;
+};
+
+async function adminCheck(request: NextRequest, requestHeaders: Headers): Promise<AdminCheck> {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return false;
+  if (!token) return { allowed: false, deadToken: false };
   try {
     const response = await fetch(`${API_URL}/v1/me`, {
       headers: { accept: "application/json", authorization: `Bearer ${token}`, ...upstreamMetaHeaders(requestHeaders).headers },
       cache: "no-store",
       signal: AbortSignal.timeout(4000),
     });
-    if (response.status === 401 || response.status === 403) return false;
-    if (!response.ok) return true;
-    return ((await response.json()) as { role?: string }).role === "admin";
+    if (response.status === 401 || response.status === 403) {
+      const code = ((await response.json().catch(() => null)) as { error?: { code?: string } } | null)?.error?.code;
+      return { allowed: false, deadToken: response.status === 401 && code === "invalid_token" };
+    }
+    if (!response.ok) return { allowed: true, deadToken: false };
+    return { allowed: ((await response.json()) as { role?: string }).role === "admin", deadToken: false };
   } catch {
     // The API is down: let the page render its own "can't reach the data service" state.
-    return true;
+    return { allowed: true, deadToken: false };
   }
 }
 
@@ -99,12 +114,18 @@ async function anyFlagOff(needed: readonly string[], requestHeaders: Headers): P
   }
 }
 
-/** Whether this request must be answered with the not-found page before any page code runs. */
-async function hidden(pathname: string, request: NextRequest, requestHeaders: Headers): Promise<boolean> {
+/**
+ * Whether this request must be answered with the not-found page before any page code runs,
+ * and whether the session cookie has to go with that answer.
+ */
+async function hidden(pathname: string, request: NextRequest, requestHeaders: Headers): Promise<{ hide: boolean; clearSession: boolean }> {
   const path = pathname.replace(/\/+$/, "");
-  if ((path === "/app/admin" || path.startsWith("/app/admin/")) && !(await mayBeAdmin(request, requestHeaders))) return true;
+  if (path === "/app/admin" || path.startsWith("/app/admin/")) {
+    const { allowed, deadToken } = await adminCheck(request, requestHeaders);
+    if (!allowed) return { hide: true, clearSession: deadToken };
+  }
   const needed = flagsForPath(path);
-  return needed.length ? anyFlagOff(needed, requestHeaders) : false;
+  return { hide: needed.length ? await anyFlagOff(needed, requestHeaders) : false, clearSession: false };
 }
 
 export async function proxy(request: NextRequest) {
@@ -114,15 +135,16 @@ export async function proxy(request: NextRequest) {
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-request-id", requestId);
+  requestHeaders.set(PAGE_PATH_HEADER, pagePath(pathname, request.nextUrl.search));
   if (nonce) {
     requestHeaders.set("x-nonce", nonce);
     requestHeaders.set("Content-Security-Policy", csp);
   }
 
   const init = { request: { headers: requestHeaders } };
-  const response = (await hidden(pathname, request, requestHeaders))
-    ? NextResponse.rewrite(new URL(UNMATCHED_PATH, request.url), init)
-    : NextResponse.next(init);
+  const { hide, clearSession } = await hidden(pathname, request, requestHeaders);
+  const response = hide ? NextResponse.rewrite(new URL(UNMATCHED_PATH, request.url), init) : NextResponse.next(init);
+  if (clearSession) response.cookies.delete(SESSION_COOKIE);
 
   response.headers.set("Content-Security-Policy", csp);
   response.headers.set("X-Request-ID", requestId);

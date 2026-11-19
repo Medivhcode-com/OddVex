@@ -7,10 +7,12 @@ import type { NotificationKind, NotificationPreferences, StakeReminder } from '@
 import { Field, SwitchRow } from '@/components/form';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
+import { STAKE_REMINDER_HELP } from '@/helpline';
 import { useStakeReminder } from '@/hooks/use-notifications';
 import { useResource } from '@/hooks/use-resource';
 import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
+import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 import { formatMoney } from '@/utils/format';
 
@@ -105,26 +107,31 @@ export function StakeReminderNotice({ reminder }: { reminder: StakeReminder }) {
     <Notice
       tone="neutral"
       title="You have reached your weekly staking reminder"
-      text={`You have staked ${formatMoney(reminder.staked_this_week)} this week. Your reminder is set at ${formatMoney(reminder.weekly_stake_threshold)}. This is a reminder, not a limit: OddVex will not stop you logging bets. If betting is causing you stress, free, confidential help is available at 1-800-GAMBLER.`}
+      text={`You have staked ${formatMoney(reminder.staked_this_week)} this week. Your reminder is set at ${formatMoney(reminder.weekly_stake_threshold)}. This is a reminder, not a limit: OddVex will not stop you logging bets. ${STAKE_REMINDER_HELP}`}
     />
   );
 }
 
 function StakeReminderEditor({ reminder, onSaved }: { reminder: StakeReminder; onSaved: (next: StakeReminder) => void }) {
   const threshold = reminder.weekly_stake_threshold ?? null;
-  const [amount, setAmount] = useState(threshold === null ? '' : String(threshold));
+  // A draft: a typed amount comes back if the session ends before it is saved.
+  const [amount, setAmount] = useDraft('stake-reminder:amount', threshold === null ? '' : String(threshold));
+  const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept('stake-reminder');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function send(value: number | null) {
+    dismissKeptNotice();
     setBusy(true);
     setError(null);
     setConfirmation(null);
     try {
       const next = await setStakeReminder(value);
       if (value === null) setAmount('');
+      // Saved or turned off: the amount in the field is the saved state, not unsaved input.
+      draftSaved();
       setConfirmation(value === null ? 'Reminder turned off.' : 'Reminder saved.');
       onSaved(next);
     } catch (caught) {
@@ -150,6 +157,7 @@ function StakeReminderEditor({ reminder, onSaved }: { reminder: StakeReminder; o
         {threshold === null ? 'The reminder is off.' : `Your reminder is set at ${formatMoney(threshold)} a week.`}
       </Txt>
       <StakeReminderNotice reminder={reminder} />
+      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
       <Field
         label="Weekly amount ($)"
         hint="You get one notification in the week your total stakes reach this amount. Weeks run Monday to Sunday, UTC."
