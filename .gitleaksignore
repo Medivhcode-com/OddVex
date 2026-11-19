@@ -5,3 +5,7 @@ b95a85945e4558f3370d69939eed0f62472683f8:services/api/.env.example:generic-api-k
 # False positives: a made-up reset token in a mobile unit test fixture. Replaced with a plainly fake value since.
 37f30e979f796b434fd49dffbb671dc419940e01:apps/mobile/src/api/client.test.ts:generic-api-key:376
 37f30e979f796b434fd49dffbb671dc419940e01:apps/mobile/src/api/client.test.ts:generic-api-key:378
+
+# False positive: a made-up request id in a web unit test ("api_unavailable:" followed by sample
+# characters). The line is built from parts since.
+fde32ae5156acf58c63a16352966c914f7964afa:apps/web/src/lib/app-error.test.ts:generic-api-key:44

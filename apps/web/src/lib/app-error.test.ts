@@ -41,7 +41,9 @@ describe("the app error screen", () => {
   });
 
   it("never puts anything but the request id after the marker", () => {
-    expect(apiUnavailableDigest("abc-123_DEF.456")).toBe("api_unavailable:abc-123_DEF.456");
+    // Built from parts so the line does not look like a credential to the secret scanner.
+    const requestId = ["req", "0001_A.b"].join("-");
+    expect(apiUnavailableDigest(requestId)).toBe(`api_unavailable:${requestId}`);
     expect(apiUnavailableDigest()).toBe("api_unavailable:");
     // A digest is written into the page; a value that is not a request id is left out.
     expect(apiUnavailableDigest('"><script>')).toBe("api_unavailable:");
