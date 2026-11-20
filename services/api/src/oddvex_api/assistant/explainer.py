@@ -3,6 +3,7 @@
 The responsible-gambling replies (``safeguards.py``) are fixed wording. The engine uses
 that wording directly and does not ask an explainer for it; :class:`TemplateExplainer`
 returns the same wording when it is asked.
+The help answer ends with the helpline sentence from ``oddvex_api.helpline``.
 """
 
 from __future__ import annotations

@@ -26,6 +26,7 @@ from .conftest import (
     AppFactory,
     admin_headers,
     auth_headers,
+    mark_email_verified,
     register,
     set_flag,
     verify_email,
@@ -291,7 +292,7 @@ def test_role_is_granted_only_after_the_email_is_confirmed_and_is_audited(
 ) -> None:
     account = register(admin_client, ADMIN_EMAIL)
     headers = bearer(account["access_token"])
-    # Registering a listed address first proves nothing while ``email_flows`` is on.
+    # Registering a listed address first proves nothing.
     assert account["user"]["role"] == "user"
     assert admin_client.get("/v1/admin/overview", headers=headers).status_code == 403
     assert login(admin_client, ADMIN_EMAIL).json()["user"]["role"] == "user"
@@ -318,7 +319,7 @@ def test_an_unlisted_address_never_gets_the_role(admin_client: TestClient) -> No
     assert not audit(admin_client, "role.granted")
 
 
-def test_with_email_flows_off_a_listed_address_is_admin_from_registration(
+def test_with_email_flows_off_a_listed_address_is_still_not_admin_until_verified(
     make_app: AppFactory,
 ) -> None:
     app = make_app(admin_emails=ADMIN_EMAIL)
@@ -327,11 +328,13 @@ def test_with_email_flows_off_a_listed_address_is_admin_from_registration(
             flags.set_flag(db, "email_flows", False, app.state.settings)
             db.commit()
         account = register(client, ADMIN_EMAIL)
-        assert account["user"]["role"] == "admin" and account["user"]["email_verified"] is False
-        assert (
-            client.get("/v1/admin/overview", headers=bearer(account["access_token"])).status_code
-            == 200
-        )
+        headers = bearer(account["access_token"])
+        assert account["user"]["role"] == "user" and account["user"]["email_verified"] is False
+        assert client.get("/v1/admin/overview", headers=headers).status_code == 403
+        assert not audit(client, "role.granted")
+        # No link can be followed while the flag is off; an operator verifies the address.
+        mark_email_verified(client, ADMIN_EMAIL)
+        assert client.get("/v1/admin/overview", headers=headers).status_code == 200
         (granted,) = audit(client, "role.granted")
         assert granted.user_id == account["user"]["id"]
 

@@ -1,6 +1,6 @@
 """Security regression tests: tokens, roles, object ownership, mass assignment, input
-handling, CORS and the per-account login throttle. One file on purpose, so a regression in
-any of these is easy to find."""
+handling, CORS and the login throttle (per account and client network). One file on
+purpose, so a regression in any of these is easy to find."""
 
 from __future__ import annotations
 
@@ -620,7 +620,7 @@ def test_cors_denies_an_unlisted_origin(make_app: AppFactory) -> None:
         assert allowed.headers["access-control-allow-origin"] != "*"
 
 
-# ------------------------------------------------- per-account login throttle
+# ------------------------------- login throttle, per account and client network
 class FakeClock:
     def __init__(self) -> None:
         self.now = 1000.0
@@ -650,7 +650,7 @@ def attempt(client: TestClient, email: str, password: str, ip: str = "10.0.0.1")
     )
 
 
-def test_login_is_throttled_per_account_regardless_of_ip(
+def test_login_is_throttled_per_account_and_client_network(
     throttled: tuple[TestClient, FakeClock],
 ) -> None:
     client, clock = throttled
@@ -658,12 +658,12 @@ def test_login_is_throttled_per_account_regardless_of_ip(
     assert client.app.state.settings.account_limit_window_seconds == 900  # type: ignore[attr-defined]
     for number in range(8):
         clock.now += 10
-        failed = attempt(client, "ada@example.test", "wrong-password", ip=f"10.0.0.{number}")
+        failed = attempt(client, "ada@example.test", "wrong-password", ip="10.0.0.9")
         assert failed.status_code == 401, number
         assert failed.json()["error"]["code"] == "invalid_credentials"
 
-    # The ninth attempt is refused even with the right password and from a new address.
-    blocked = attempt(client, "ada@example.test", PASSWORD, ip="192.0.2.77")
+    # The ninth attempt from that address is refused even with the right password.
+    blocked = attempt(client, "ada@example.test", PASSWORD, ip="10.0.0.9")
     assert blocked.status_code == 429
     body = blocked.json()["error"]
     assert body["code"] == "rate_limited" and set(body) == {"code", "message", "details"}
@@ -671,15 +671,17 @@ def test_login_is_throttled_per_account_regardless_of_ip(
     assert body["details"] == {"retry_after_seconds": 830}
     assert blocked.headers["retry-after"] == "830"
     assert "access_token" not in blocked.text
-    # Another account is not affected.
+    # The failures came from one address: the owner, on another, is not locked out.
+    assert attempt(client, "ada@example.test", PASSWORD, ip="192.0.2.77").status_code == 200
+    # Another account is not affected, from the refused address either.
     register(client, "grace@example.test")
-    assert attempt(client, "grace@example.test", PASSWORD).status_code == 200
+    assert attempt(client, "grace@example.test", PASSWORD, ip="10.0.0.9").status_code == 200
 
     # Still refused just before the window moves on, allowed again just after.
     clock.now += 829
-    assert attempt(client, "ada@example.test", PASSWORD).status_code == 429
+    assert attempt(client, "ada@example.test", PASSWORD, ip="10.0.0.9").status_code == 429
     clock.now += 2
-    assert attempt(client, "ada@example.test", PASSWORD).status_code == 200
+    assert attempt(client, "ada@example.test", PASSWORD, ip="10.0.0.9").status_code == 200
 
 
 def test_login_throttle_does_not_reveal_whether_the_account_exists(
@@ -688,8 +690,8 @@ def test_login_throttle_does_not_reveal_whether_the_account_exists(
     client, _ = throttled
     seen: dict[str, list[tuple[int, str, dict[str, Any]]]] = {}
     for email in ("ada@example.test", "nobody@example.test"):
-        for number in range(10):
-            response = attempt(client, email, "wrong-password", ip=f"10.0.1.{number}")
+        for _ in range(10):
+            response = attempt(client, email, "wrong-password", ip="10.0.1.9")
             error = response.json()["error"]
             seen.setdefault(email, []).append(
                 (response.status_code, error["code"], error.get("details") or {})
@@ -759,6 +761,14 @@ def test_account_limiter_primitives() -> None:
     limiter.forget("k")
     assert limiter.blocked_for("k", 2) == 0.0
     limiter.forget("never-seen")
+    for key in ("a:1", "a:2", "b:1"):
+        limiter.hit(key)
+    limiter.forget_matching(lambda key: key.startswith("a:"))
+    assert [limiter.blocked_for(key, 1) > 0 for key in ("a:1", "a:2", "b:1")] == [
+        False,
+        False,
+        True,
+    ]
 
 
 # ------------------------------------------------------------------ community

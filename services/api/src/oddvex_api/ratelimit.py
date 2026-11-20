@@ -4,11 +4,17 @@ Process-local: with several workers each worker keeps its own counters. Swap
 for a shared store (e.g. Redis) before scaling horizontally.
 
 Two limiters live on the app. ``rate_limiter`` counts requests per client IP
-(:func:`rate_limit`). ``account_limiter`` counts things per account whatever the IP:
-failed logins per email (:func:`check_login_allowed`, :func:`record_login_failure`) and
-verification or reset emails per address (:func:`limit_account_action`). The per-account
-keys are the address as typed, whether or not an account exists for it, so the answer
-never reveals that.
+(:func:`rate_limit`). ``account_limiter`` counts things per account: failed logins
+(:func:`check_login_allowed`, :func:`record_login_failure`) and verification or reset
+emails per address, whatever the IP (:func:`limit_account_action`). The per-account keys
+are the address as typed, whether or not an account exists for it, so the answer never
+reveals that.
+
+Failed logins are counted twice. Per email and client network (:func:`client_network`)
+with the ceiling ``login_max_failures``: somebody else's failures do not refuse the
+owner, who signs in from another network. And per email across all networks with the
+much higher ceiling ``login_max_failures_per_email``, so guessing spread over many
+addresses is still stopped.
 
 The community has limiters with their own windows (picks per day; comments, reports and
 follows per hour), counted per user: :func:`check_user_quota` and :func:`use_user_quota`.
@@ -26,6 +32,7 @@ auto-settlement (:func:`user_exclusive`).
 
 from __future__ import annotations
 
+import ipaddress
 import threading
 import time
 import weakref
@@ -98,6 +105,12 @@ class SlidingWindowRateLimiter:
     def forget(self, key: str) -> None:
         with self._lock:
             self._hits.pop(key, None)
+
+    def forget_matching(self, matches: Callable[[str], bool]) -> None:
+        """Forget every key ``matches`` accepts. Looks at each key once."""
+        with self._lock:
+            for key in [k for k in self._hits if matches(k)]:
+                del self._hits[key]
 
     def reset(self) -> None:
         with self._lock:
@@ -193,9 +206,40 @@ def client_ip(request: Request) -> str:
     if settings is not None and settings.trust_proxy:
         forwarded = request.headers.get("x-forwarded-for", "")
         last = forwarded.split(",")[-1].strip()
-        if last:
+        # Printable text only: the value is stored in audit rows and used in limiter keys.
+        if last and last.isprintable():
             return last[:64]
     return request.client.host if request.client else "unknown"
+
+
+def client_network(address: str) -> str:
+    """The network an address is counted under for failed sign-ins.
+
+    An IPv4 address is its own network. An IPv6 address is counted with its /64 prefix,
+    because one host is normally given a whole /64 and can pick a new address inside it
+    for every request. An IPv4 address written as IPv6 (``::ffff:a.b.c.d``) is that IPv4
+    address. A port some proxies add (``a.b.c.d:port``, ``[v6]:port``) and an IPv6 zone
+    index are not part of the network. Anything that is not an address (a proxy that
+    sends something else, the peer name of a test client) is used as it is, without
+    whitespace.
+    """
+    text = "".join(address.split())
+    if not text:
+        return "unknown"
+    host = text
+    if host.startswith("[") and "]" in host:
+        host = host[1 : host.index("]")]
+    elif host.count(":") == 1 and "." in host:
+        host = host.partition(":")[0]
+    try:
+        parsed = ipaddress.ip_address(host.partition("%")[0])
+    except ValueError:
+        return text[:64]
+    if isinstance(parsed, ipaddress.IPv6Address):
+        if parsed.ipv4_mapped is None:
+            return str(ipaddress.ip_network((parsed, 64), strict=False))
+        parsed = parsed.ipv4_mapped
+    return str(parsed)
 
 
 def too_many_requests(retry_after: float) -> ApiError:
@@ -226,32 +270,70 @@ def rate_limit(bucket: str) -> Callable[[Request], None]:
 
 
 # ------------------------------------------------------------ per account
-def _login_key(email: str) -> str:
-    return f"login-failed:{email}"
+_LOGIN_PAIR_PREFIX = "login-failed:"
+
+
+def _login_pair_key(email: str, network: str) -> str:
+    # The network has no whitespace (:func:`client_network`), so the first space ends it
+    # and no email can be made to look like another email on another network.
+    return f"{_LOGIN_PAIR_PREFIX}{network} {email}"
+
+
+def _login_email_key(email: str) -> str:
+    return f"login-failed-anywhere:{email}"
 
 
 def check_login_allowed(request: Request, email: str) -> None:
-    """429 when this email has had too many failed logins inside the window.
+    """429 when there were too many failed logins for this email inside the window.
 
-    Checked before the password, for any email, so a locked-out address looks the same
-    whether or not an account exists for it and whichever IP the attempt comes from.
+    Two counts are checked: the failures for this email from the caller's network
+    (ceiling ``login_max_failures``) and the failures for this email from anywhere
+    (ceiling ``login_max_failures_per_email``). The answer carries the longer of the two
+    waits. Checked before the password, for any email, so a refused address looks the
+    same whether or not an account exists for it. Records nothing: an attempt made while
+    refused does not extend the refusal.
     """
     settings = request.app.state.settings
     if not settings.rate_limit_enabled:
         return
     limiter: SlidingWindowRateLimiter = request.app.state.account_limiter
-    retry_after = limiter.blocked_for(_login_key(email), settings.login_max_failures)
+    network = client_network(client_ip(request))
+    retry_after = max(
+        limiter.blocked_for(_login_pair_key(email, network), settings.login_max_failures),
+        limiter.blocked_for(_login_email_key(email), settings.login_max_failures_per_email),
+    )
     if retry_after > 0:
         raise too_many_requests(retry_after)
 
 
 def record_login_failure(request: Request, email: str) -> None:
+    """Count one failed login for this email, for the caller's network and in all."""
     if request.app.state.settings.rate_limit_enabled:
-        request.app.state.account_limiter.hit(_login_key(email))
+        limiter: SlidingWindowRateLimiter = request.app.state.account_limiter
+        limiter.hit(_login_pair_key(email, client_network(client_ip(request))))
+        limiter.hit(_login_email_key(email))
 
 
-def clear_login_failures(request: Request, email: str) -> None:
-    request.app.state.account_limiter.forget(_login_key(email))
+def clear_login_failures(request: Request, email: str, everywhere: bool = False) -> None:
+    """Forget the failed logins for this email from the caller's network.
+
+    That is all a successful login clears: the counts for other networks stay, and so
+    does the count for the email across all networks, or someone who holds one valid
+    password could reset it between guesses at another. ``everywhere`` forgets every
+    count for the email, from all networks; it is for a completed password reset, which
+    proves control of the mailbox and makes earlier guesses worthless.
+    """
+    limiter: SlidingWindowRateLimiter = request.app.state.account_limiter
+    if not everywhere:
+        limiter.forget(_login_pair_key(email, client_network(client_ip(request))))
+        return
+
+    def is_pair_of_email(key: str) -> bool:
+        head, _, rest = key.partition(" ")
+        return rest == email and head.startswith(_LOGIN_PAIR_PREFIX)
+
+    limiter.forget_matching(is_pair_of_email)
+    limiter.forget(_login_email_key(email))
 
 
 def limit_account_action(request: Request, action: str, subject: str, limit: int) -> None:

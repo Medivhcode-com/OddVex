@@ -5,6 +5,10 @@ change is written to the audit log with the acting administrator, the target and
 values before and after. Reading the overview, the user list or the email outbox is
 audited too, coarsely: one ``admin.read`` row per request naming what was read, with no
 payload. Responses never carry password hashes, tokens or email bodies.
+
+Two routes act on a user's data rights for an owner who cannot sign in: the export
+(the owner's own export document, produced by the same code) and the deletion (the
+owner's own deletion, the same function). Both need a reason, which is audited.
 """
 
 from __future__ import annotations
@@ -12,24 +16,30 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from .. import __version__
+from ..account import export as account_export
+from ..account import service as account_service
+from ..account.schemas import AccountExportOut
 from ..config import Settings
 from ..db import AuditLog, Bet, EmailOutbox, FeatureFlag, SyncConnection, User
 from ..deps import AdminDep, DbDep, ProviderDep, SettingsDep, write_audit
 from ..errors import (
     AUTH_ERROR_RESPONSES,
     NOT_FOUND_RESPONSE,
+    RATE_LIMIT_RESPONSE,
     ApiError,
     ErrorResponse,
     not_found,
 )
 from ..flags import service as flags
 from ..flags.catalog import KNOWN_FLAGS
+from ..ratelimit import take_user_stream_slot
 from ..textnorm import fold
 
 _ADMIN_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -146,6 +156,13 @@ class AdminUserListOut(BaseModel):
     offset: int
 
 
+def _clean_reason(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) < 3:
+        raise ValueError("a reason of at least 3 characters is required")
+    return cleaned
+
+
 class SuspendUserRequest(BaseModel):
     reason: str = Field(
         min_length=3,
@@ -156,10 +173,54 @@ class SuspendUserRequest(BaseModel):
     @field_validator("reason")
     @classmethod
     def _strip(cls, value: str) -> str:
-        cleaned = value.strip()
-        if len(cleaned) < 3:
-            raise ValueError("a reason of at least 3 characters is required")
-        return cleaned
+        return _clean_reason(value)
+
+
+class ExportUserRequest(BaseModel):
+    reason: str = Field(
+        min_length=3,
+        max_length=500,
+        description=(
+            "Why the account's data is exported, for example the reference of the "
+            "owner's request. Stored in the audit log only, and kept there after the "
+            "account is deleted: it must not contain the account's email address."
+        ),
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return _clean_reason(value)
+
+
+class DeleteUserRequest(BaseModel):
+    reason: str = Field(
+        min_length=3,
+        max_length=500,
+        description=(
+            "Why the account is deleted, for example the reference of the owner's "
+            "request. Stored in the audit log only, and kept there after the account is "
+            "gone: it must not contain the account's email address."
+        ),
+    )
+    confirm_email: str = Field(
+        min_length=1,
+        max_length=320,
+        description=(
+            "The email address of the account to delete, typed again. Compared the way "
+            "login compares addresses: surrounding spaces and letter case do not matter."
+        ),
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return _clean_reason(value)
+
+    @field_validator("confirm_email")
+    @classmethod
+    def _as_login_does(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class SetUserPlanRequest(BaseModel):
@@ -368,6 +429,150 @@ def admin_set_user_plan(
         )
         db.commit()
     return _user_out(user, _bet_count(db, user.id))
+
+
+# ------------------------------------------- data rights on behalf of the owner
+def _data_rights_target(
+    db: Session, admin: User, user_id: str, action: Literal["export", "delete"], reason: str
+) -> User:
+    """The user an administrator may ``action`` (``export`` or ``delete``) for a data
+    request: not themselves (they have the routes under ``/v1/me``) and not another
+    administrator, as for a suspension. The reason must not name the account by its
+    email address: the audit entry outlives the account."""
+    user = _user_or_404(db, user_id)
+    if user.id == admin.id:
+        raise ApiError(
+            409,
+            f"cannot_{action}_self",
+            f"You cannot {action} your own account here. Use your account settings.",
+        )
+    if user.role == "admin":
+        done = {"export": "exported", "delete": "deleted"}[action]
+        raise ApiError(
+            409,
+            f"cannot_{action}_admin",
+            f"An administrator's account cannot be {done} by another administrator",
+        )
+    if user.email.lower() in reason.lower():
+        raise ApiError(
+            422,
+            "reason_contains_email",
+            "The reason must not contain the account's email address: it stays in the "
+            "audit log after the account is gone. Use the reference of the request.",
+        )
+    return user
+
+
+_DATA_RIGHTS_CONFLICT: dict[int | str, dict[str, Any]] = {
+    409: {
+        "model": ErrorResponse,
+        "description": "The target is an administrator or the caller's own account",
+    }
+}
+
+
+@router.post(
+    "/users/{user_id}/export",
+    response_model=AccountExportOut,
+    operation_id="admin_export_user",
+    summary="Export a user's data on their behalf",
+    description=(
+        "For a data request from an owner who cannot sign in: a suspended account, an "
+        "account closed because its owner is under 21, a lost password. Returns the same "
+        "document as `GET /v1/me/export` for that user, produced by the same code and "
+        "streamed the same way: one JSON document without a `Content-Length`, to be read "
+        "to the end and parsed once. It is the owner's data: pass it on to the owner "
+        "only, and only once you know the request is theirs. Works for an active and "
+        "for a suspended account and changes nothing in it.\n\n"
+        "`reason` is required and is recorded in the audit log as `admin.user_exported` "
+        "with the acting administrator, the user's id and the account's status; the "
+        "entry holds none of the exported data. The reason must not contain the "
+        "account's email address (`422 reason_contains_email`). An administrator cannot "
+        "export another administrator's account or their own (`409`); their own is at "
+        "`GET /v1/me/export`. The response counts as one of the streamed responses the "
+        "administrator can have in progress at the same moment "
+        "(`ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE`): over it this answers "
+        "`429 rate_limited`."
+    ),
+    responses={
+        **_ADMIN_RESPONSES,
+        **NOT_FOUND_RESPONSE,
+        **_DATA_RIGHTS_CONFLICT,
+        **RATE_LIMIT_RESPONSE,
+    },
+)
+def admin_export_user(
+    user_id: str, body: ExportUserRequest, admin: AdminDep, db: DbDep, request: Request
+) -> StreamingResponse:
+    user = _data_rights_target(db, admin, user_id, "export", body.reason)
+    # The stream is the administrator's: it counts against the streams they have in
+    # progress. Taken before the audit entry, so a refused request is not recorded as
+    # an export; given back here if no response comes of it.
+    release = take_user_stream_slot(request, admin.id)
+    try:
+        write_audit(
+            db,
+            request,
+            "admin.user_exported",
+            user_id=admin.id,
+            entity_type="user",
+            entity_id=user.id,
+            details={"reason": body.reason, "account_status": user.status},
+        )
+        db.commit()
+        return account_export.export_response(request.app, user.id, release)
+    except BaseException:
+        release()
+        raise
+
+
+@router.post(
+    "/users/{user_id}/delete",
+    status_code=204,
+    operation_id="admin_delete_user",
+    summary="Delete a user's account on their behalf",
+    description=(
+        "For a data request from an owner who cannot sign in, and for closing an account "
+        "that must not exist. Permanently deletes the user and everything "
+        "`DELETE /v1/me` deletes, through the same code: bets, watchlist, alert rules, "
+        "notifications and their preferences, the staking reminder, sync connections, "
+        "import runs, email tokens, outbox emails and all community data. It cannot be "
+        "undone. Works for an active and for a suspended account.\n\n"
+        "`confirm_email` must be the account's email address (compared as login compares "
+        "addresses), otherwise `422 confirm_email_mismatch` and nothing is deleted. "
+        "`reason` is required and must not contain that address "
+        "(`422 reason_contains_email`). The audit log keeps the entry the owner's own "
+        "deletion leaves (`account.deleted`, the opaque user id only) and an "
+        "`admin.user_deleted` entry with the acting administrator, the user's id, the "
+        "account's status and the reason; neither holds the email address. An "
+        "administrator cannot delete another administrator's account or their own "
+        "(`409`). Answers `204` with no body."
+    ),
+    responses={**_ADMIN_RESPONSES, **NOT_FOUND_RESPONSE, **_DATA_RIGHTS_CONFLICT},
+)
+def admin_delete_user(
+    user_id: str, body: DeleteUserRequest, admin: AdminDep, db: DbDep, request: Request
+) -> Response:
+    user = _data_rights_target(db, admin, user_id, "delete", body.reason)
+    if body.confirm_email != user.email:
+        raise ApiError(
+            422,
+            "confirm_email_mismatch",
+            "confirm_email is not this account's email address. Nothing was deleted.",
+        )
+    # The owner's own deletion, the same function; then who did it and why.
+    status = account_service.delete_account(db, request, user)
+    write_audit(
+        db,
+        request,
+        "admin.user_deleted",
+        user_id=admin.id,
+        entity_type="user",
+        entity_id=user_id,
+        details={"reason": body.reason, "account_status": status},
+    )
+    db.commit()
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------- flags

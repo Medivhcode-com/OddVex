@@ -193,8 +193,8 @@ def test_auth_events_are_audited(client: TestClient, app) -> None:  # type: igno
 def test_admin_role_comes_from_configuration(make_app: AppFactory) -> None:
     app = make_app(admin_emails="boss@example.test, other@example.test")
     with TestClient(app) as client:
-        # ``email_flows`` is on outside production, so a listed address is an ordinary
-        # user until it is confirmed: registering it first proves nothing.
+        # A listed address is an ordinary user until it is verified: registering it first
+        # proves nothing.
         boss = register(client, "boss@example.test")
         assert boss["user"]["role"] == "user"
         headers = {"Authorization": f"Bearer {boss['access_token']}"}

@@ -34,8 +34,9 @@ ODDVEX_ADMIN_EMAILS=admin@oddvex.test .venv/bin/python scripts/seed_demo.py   # 
   verified.
 - Administrator: there is no default one. `scripts/seed_demo.py` creates `admin@oddvex.test`
   (same password, email counted as confirmed) **only** when `ODDVEX_ADMIN_EMAILS` lists that
-  address. Any other listed address becomes an administrator once its email is confirmed
-  (see "Admin role" below).
+  address. Any other listed address becomes an administrator once its email is verified, and
+  never before. Where no confirmation link can be followed (production), the operator runs
+  `python scripts/bootstrap_admin.py --email <address>` (see "Admin role" below).
 - Docker: `docker build -t oddvex-api .` then run with `DATABASE_URL` and `ODDVEX_JWT_SECRET`
   set. The image runs `alembic upgrade head` and then uvicorn on port 8000 as a non-root user.
 
@@ -86,13 +87,14 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_JWT_SECRET` | dev-only value | HS256 signing secret. **Production refuses to start with the default or a secret shorter than 32 characters** |
 | `ODDVEX_JWT_TTL_MINUTES` | `60` | Access token lifetime |
 | `ODDVEX_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated CORS allowlist. `*` is rejected in production |
-| `ODDVEX_TRUST_PROXY` | `false` | Use the last `X-Forwarded-For` entry (the one your proxy appends) as the rate-limit client IP. Only behind exactly one trusted proxy |
+| `ODDVEX_TRUST_PROXY` | `false` | Use the last `X-Forwarded-For` entry (the one your proxy appends) as the client IP for rate limiting, for the login lockout's client network and for audit rows. Only behind exactly one trusted proxy |
 | `ODDVEX_RATE_LIMIT_ENABLED` | `true` | Turn the limiter off (tests) |
 | `ODDVEX_RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Per-IP limit shared by register, login and password change |
 | `ODDVEX_RATE_LIMIT_ASSISTANT_PER_MINUTE` | `20` | Per-IP limit on the assistant |
 | `ODDVEX_RATE_LIMIT_WINDOW_SECONDS` | `60` | Sliding window length |
 | `ODDVEX_ACCOUNT_LIMIT_WINDOW_SECONDS` | `900` | Window of the per-account limits below |
-| `ODDVEX_LOGIN_MAX_FAILURES` | `8` | Failed logins for one email inside that window before further attempts get `429`, from any IP |
+| `ODDVEX_LOGIN_MAX_FAILURES` | `8` | Failed logins for one email from one client network (an IPv4 address, or the /64 prefix of an IPv6 address) inside that window before further attempts for that email from that network get `429`. Other networks are not affected |
+| `ODDVEX_LOGIN_MAX_FAILURES_PER_EMAIL` | `50` | Failed logins for one email from all networks together inside that window before every attempt for that email gets `429`. For guessing spread over many addresses |
 | `ODDVEX_EMAIL_REQUESTS_PER_WINDOW` | `3` | Verification emails per user and password-reset emails per address inside that window |
 | `ODDVEX_EMAIL_PROVIDER` | `outbox` | `outbox`: write emails to the `email_outbox` table, send nothing. `resend`: a stub; the app refuses to start (`NotImplementedError`). Real email needs Founder approval |
 | `ODDVEX_WEB_BASE_URL` | `http://localhost:3000` | Base of the links in emails (`/verify-email?token=`, `/reset-password?token=`) |
@@ -101,7 +103,7 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_STALE_LIVE_SECONDS` | `120` | Live quotes older than this are stale |
 | `ODDVEX_STALE_PREGAME_SECONDS` | `900` | Pre-game quotes older than this are stale |
 | `ODDVEX_SYNTHETIC_SEED` | `20260101` | Seed of the synthetic data generator |
-| `ODDVEX_ADMIN_EMAILS` | empty | The only source of the `admin` role. A listed address gets it (once its email is confirmed, while `email_flows` is on); an address taken off the list loses it at its next login or token use. The seed script creates `admin@oddvex.test` only if it is listed |
+| `ODDVEX_ADMIN_EMAILS` | empty | The addresses that may hold the `admin` role. Listing an address gives nobody the role by itself: an account gets it only when its address is listed **and** verified, in every environment. An address taken off the list loses it at its next login or token use. `scripts/bootstrap_admin.py` makes a listed address an administrator where nothing can be verified through the API; the seed script creates `admin@oddvex.test` only if it is listed |
 | `ODDVEX_AUTO_SEED_DEMO` | `false` | Seed the demo account on startup. Ignored in production |
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
@@ -150,7 +152,7 @@ Errors always use one envelope, including validation errors and 404s:
 | Sync | `GET /v1/sync/providers`, `GET/POST /v1/sync/connections`, `POST .../{id}/sync`, `GET .../{id}/runs`, `DELETE .../{id}?delete_data=` |
 | Assistant | `POST /v1/assistant/query` |
 | Community (flag `community`) | `GET /v1/community/guidelines`, `PUT/GET /v1/community/profile`, `GET /v1/community/profiles/{handle}`, `POST/GET /v1/community/picks`, `GET/DELETE /v1/community/picks/{id}`, `GET /v1/community/feed`, `PUT/DELETE /v1/community/picks/{id}/like`, `POST/GET /v1/community/picks/{id}/comments`, `DELETE /v1/community/comments/{id}`, `POST/DELETE /v1/community/follows/{handle}`, `GET /v1/community/following`, `GET /v1/community/followers`, `PUT/DELETE /v1/community/blocks/{handle}`, `GET /v1/community/blocks`, `POST /v1/community/reports`, `GET /v1/community/leaderboard` (also flag `community_leaderboard`) |
-| Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
+| Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `POST /v1/admin/users/{id}/export`, `POST /v1/admin/users/{id}/delete`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
 | Moderation (admin, flag `community`) | `GET /v1/admin/community/overview`, `GET /v1/admin/community/reports`, `POST /v1/admin/community/reports/{id}/resolve` |
 | Dev (404 in production) | `GET /v1/dev/email-outbox/latest?to=` |
 
@@ -169,7 +171,7 @@ that is off answers `404 feature_disabled` with `details.flag`. In code:
 | `community_leaderboard` | off | `GET /v1/community/leaderboard`, in addition to `community`. **Off until a responsible-gambling review approves leaderboards** (`docs/compliance/RESPONSIBLE_GAMBLING.md`, section 8: a review gate "before build"; the roadmap allows leaderboards "only if RG review approves"). A ranking of bettors is the part of a community most likely to push people to bet more, so it has its own switch |
 | `value_screen` | on | `GET /v1/value` |
 | `tracker_analytics` | on | `GET /v1/bets/analytics` |
-| `email_flows` | on, **off when `ODDVEX_ENV=production`** | The four email-flow routes, the verification email queued at registration, and whether the admin role waits for a confirmed email. Off in production because no email provider is connected there: a reset request would be accepted and go nowhere. Turn it on in production only together with a real sender |
+| `email_flows` | on, **off when `ODDVEX_ENV=production`** | The four email-flow routes and the verification email queued at registration. It has no say in the admin role, which needs a verified address whether the flag is on or off. Off in production because no email provider is connected there: a reset request would be accepted and go nowhere. Turn it on in production only together with a real sender |
 | `premium_gating` | off | Whether plan entitlements are enforced. **Turning it on is a pricing decision: Founder approval first** |
 
 ### Plans and entitlements (no billing)
@@ -410,8 +412,8 @@ Behaviour worth knowing:
 
   | The message | The answer |
   | --- | --- |
-  | Crisis or self-harm language | Only support: 988 and 911 first, then the gambling helpline, and a line asking the user to tell someone they trust. One link, to `/responsible-gambling` |
-  | The user says they are under 21 ("I'm 17", "I turn 21 in March", "I'm in high school") | OddVex is for adults 21 and over; no betting information; the helpline |
+  | Crisis or self-harm language ("I want to end it tonight", "I'd be better off not being here", "I took a bunch of pills") | Only support: 988 and 911 first, then the gambling helpline, and a line asking the user to tell someone they trust. One link, to `/responsible-gambling` |
+  | The user says they are under 21 ("I'm 17", "I turn 21 in March", "I'm in high school", "I was born in 2009") | OddVex is for adults 21 and over; no betting information; the helpline |
   | Distress about gambling (cannot stop, lost more than they can afford, borrowed money, hiding it) | An acknowledgement without judgement, the helpline, the weekly staking reminder and the bet tracker, the crisis line. No prices |
   | Wanting to win losses back ("how much should I bet to recover my losses?") | The distress answer, which also declines to size or pick a bet and says that chasing losses is a recognised warning sign |
   | A request for a certain winner | No result is certain; no picks or predictions; market data is offered |
@@ -421,7 +423,12 @@ Behaviour worth knowing:
   "underage" | "distress"}`; every other answer has `support: null`. The last row keeps
   `intent: "fallback"`. The wording is fixed in code and is not passed through the
   `Explainer`. Each support reply is logged as `assistant_support_reply` with the case and
-  whether a token was sent: never the message, never a user id.
+  whether a token was sent: never the message, never a user id. The patterns read the
+  message and, for a birth year, today's date; nothing else. Where a message could be read
+  either way they lean towards the support reply ("the Tides can't lose this one" is
+  declined as a request for a certain winner). The general help answer (`intent: "help"`)
+  always ends with the helpline sentence, because "I need help" may not be about the
+  product.
 - **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
   (public, flag `value_screen`). For every outcome of every upcoming event, the best
   open, non-stale price is compared with the mean no-vig probability of the **other** open,
@@ -469,13 +476,26 @@ Behaviour worth knowing:
 - **Email limits.** The four routes share the per-IP auth limit. In addition a user can
   request 3 verification emails and one address 3 reset emails per 15 minutes; the reset
   limit is keyed on the address as typed, so it does not reveal whether an account exists.
-- **Login throttling.** After 8 failed logins for the same email within 15 minutes, further
-  attempts for that email get `429 rate_limited` (standard envelope, `Retry-After`) until the
-  window moves on, from any IP and even with the right password. It is keyed on the email as
-  typed, so the answer is the same for an address without an account. A successful login or
-  a completed password reset clears the count. In memory, per process, like the IP limiter,
-  and off when `ODDVEX_RATE_LIMIT_ENABLED=false`. Trade-off to know: someone who knows an
-  email can keep that account locked out of password login; the reset flow is the way back in.
+- **Login throttling.** Failed logins are counted per email **and client network**: an IPv4
+  address, or the /64 prefix of an IPv6 address (one host usually has a whole /64), taken
+  from the client IP described under `ODDVEX_TRUST_PROXY`. After 8 failed logins for the
+  same email from the same network within 15 minutes, further attempts for that email from
+  that network get `429 rate_limited` (standard envelope, `Retry-After`) until the window
+  moves on, even with the right password. Attempts from other networks are not affected,
+  so someone who knows an email and sends wrong passwords locks out only themselves, not
+  the owner. A second ceiling counts the failures for one email from all networks together
+  (`ODDVEX_LOGIN_MAX_FAILURES_PER_EMAIL`, 50 in the same window): over it every attempt for
+  that email gets the same `429`, which stops guessing spread over many addresses. Both are
+  keyed on the email as typed, so the answer is the same for an address without an account.
+  An attempt made while refused is not counted. A successful login clears the count of the
+  caller's own network only; a completed password reset clears every count for the email.
+  In memory, per process, like the IP limiter, and off when
+  `ODDVEX_RATE_LIMIT_ENABLED=false`. What is left: someone who can send 50 failures every 15
+  minutes from at least seven networks can still keep one email locked out, and in
+  production the reset flow is switched off (`email_flows`), so the ways back in are to
+  wait for the window, to restart the API process (the counts are in its memory) or to
+  raise the ceiling. A client that reaches the API through a server which does not pass
+  the visitor's address on shares that server's address with everyone else behind it.
 - **Suspension.** `POST /v1/admin/users/{id}/suspend` `{reason}` sets `users.status` to
   `suspended`: the user's existing tokens get `401 account_suspended` and login gets
   `403 account_suspended` with a neutral message (only after the correct password). The data
@@ -485,25 +505,55 @@ Behaviour worth knowing:
 - **Data rights of a suspended account.** A suspended user's token still works on exactly two
   routes, `GET /v1/me/export` and `DELETE /v1/me`, and on nothing else (one dependency,
   `get_data_rights_user`, used by those two routes only; a test walks every other route).
-  Both calls are audited with `details.account_status: "suspended"`. Known gap: a suspended
-  account cannot sign in, so this only helps while it still holds an unexpired token (60
-  minutes by default). After that the export or deletion has to be requested from support;
-  there is no admin route that does it yet.
+  Both calls are audited with `details.account_status: "suspended"`. A suspended account
+  cannot sign in, so this only helps while it still holds an unexpired token (60 minutes by
+  default), and the web and mobile apps drop the session of a suspended account. After
+  that the owner asks support, and an administrator meets the request with the two routes
+  below.
+- **Data requests met by an administrator.** For an owner who cannot sign in (suspended,
+  closed because under 21, lost password). `POST /v1/admin/users/{id}/export` `{reason}`
+  returns the same document as `GET /v1/me/export` for that user, from the same code and
+  streamed the same way. `POST /v1/admin/users/{id}/delete` `{reason, confirm_email}`
+  deletes the account through the same function as `DELETE /v1/me`
+  (`account/service.py`), so what is removed and the `account.deleted` entry that stays are
+  the same; it answers `204`. `confirm_email` must be the account's address, compared as
+  login compares addresses (`422 confirm_email_mismatch` otherwise, nothing deleted). Both
+  work for an active and for a suspended account, and both refuse another administrator
+  or the caller's own account (`409 cannot_export_admin`, `cannot_export_self`,
+  `cannot_delete_admin`, `cannot_delete_self`). `reason` is required (3 to 500 characters)
+  and must not contain the account's email address (`422 reason_contains_email`), because
+  the audit entry stays after the account is gone. The entries are `admin.user_exported`
+  and `admin.user_deleted`: the acting administrator as `user_id`, the user's opaque id as
+  `entity_id`, `details.reason` and `details.account_status`, and nothing of the exported
+  data. The export counts among the administrator's streamed responses in progress, not
+  against the hourly export limit. Checking that a request really comes from the owner is
+  up to the person handling it; the API cannot.
 - **Admin.** Every route needs the `admin` role (`403 forbidden` otherwise). Every change
   (suspend, unsuspend, plan, flag) writes an audit entry with the acting administrator as
   `user_id`, the target as `entity_type`/`entity_id` and `details.before` / `details.after`
-  (plus `details.reason` for a suspension). Reads are audited too, coarsely: one `admin.read`
+  (plus `details.reason` for a suspension). The export and the deletion of a user's account
+  are audited with their reason (see above). Reads are audited too, coarsely: one `admin.read`
   row per request to the overview, the user list, the email outbox or the community report
   queue, with the resource as `entity_type` and no payload (not the search term, not the rows
   returned). Reading the audit log and the flag list is not recorded.
-- **Admin role.** `ODDVEX_ADMIN_EMAILS` is the only source of the role. It is checked at
-  registration, at login and on every token use, so taking an address off the list demotes
-  that user at their next request (`role.removed` in the audit log) and adding one promotes
-  it (`role.granted`). While `email_flows` is on, the role is only granted once the address
-  has been confirmed, so registering a listed address first gains nothing. With `email_flows`
-  off (the production default, because nothing can be confirmed without a sender) a listed
-  address is an administrator from registration: **in production, only list addresses that
-  are already registered by their owners, or register them yourself first.** There is still
+- **Admin role.** An account is an administrator exactly when its address is in
+  `ODDVEX_ADMIN_EMAILS` **and** its email address is verified. That is the rule in every
+  environment and whatever `email_flows` says: the list alone gives nobody the role, so
+  having registered a listed address first gains nothing. The rule is applied at login,
+  when an address is confirmed and on every token use: an account that meets it is
+  promoted (`role.granted` in the audit log), and one that holds the role without meeting
+  it is demoted at its next request (`role.removed`, with the reason `not_in_admin_emails`
+  or `email_not_verified`). Outside production an address is verified with the link from
+  the outbox. In production no link can be followed, so the first administrator comes
+  from an operator command, run where the API runs (in the container:
+  `python scripts/bootstrap_admin.py --email <address>`). It refuses an address that is
+  not in `ODDVEX_ADMIN_EMAILS`. For a listed address it creates the account, or takes over
+  the one that exists, whoever registered it: it sets a new random password, marks the
+  address verified, ends every earlier token and every outstanding email link of the
+  account, lifts a suspension, gives the role and writes `admin.bootstrap` to the audit
+  log. The password is printed once on standard output: sign in and change it at once.
+  Whoever held the address before can no longer sign in. Do not list an address that is
+  published anywhere. There is still
   no second factor for administrators. `GET /v1/admin/users?q=&status=&plan=&limit=&offset=`
   returns `{items, total, limit, offset}` with `bet_count` and `last_login_at`.
   `GET /v1/admin/audit?action=&user_id=&before=&limit=` is newest first with a `next_before`
@@ -570,7 +620,22 @@ Behaviour worth knowing:
 - **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
   notifications, notification preferences, the staking reminder, sync connections, import
   runs, email tokens and outbox emails, and all of the account's community data (see
-  "Community" below). The audit log keeps an entry with the opaque user id only.
+  "Community" below). The audit log keeps an entry with the opaque user id only. An
+  administrator's `POST /v1/admin/users/{id}/delete` runs the same function.
+- **NUL characters.** Text with a NUL character (U+0000) in it is refused with
+  `422 validation_error` (`details[0].type: "nul_character"`, `loc` naming the place)
+  before the route runs, on every route: in a path value, in a query name or value, and in
+  any string or key of a JSON body, in whatever encoding the body was sent. PostgreSQL
+  cannot store the character, so it used to end as a failed statement and a `500`. The six
+  characters `\u0000` as ordinary text are not affected.
+- **Database errors in the log.** A failed statement is logged with its class, the place
+  it was raised, the SQLSTATE, the table, column and constraint names the driver reports
+  and the statement with its placeholders, and without the values bound to it: both
+  engines run with `hide_parameters`, and the tracebacks the application writes
+  (`logging_config.py`) leave out the message of every exception in a chain that contains a
+  database error, because the driver's own text can quote a key or a whole row. The same
+  treatment is put on uvicorn's error logger. The worker scripts print Python's standard
+  traceback if they crash: no parameter list, but the driver's message as it is.
 
 ### Community (flags `community` and `community_leaderboard`, both off by default)
 
@@ -710,7 +775,8 @@ src/oddvex_api/
                      record.py: flat-stake record of graded picks)
   providers/         SportsDataProvider protocol, SyntheticProvider, vendor-payload normalizer
   board.py           read models: odds comparison, best price, consensus, prop research, value screen
-  api/               public data routes, calculators, admin (overview, users, flags, audit, outbox)
+  api/               public data routes, calculators, admin (overview, users and their data
+                     requests, flags, audit, outbox)
   community/         profiles, picks, grading, records, follows, feed, comments, likes, blocks,
                      reports (service.py, router.py), moderation (admin_router.py), the content
                      rules (content_rules.py, pure), the guidelines and the demo seed
@@ -720,7 +786,8 @@ src/oddvex_api/
   entitlements/      plan catalog, require_entitlement, GET /v1/me/entitlements. No billing
   mailer/            EmailSender protocol, OutboxEmailSender, ResendEmailSender stub, email
                      templates (all wording), hashed single-use tokens, dev outbox route
-  account/           data export (export.py streams the document)
+  account/           data export (export.py streams the document) and account deletion
+                     (service.py, shared by the owner's route and the administrator's)
   bets/              tracker: schemas, storage (what the columns can hold), service
                      (settlement, auto-settlement, summary), analytics, routes
   watchlist/         watched teams, players and events
@@ -744,7 +811,8 @@ alembic/             migrations (0001: users, bets, bet_legs, sync_connections, 
                      community_follows, community_likes, community_blocks, community_reports,
                      users.search_key, bets.sportsbook_key;
                      0006: bets.client_request_id and its unique index)
-scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py
+scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py,
+                     bootstrap_admin.py (the first administrator; see "Admin role")
 docs/QUANT_METHODOLOGY.md
 ```
 
@@ -755,7 +823,7 @@ docs/QUANT_METHODOLOGY.md
   `provider`, `provider_id` and `fetched_at`.
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
   security headers, CORS allowlist, request body size limit, in-memory sliding-window rate
-  limits (per IP, per account for failed logins and emails, and per user for community
+  limits (per IP, per account and client network for failed logins, per account for emails, and per user for community
   picks, comments, reports and follows, bet and sync writes and the data export), audit log for auth events including logout,
   email verification, password resets, every admin change, admin reads, role grants and
   removals, community posts, follows, blocks, reports and moderation decisions, password changes, bet create/settle/auto-settle/delete,
@@ -791,7 +859,9 @@ docs/QUANT_METHODOLOGY.md
 
 - No real odds, scores or statistics. Nothing here should be used to make a betting decision.
 - Email is not delivered, so nobody outside development can verify an address or reset a
-  password yet. An administrator cannot reset a password either.
+  password yet. An administrator cannot reset a password either. The one exception is the
+  operator command `scripts/bootstrap_admin.py`, which sets a new password for an address
+  in `ODDVEX_ADMIN_EMAILS` and marks it verified.
 - `GET /v1/dev/email-outbox/latest` is unauthenticated outside production by design.
 - Flags are global: no per-user or percentage rollout. Each flagged request reads the flag
   from the database.

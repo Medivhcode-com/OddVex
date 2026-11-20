@@ -458,8 +458,8 @@ def test_dev_outbox_route_is_404_in_production_and_no_link_is_stored(
             assert LINK_WITHHELD in row.body_text and "token=" not in row.body_text
         # The token hashes are there; nothing in the database can be turned back into a link.
         assert len(rows(client, EmailToken)) == 2
-        # Back to the production default, under which a listed address is an
-        # administrator from registration (there is no way to confirm it here).
+        # Back to the production default. No link can be followed there, so the helper
+        # marks the listed address verified, as the operator command does.
         with app.state.session_factory() as db:
             flags.set_flag(db, "email_flows", False, app.state.settings)
             db.commit()

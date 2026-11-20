@@ -21,6 +21,12 @@ ADMIN_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/v1/admin/users/{id}/suspend", {"reason": "testing"}),
     ("POST", "/v1/admin/users/{id}/unsuspend", None),
     ("PUT", "/v1/admin/users/{id}/plan", {"plan": "premium"}),
+    ("POST", "/v1/admin/users/{id}/export", {"reason": "testing"}),
+    (
+        "POST",
+        "/v1/admin/users/{id}/delete",
+        {"reason": "testing", "confirm_email": "grace@example.test"},
+    ),
     ("GET", "/v1/admin/flags", None),
     ("PUT", "/v1/admin/flags/community", {"enabled": True}),
     ("GET", "/v1/admin/audit", None),
@@ -88,6 +94,9 @@ def test_every_admin_route_is_403_for_a_user_and_401_without_a_token(
         assert (grace.plan, grace.status) == ("free", "active")
     assert admin_client.get("/v1/flags").json()["flags"]["community"] is False
     assert not audit_rows(admin_client, "admin.user_suspended")
+    assert not audit_rows(admin_client, "admin.user_exported")
+    assert not audit_rows(admin_client, "admin.user_deleted")
+    assert not audit_rows(admin_client, "account.deleted")
 
 
 # ---------------------------------------------------------------------- users

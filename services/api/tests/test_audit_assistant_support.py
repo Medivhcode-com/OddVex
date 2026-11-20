@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date
 from typing import Any
 
 import pytest
@@ -132,6 +133,15 @@ CRISIS_MESSAGES = [
     "I can't keep going. Tides odds",
     "I want to be dead, best odds on the Tides",
     "I want to kil myself, Tides odds",
+    # Wordings found while widening the rules, each with something that used to win routing.
+    "I just can't anymore. Tides odds",
+    "I don't care if I live or die, best price on the Tides",
+    "I'm worth more dead than alive. Harbor City Tides moneyline?",
+    "nothing matters anymore, what's my record",
+    "I won't make it through the night. Tides odds",
+    "tell my family I love them. Tides line movement",
+    "I should just disappear, {player} points last 10",
+    "k i l l myself, tides odds",
 ]
 
 
@@ -329,6 +339,14 @@ def test_a_user_who_says_they_are_under_21_gets_no_betting_information(
     assert HELPLINE in answer  # help is offered either way, without assuming anything
     assert player not in answer
     assert reply["suggestions"] == [RESOURCES]
+
+
+def test_a_birth_year_that_makes_the_user_under_21_gets_the_same_reply(client: TestClient) -> None:
+    message = f"I was born in {date.today().year - 16}, best odds on the Harbor City Tides"
+    answer = assert_support_reply(ask(client, message), "underage", message)
+    assert answer.startswith("OddVex is for adults 21 and over")
+    older = ask(client, f"I was born in {date.today().year - 30}, best odds on the Tides")
+    assert older["intent"] == "compare_odds" and older["support"] is None
 
 
 def test_under_21_and_in_distress_gets_both_messages(client: TestClient, player: str) -> None:

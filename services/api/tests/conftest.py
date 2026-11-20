@@ -9,11 +9,11 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from oddvex_api.auth import security
 from oddvex_api.config import Settings
-from oddvex_api.db import Base, make_engine
+from oddvex_api.db import Base, User, make_engine, utcnow
 from oddvex_api.main import create_app
 from oddvex_api.providers import SyntheticProvider
 
@@ -121,7 +121,7 @@ ADMIN_EMAIL = "boss@example.test"
 
 @pytest.fixture
 def admin_client(make_app: AppFactory) -> Iterator[TestClient]:
-    """A client on an app where ``ADMIN_EMAIL`` registers as an administrator."""
+    """A client on an app where ``ADMIN_EMAIL`` is listed as an administrator address."""
     with TestClient(make_app(admin_emails=ADMIN_EMAIL)) as test_client:
         yield test_client
 
@@ -136,12 +136,28 @@ def verify_email(client: TestClient, email: str) -> None:
     assert confirmed.status_code == 200, confirmed.text
 
 
+def mark_email_verified(client: TestClient, email: str) -> None:
+    """Mark ``email`` as verified directly in the database: what an operator step does
+    where no confirmation link can be followed (production, or ``email_flows`` off)."""
+    with client.app.state.session_factory() as db:  # type: ignore[attr-defined]
+        user = db.scalars(select(User).where(User.email == email)).one()
+        if user.email_verified_at is None:
+            user.email_verified_at = utcnow()
+        db.commit()
+
+
 def admin_headers(client: TestClient, email: str = ADMIN_EMAIL) -> dict[str, str]:
-    """Register a listed address and confirm it: with ``email_flows`` on (the default
-    outside production) the admin role is only granted to a confirmed address."""
+    """Register a listed address and verify it: the admin role is only ever given to a
+    verified address. The confirmation link from the development outbox is used where
+    there is one; otherwise the address is marked verified in the database."""
     account = register(client, email)
-    if account["user"]["role"] != "admin":  # already one when ``email_flows`` is off
+    latest = client.get(
+        "/v1/dev/email-outbox/latest", params={"to": email, "template": "verify_email"}
+    )
+    if latest.status_code == 200:
         verify_email(client, email)
+    else:
+        mark_email_verified(client, email)
     return {"Authorization": f"Bearer {account['access_token']}"}
 
 

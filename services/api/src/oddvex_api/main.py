@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
@@ -25,6 +25,7 @@ from .community import admin_router as community_admin_router
 from .community import router as community_router
 from .config import Settings, get_settings
 from .db import Base, make_engine, make_session_factory
+from .deps import reject_nul_characters
 from .entitlements import router as entitlements_router
 from .errors import ErrorResponse, install_error_handlers
 from .flags import router as flags_router
@@ -99,7 +100,8 @@ TAGS = [
     {
         "name": "admin",
         "description": (
-            "Administrator routes: overview, users, feature flags, audit log, email outbox "
+            "Administrator routes: overview, users (including the export and the deletion "
+            "of an account on its owner's behalf), feature flags, audit log, email outbox "
             "and community moderation. Every change is audited."
         ),
     },
@@ -206,6 +208,9 @@ def create_app(
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None,
         openapi_url=None if settings.is_production else "/openapi.json",
+        # Runs for every route, before the route's own dependencies: no text with a NUL
+        # character in it gets as far as a route, and so none reaches the database.
+        dependencies=[Depends(reject_nul_characters)],
     )
     app.state.settings = settings
     app.state.engine = engine
@@ -215,7 +220,8 @@ def create_app(
     app.state.rate_limiter = SlidingWindowRateLimiter(settings.rate_limit_window_seconds)
     app.state.sync_registry = sync_registry or default_registry()
     app.state.alert_throttle = EvaluationThrottle()
-    #: Per-account counters (failed logins per email, emails per address); see ratelimit.py.
+    #: Per-account counters (failed logins per email and client network and per email,
+    #: emails per address); see ratelimit.py.
     app.state.account_limiter = SlidingWindowRateLimiter(settings.account_limit_window_seconds)
     #: Community: picks per user per day; comments, reports and follows per user per hour;
     #: and when pending picks were last checked against final scores.

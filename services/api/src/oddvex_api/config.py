@@ -37,9 +37,11 @@ class Settings(BaseSettings):
     stale_live_seconds: int = 120
     stale_pregame_seconds: int = 900
 
-    #: Trust ``X-Forwarded-For`` for the rate-limit client IP (only behind a trusted proxy).
+    #: Trust ``X-Forwarded-For`` for the client IP used by the rate limits, the login
+    #: lockout and audit rows (only behind a trusted proxy).
     trust_proxy: bool = False
-    #: Comma-separated emails that receive the admin role at registration / login.
+    #: Comma-separated emails that may hold the admin role. An account gets it only when
+    #: its address is listed here and verified (``deps.sync_admin_role``).
     admin_emails: str = ""
 
     rate_limit_enabled: bool = True
@@ -47,11 +49,17 @@ class Settings(BaseSettings):
     rate_limit_assistant_per_minute: int = 20
     rate_limit_window_seconds: int = 60
 
-    #: Per-account limits. They are keyed on the email address (or user id), not the IP,
-    #: and share one window. Disabled together with ``rate_limit_enabled``.
+    #: Per-account limits. They are keyed on the email address (or user id) and share one
+    #: window. Disabled together with ``rate_limit_enabled``.
     account_limit_window_seconds: int = Field(default=900, ge=1)
-    #: Failed logins for one email inside the window before further attempts get 429.
+    #: Failed logins for one email from one client network (an IPv4 address, or the /64
+    #: prefix of an IPv6 address) inside the window before further attempts for that
+    #: email from that network get 429. Other networks are not affected.
     login_max_failures: int = Field(default=8, ge=1)
+    #: Failed logins for one email from all networks together inside the window before
+    #: every attempt for that email gets 429. Much higher than ``login_max_failures``:
+    #: it is there for guessing spread over many addresses.
+    login_max_failures_per_email: int = Field(default=50, ge=1)
     #: Verification or password-reset emails one address can request inside the window.
     email_requests_per_window: int = Field(default=3, ge=1)
 

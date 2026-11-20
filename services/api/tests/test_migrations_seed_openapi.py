@@ -48,7 +48,12 @@ from oddvex_api.seed import (
     seed_demo,
 )
 
-from .conftest import EXTERNAL_DATABASE_URL, AppFactory, _reset_external_database
+from .conftest import (
+    EXTERNAL_DATABASE_URL,
+    AppFactory,
+    _reset_external_database,
+    mark_email_verified,
+)
 from .test_provider_synthetic import REAL_NAMES
 
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -507,6 +512,10 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
             },
         ).json()
         admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        # The list alone gives nobody the role: the address has to be verified, and in
+        # production that is an operator step.
+        assert client.get("/v1/admin/users", headers=admin_headers).status_code == 403
+        mark_email_verified(client, "boss@example.test")
         turned_on = client.put(
             "/v1/admin/flags/email_flows", json={"enabled": True}, headers=admin_headers
         )
@@ -718,6 +727,7 @@ def test_upgrade_from_0004_with_existing_data_then_downgrade(
             },
         ).json()
         admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        mark_email_verified(client, "boss@example.test")  # the admin role needs it
         searched = client.get("/v1/admin/users", params={"q": "ZOË ünsal"}, headers=admin_headers)
         assert [u["email"] for u in searched.json()["items"]] == ["old@example.test"]
         searched = client.get("/v1/admin/users", params={"q": "josé"}, headers=admin_headers)
@@ -1485,6 +1495,44 @@ def test_seed_verifies_the_demo_user_and_only_creates_a_listed_admin(
         assert db.scalar(select(Bet.id).where(Bet.user_id == admin.id)) is None
 
 
+def test_seed_admin_and_an_account_that_already_exists(
+    session_factory,
+    make_settings,  # type: ignore[no-untyped-def]
+) -> None:
+    """The seed keeps an existing account's password. In a demo database it still makes
+    that account the demo administrator; in production the account may be anybody's, so
+    an unverified one is left exactly as it is."""
+    listed = make_settings(admin_emails="admin@oddvex.test")
+    production = make_settings(
+        admin_emails="admin@oddvex.test", env="production", jwt_secret="k" * 48
+    )
+    with session_factory() as db:
+        squatter = User(
+            email=DEMO_ADMIN_EMAIL,
+            password_hash=hash_password("somebody-elses-password"),
+            display_name="Somebody",
+            age_confirmed_at=NOW,
+        )
+        db.add(squatter)
+        db.commit()
+        first_hash = squatter.password_hash
+
+        seed_demo(db, "pw-one-1234", NOW, settings=production)
+        db.refresh(squatter)
+        assert (squatter.role, squatter.email_verified_at) == ("user", None)
+        assert squatter.password_hash == first_hash
+
+        # Outside production it is the demo administrator, verified by the seed.
+        seed_demo(db, "pw-one-1234", NOW, settings=listed)
+        db.refresh(squatter)
+        assert (squatter.role, squatter.email_verified_at) == ("admin", NOW)
+        assert squatter.password_hash == first_hash
+        # Verified once, production keeps it as it is.
+        seed_demo(db, "pw-one-1234", NOW, settings=production)
+        db.refresh(squatter)
+        assert squatter.role == "admin"
+
+
 # -------------------------------------------------------------------- OpenAPI
 EXPECTED_OPERATIONS = {
     ("GET", "/health"): "get_health",
@@ -1552,6 +1600,8 @@ EXPECTED_OPERATIONS = {
     ("POST", "/v1/admin/users/{user_id}/suspend"): "admin_suspend_user",
     ("POST", "/v1/admin/users/{user_id}/unsuspend"): "admin_unsuspend_user",
     ("PUT", "/v1/admin/users/{user_id}/plan"): "admin_set_user_plan",
+    ("POST", "/v1/admin/users/{user_id}/export"): "admin_export_user",
+    ("POST", "/v1/admin/users/{user_id}/delete"): "admin_delete_user",
     ("GET", "/v1/admin/flags"): "admin_list_flags",
     ("PUT", "/v1/admin/flags/{key}"): "admin_set_flag",
     ("GET", "/v1/admin/audit"): "admin_list_audit",
