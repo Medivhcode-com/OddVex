@@ -86,7 +86,7 @@ Important caveats:
 | INTL-08 | Bankroll / staking calculator | e.g. fractional staking | Free | M3 | Planned | RG review of framing before build |
 | INTL-09 | Market discrepancy / +EV screen | Market-wide scan vs. reference price | Premium | M4 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | Licensed provider; reference-price methodology; claims review |
 | INTL-10 | Backtesting | Test projections/strategies on history | Premium | M4 | Planned | Historical data licence; DATA-05 |
-| INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated on app open or by script; no background worker) | Real-time provider; NOTF-01 |
+| INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated when notifications are read, by "Check now", by script, and on the preview by a worker that waits two minutes between passes; in-app delivery only) | Real-time provider; NOTF-01 |
 | INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Built in code, not reported as run on a device (converter, no-vig, EV, CLV) | MOB-01 |
 
 ## F. Bet Tracker
@@ -128,7 +128,7 @@ Important caveats:
 | AI-01 | Assistant UI | Chat at `/app/assistant` | Free | M1 | Built in M1 | AUTH-01 |
 | AI-02 | Rule-based router | Intent → internal tools | Free | M1 | Built in M1 | Internal data tools |
 | AI-03 | Grounded answers | Numbers only from tools; source + "as of" | Free | M1 | Built in M1 | DATA-04 |
-| AI-04 | Refusal behaviour | No guarantees/picks; honest "no data"; support replies for crisis, under-21 and distress messages | Free | M1 | Built. Support detection is a fixed rule list with known misses; every other answer ends with the helpline and 988 (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5). The AG-03 under-21 flag is not built | — |
+| AI-04 | Refusal behaviour | No guarantees/picks; honest "no data"; support replies for crisis, under-21 and distress messages | Free | M1 | Built. Support detection is a fixed rule list with known misses; every answer that is not a support reply ends with the helpline and 988 (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5). The AG-03 under-21 flag is not built | — |
 | AI-05 | AI disclosure + RG footer | Automated-assistant label | Free | M1 | Built in M1 | — |
 | AI-06 | Suggested prompts | Starter questions | Free | M1 | Built in M1 | — |
 | AI-07 | LLM-backed assistant | Tool calling under same grounding contract | Free+limits / Premium | M4 | Planned | **Founder gate** (paid API); provider data-processing terms; AI-08 |

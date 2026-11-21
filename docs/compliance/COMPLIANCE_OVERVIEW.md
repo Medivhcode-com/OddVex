@@ -21,7 +21,7 @@ Last updated: 2026-11-21 (product facts in section 1 and the current positions c
 | Current build uses synthetic data and fictional teams/players/sportsbooks | No licensed data, no real brands. An internal-only replay with real NFL names exists and refuses to run in production mode (`docs/product/DECISION_LOG.md`, D-015) |
 | Sportsbook sync is a mock; real sync only via authorized third-party vendors (planned M3) | No credential storage by OddVex |
 | No affiliate links, no ads, no subscriptions today | All planned later; each changes the analysis |
-| Community (user-generated content) is built and switched off | Profiles, picks, comments, follows, blocks, reports and moderation behind the `community` switch, off by default and on the preview. The screens are in the web and mobile code and appear when the switch is turned on |
+| Community (user-generated content) is built and switched off | Profiles, picks, comments, follows, blocks, reports and moderation behind the `community` switch, off by default, and off on the preview. The screens are in the web and mobile code and appear when the switch is turned on |
 | A private preview is running | Since 2026-11-18 on a Hostinger server, in production mode on synthetic data. The web preview is behind a password; the API at `api-preview.oddvex.com` is open and accepts sign-ups from anyone (`docs/product/DECISION_LOG.md`, D-021) |
 | Assistant is rule-based today; LLM-backed planned (M4) | Fixed rules for crisis, under-21, distress and certainty messages, with known misses (RESPONSIBLE_GAMBLING section 5) |
 
@@ -90,7 +90,7 @@ Platform policies change; **re-read the current official text before submission.
 |---|---|---|---|---|
 | AG-01 | Method | 21+ self-attestation checkbox at signup, recorded with a timestamp only; no terms version is stored (AUTH-02) | Is attestation adequate for an information service? For an affiliate? Is a neutral date-of-birth screen expected? | Open |
 | AG-02 | Marketing-site access | Public pages are not gated | Is an age interstitial advisable? | Open |
-| AG-03 | Handling suspected minors | Policy: close account and delete data on credible indication. An administrator can delete an account; no written procedure exists. The assistant gives no betting information to someone who says they are under 21 but records nothing | Confirm process and any reporting duties | Open |
+| AG-03 | Handling suspected minors | Policy: close account and delete data on credible indication. An administrator can delete an account; no written procedure exists. The assistant gives no betting information to someone who says they are under 21. Nothing is stored against the account and no flag is set; the only trace is one `assistant_support_reply` log line (case `underage`, no text, no user id) that can be matched by time to the request line. On the preview that request line holds the shared reverse proxy's or the web server's address, not the user's; the shared reverse proxy's own logs were not inspected | Confirm process and any reporting duties | Open |
 | AG-04 | Stronger verification | Not planned; would require new personal data (G-13) | When (if ever) would ID/age verification be required? | Open |
 | AG-05 | State age-verification / app-store age-assurance laws | Several states have enacted or proposed laws on age assurance for apps/online services | Applicability to OddVex | Open |
 
@@ -148,7 +148,7 @@ Details: [PRIVACY_AND_DATA.md](./PRIVACY_AND_DATA.md).
 | AI-C3 | Advice characterisation | Assistant gives information, not betting or financial advice; a request for a certain winner gets a fixed refusal | Is disclaimer sufficient? | Open |
 | AI-C4 | Marketing claims about "AI" | M1 assistant is rule-based; marketing must not overstate capability | Substantiation for "AI" claims | Open |
 | AI-C5 | LLM provider terms (M4) | Usage policies may restrict gambling-related use cases | Check provider acceptable-use policy before selection | Open |
-| AI-C6 | Vulnerable users | Fixed rules route crisis, under-21 and distress messages to support replies with no betting data, in that order; every other answer ends with the helpline and 988. The rules miss some wordings (listed in the tests as `KNOWN_MISSES`). See RESPONSIBLE_GAMBLING section 5 | Any duty-of-care expectations | Open |
+| AI-C6 | Vulnerable users | Fixed rules route crisis, under-21 and distress messages to support replies with no betting data, in that order; every answer that is not a support reply ends with the helpline and 988. The rules miss some wordings (listed in the tests as `KNOWN_MISSES`). See RESPONSIBLE_GAMBLING section 5 | Any duty-of-care expectations | Open |
 | AI-C7 | Retention of conversations | Not stored. Each support reply writes one log record with the case and whether the person was signed in, no text | Retention/notice requirements when persisted | Open |
 | AI-C8 | Emerging state AI laws | Rapidly changing | Monitoring plan | Open |
 

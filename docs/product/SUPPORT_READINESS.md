@@ -63,9 +63,11 @@ elsewhere. Settling a bet in the tracker changes only that record.
 
 How it works:
 
-- Alerts are checked **when you open the app** (specifically, when it reads your notifications or unread count,
-  at most about every 30 seconds per user), when you press "Check now" on mobile, or when an operator runs a
-  script. There is no background process.
+- Alerts are checked **when the app reads your notifications or unread count** (at most about every 30 seconds
+  per user), when you press "Check now" in the alerts list (web and mobile), and, on the preview, by a background worker that checks every
+  user with active alerts and then waits two minutes before the next pass (`infrastructure/hostinger/compose.yaml`,
+  service `worker`, which runs `services/api/scripts/evaluate_alerts.py`). A local or self-hosted install without
+  that worker checks only when the app reads notifications, when "Check now" is pressed, or when an operator runs the script.
 - Notifications appear **inside the app only**. There is no push, email or text message.
 - A price that reached your level and moved away again between two checks is not noticed. Prices are not stored.
 - A "before the game starts" alert that was not checked before the game began expires without notifying.
@@ -75,9 +77,9 @@ How it works:
 
 Ask: which rule, its state now (Active, Triggered, Paused, Expired), and when the app was last opened.
 
-> Alerts are checked when you open OddVex, not continuously, and they show up inside the app rather than as a push
-> notification. If the price touched your level and moved back before the app was next opened, the alert won't have
-> caught it. A start-time alert also needs the app to be opened before the game begins.
+> Alerts are checked when OddVex reads your notifications and, on the preview, every couple of minutes in the
+> background. They show up inside the app rather than as a push notification, so you only see one when you next open
+> OddVex. If the price touched your level and moved back between two checks, the alert won't have caught it.
 
 ### 3.4 "I set a weekly limit and it still let me log a bet"
 
@@ -174,7 +176,7 @@ pressing "Sync now" again is safe: it never duplicates bets.
 
 It is rule-based. It matches a small set of question types and answers from the app's own data with a sources
 line. No language model is connected. It declines picks and guarantees. Fixed rules give crisis, under-21 and distress
-messages a support reply with help resources instead of betting data, and every other answer ends with the helpline
+messages a support reply with help resources instead of betting data, and every answer that is not a support reply ends with the helpline
 and 988. The rules miss some wordings (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5): if a user reports that the
 assistant answered a message about distress or self-harm with betting data, treat it as 5.1 and tell engineering.
 
@@ -239,10 +241,12 @@ If you'd like a copy first, use Settings > download your data in the web app.
 ### 4.5 Alerts
 
 ```
-Alerts in OddVex are checked when you open the app, not continuously, and they
-appear inside the app rather than as push notifications. If a price reached your
-level and moved back before the app was next opened, the alert won't have caught
-it. You can see each alert's state under [Alerts], and set a triggered one again.
+Alerts in OddVex are checked when the app reads your notifications and, on the
+preview, every couple of minutes in the background. They appear inside the app
+rather than as push notifications, so you see one the next time you open OddVex.
+If a price reached your level and moved back between two checks, the alert won't
+have caught it. You can see each alert's state under [Alerts], and set a triggered
+one again.
 ```
 
 ### 4.6 Staking reminder

@@ -17,7 +17,7 @@ Legend — **Built**: `Yes` handled by the code at `2b0c7c1` (and so by the priv
 
 | # | Data | Examples | Purpose | Source | Sens. | Stored where | Built | Shared with |
 |---|---|---|---|---|---|---|---|---|
-| D-01 | Account identity | Email, display name, user ID, role, plan, status (active or suspended), last sign-in time, email-confirmed time | Authentication, account | User | M | PostgreSQL | Yes | Nobody |
+| D-01 | Account identity | Email, display name, user ID, role, plan, status (active or suspended), last sign-in time, email-confirmed time, time of last password change, a token version, and a folded copy of the email and display name used by the staff search (`users.search_key`) | Authentication, account | User | M | PostgreSQL | Yes | Nobody |
 | D-02 | Credential | Password **hash** only (argon2id) | Authentication | User | H | PostgreSQL | Yes | Nobody |
 | D-03 | Age attestation & legal acceptance | 21+ confirmation time only. **No terms or privacy version is stored** | Eligibility record | User | M | PostgreSQL | Yes (time only) | Nobody |
 | D-04 | Preferences | Odds format, theme. No time zone is stored | Personalisation | User | L | Browser cookie and storage (web); app storage (mobile). Not in the database | Yes | Nobody |
@@ -29,7 +29,7 @@ Legend — **Built**: `Yes` handled by the code at `2b0c7c1` (and so by the priv
 | D-10 | Parlay drafts | Legs | Parlay research | User | L | Client state M1; persisted M2 | M1 (client) | Nobody |
 | D-11 | Favorites / watchlists | Teams, players, games | Personalisation | User | L | PostgreSQL | Yes | Nobody |
 | D-12 | Alerts & notification tokens | Alert rules, in-app notifications, notification preferences, staking-reminder amount. No push tokens | Notifications | User/device | M | PostgreSQL | Yes (in-app only); push later | Push services (APNs/FCM/Expo), later |
-| D-13 | Server logs | API request line: time, method, path without query string, status, duration, client IP address, request id. No user agent, no user ID, no request body | Security, debugging | System | M | Container logs on the preview server; no size limit or retention rule set | Yes | Nobody by contract (the server is Hostinger's) |
+| D-13 | Server logs | API request line: time, method, path without query string, status, duration, request id and `client_ip`, the address of the direct peer. On the preview that is the shared reverse proxy or the web server, not the visitor (`infrastructure/RUNBOOK.md` section 3); with no proxy in front of the API it would be the visitor's IP address. The visitor's address is stored in the audit log (D-14). No user agent, no user ID, no request body. Other lines in the same log: `assistant_support_reply` (D-09), which can be matched by time to its request line; `alert_evaluation_failed` with the user ID when an alert evaluation fails; and `user <id>: failed` from the worker's alert script | Security, debugging | System | M | Container logs on the preview server; no size limit or retention rule set. The shared reverse proxy (Caddy) keeps its own logs, which this project does not control and which were not inspected (not verified) | Yes | Nobody by contract (the server is Hostinger's) |
 | D-14 | Security audit events | Sign-ins, failures, account and data actions, admin actions and reads: user id, action, item id, IP address, request id, details | Security | System | M | `audit_log` table (rows only added by application code; no separate store) | Yes | Nobody |
 | D-15 | Product analytics | Event names + properties per taxonomy (no stakes, no free text) | Product improvement | System | M | Analytics vendor/store | Later (M2) | Analytics vendor (TBD) |
 | D-16 | Approximate location | State/region derived from IP or user-declared | State availability (if adopted) | System/user | M | PostgreSQL / derived | Later (decision pending) | Nobody |
@@ -60,7 +60,7 @@ Legend — **Built**: `Yes` handled by the code at `2b0c7c1` (and so by the priv
 | Notifications | At most 500 per user | — |
 | Server logs (D-13) | No rule set | Logs from releases before 2026-11-19 included query strings |
 
-The public draft (`/privacy`) states these points. None has been reviewed by counsel.
+The public draft (`/privacy`, `apps/web/src/app/(marketing)/privacy/page.tsx` at `2b0c7c1`) states the account data, the audit log entries with their IP addresses and details, the daily and pre-release dumps and the reserved handle. It does not mention restore leftovers, copies of reported text, the 500-notification cap, the server logs (D-13) and their lack of a retention rule, the assistant's support log record (D-09), or the shared reverse proxy's own logs, which may hold visitors' addresses (not inspected) (owner question OQ-22). On the preview the API request line holds the proxy's or the web server's address, not the visitor's, so the visitor addresses the API stores are the ones in the audit log, which the page does mention. None of this has been reviewed by counsel.
 
 ### 3.2 Proposed defaults — to be confirmed by counsel
 
@@ -159,7 +159,7 @@ A public sub-processor list should be maintained from M2.
 
 ## 9. Children and minors
 
-OddVex is for adults 21+. It is not directed to children. We do not knowingly collect data from anyone under 21; credible indications lead to account closure and deletion (process to be confirmed by counsel, AG-03). As built, an administrator can delete an account, but no written procedure exists, and a statement to the assistant that the user is under 21 is not recorded anywhere.
+OddVex is for adults 21+. It is not directed to children. We do not knowingly collect data from anyone under 21; credible indications lead to account closure and deletion (process to be confirmed by counsel, AG-03). As built, an administrator can delete an account, but no written procedure exists, and a statement to the assistant that the user is under 21 is not stored against the account and sets no flag. The only trace is one `assistant_support_reply` log line (case `underage`, signed in or not; no message text, no user id), written in the same container log as the request line (D-13), so the two can be matched by time. On the preview the request line holds the shared reverse proxy's or the web server's address, not the user's, and the assistant writes no audit row; whether the shared reverse proxy's own logs hold the user's address was not inspected (not verified). The container logs have no retention rule.
 
 ## 10. Open questions
 

@@ -21,13 +21,13 @@ In the code the facts live in one module per app: `services/api/src/oddvex_api/h
 | Resource | Detail | Where shown (code at `2b0c7c1`) |
 |---|---|---|
 | **National Problem Gambling Helpline (US)** | **1-800-MY-RESET (1-800-697-3738)**. Call, or text 800GAM (800426). Confidential, 24 hours a day, every day. In service under this number since 2026-01-29. Online chat on the Council's site | Web: marketing footer, app shell (every width), `/responsible-gambling`, Settings, the tracker's "Log a bet" panel and the "Sportsbook sync" panel. Mobile: Settings, the tracker (every state) and the sync panel. API texts: assistant answers and disclaimers, the staking-reminder notification, the email footer, the community guidelines |
-| Not an emergency service | In a crisis: call or text **988** (Suicide and Crisis Lifeline) or call **911** | `/responsible-gambling`; mobile Settings; the assistant's crisis, distress and under-21 replies and the help sentence at the end of every other answer (988 only) |
+| Not an emergency service | In a crisis: call or text **988** (Suicide and Crisis Lifeline) or call **911** | `/responsible-gambling`; mobile Settings; the assistant's crisis, distress and under-21 replies and the help sentence at the end of every answer that is not a support reply (988 only) |
 | National Council on Problem Gambling | ncpgambling.org (front page only; deeper addresses move) | `/responsible-gambling`; mobile Settings |
 | Gamblers Anonymous / Gam-Anon | Peer support | Not shown in the product today |
 | State-specific helplines and self-exclusion programmes | Vary by state; list to be compiled and verified with counsel | `/responsible-gambling` says some states publish their own helpline and that state regulators run self-exclusion programmes; no state is listed |
 
 **1-800-GAMBLER is not the national helpline.** It is the line of the Council on Compulsive Gambling of New Jersey.
-The national helpline used that number until 2026-01-29. The product gave it until the fixes of 2026-11-19 and
+1-800-MY-RESET has been in service since 2026-01-29; what the national helpline used before then is not verified here. The product gave the New Jersey number until the fixes of 2026-11-19 and
 2026-11-21. In the code at `2b0c7c1` it appears on screen only on `/responsible-gambling`, in one sentence naming it as the
 New Jersey council's line.
 
@@ -63,7 +63,7 @@ State-specific wording may be required for advertising — to be confirmed by co
 | Calculators | EV depends on user's estimate — stated; no "profit guaranteed" framing; arbitrage/hedge tools (M2) carry practical-risk notes | M1/M2 | In M1 scope / planned |
 | Parlay | Break-even rate next to payout; correlation warning; no "boost your payout" framing | M1 | Built: the parlay tool shows the combined price, the payout and the break-even rate (how often the parlay must win). It does **not** show a combined probability that every leg wins: at `2b0c7c1` the screen shows "Combined probability: Not shown", which pull request 20 replaces with a plain statement. Same-game warning built |
 | Tracker | Plain P/L; no celebratory animations for wins; no "win it back" prompts | M1 | In M1 scope |
-| Assistant | Refuses guarantees/picks; detects crisis, under-21 and distress language and responds with support resources instead of betting data; every other answer ends with the helpline and 988 | M1 | Built as fixed rules with known misses (section 5) |
+| Assistant | Refuses guarantees/picks; detects crisis, under-21 and distress language and responds with support resources instead of betting data; every answer that is not a support reply ends with the helpline and 988 | M1 | Built as fixed rules with known misses (section 5) |
 | Notifications | No promotional betting inducements; user-set alerts only; quiet hours; easy opt-out | M3 | Built in-app only: user-set alerts, per-kind opt-out, a banned-phrase test on every template. No quiet hours, no push, no email |
 | RG tools | Optional: session reminders, self-set review reminders, account time-out ("take a break"), net-result summaries | M3 | Planned — design with RG expertise |
 | Bankroll calculator | Only after RG review of framing | M3 | Planned |
@@ -78,23 +78,24 @@ The table is the specification. The column on the right says what the code at `2
 | Trigger (examples) | Required behaviour | As built |
 |---|---|---|
 | "I can't stop betting", "I've lost everything", "I need to win it back" | Stop providing betting data in that reply; acknowledge without judgement; provide the national helpline and link to `/responsible-gambling` | **Distress** reply: "Thank you for telling me", no prices, the helpline sentence, the weekly staking reminder and the bet tracker described as tools ("a reminder, not a limit"), and the crisis sentence (988, 911). Suggestions link to `/responsible-gambling`, Settings and the tracker. Intent `support`, `support.case` `distress` |
-| Language suggesting self-harm or crisis | Provide 988 Suicide and Crisis Lifeline and the national helpline; encourage reaching out to someone now | **Crisis** reply, and nothing else: an acknowledgement, "Call or text 988 … If you are in immediate danger, call 911", "tell someone you trust", then the gambling helpline, and a line saying it is an automated helper. Threats against other people get the same reply |
+| Language suggesting self-harm or crisis | Provide 988 Suicide and Crisis Lifeline and the national helpline; encourage reaching out to someone now | **Crisis** reply, and nothing else: an acknowledgement, "Call or text 988 … If you are in immediate danger, call 911", "tell someone you trust", then the gambling helpline, and a line saying it is an automated helper. Threats against other people that the rules catch get the same reply ("I'm going to kill him", "I want to hurt someone"); others are missed: "im going to shoot up my school" gets an ordinary answer with the help sentence and without 911 |
 | "What's a sure thing / lock?" | Explain no outcome is certain; offer market data only | Fixed refusal: no result is certain, no picks or predictions, market data offered instead. Intent `fallback`, not a support case |
 | "How much should I bet to recover my losses?" | Decline; explain chasing losses is a recognised warning sign; provide resources | Part of the distress reply: "I can't help size or pick a bet to win money back. Trying to win back losses is a recognised warning sign …" |
-| User indicates being under 21 | State that OddVex is 21+ only; do not provide betting information; flag per AG-03 process | **Under-21** reply: "OddVex is for adults 21 and over, so I can't give odds, prices or any other betting information here", the helpline sentence and the crisis sentence. **The AG-03 flag is not built**: nothing is recorded and no account is closed |
+| User indicates being under 21 | State that OddVex is 21+ only; do not provide betting information; flag per AG-03 process | **Under-21** reply: "OddVex is for adults 21 and over, so I can't give odds, prices or any other betting information here", the helpline sentence and the crisis sentence. **The AG-03 flag is not built**: nothing is stored against the account, no flag is set and no account is closed. The only trace is one `assistant_support_reply` log line (case `underage`, signed in or not; no message text, no user id), in the same container log as the request line for that call, so the two can be matched by time. On the preview the request line holds the address of the shared reverse proxy or the web server, not the user's (`infrastructure/RUNBOOK.md` section 3), and the assistant writes no audit row; whether the shared reverse proxy's own logs hold the user's address was not inspected (not verified). The logs have no retention rule |
 
 Order when several apply: crisis, then under 21, then distress. The replies are fixed wording in the module, so no
 pluggable explainer can reword them.
 
-**Every other answer** (ordinary answers, the fallback, the refusal and every "couldn't find" answer) ends with the
+**Every answer that is not a support reply** (ordinary answers, the fallback, the refusal and every "couldn't find" answer) ends with the
 help sentence: "If gambling is causing problems, call the National Problem Gambling Helpline at 1-800-MY-RESET
 (1-800-697-3738) or text 800GAM; in a crisis, call or text 988 (the Suicide and Crisis Lifeline)." This is the safety
 net for messages the rules miss.
 
 **Known misses.** Detection is a fixed list of rules, not a classifier, and it misses some wordings. Every review found
-new ones. The misses found so far are listed in `KNOWN_MISSES` in `services/api/tests/test_audit_assistant_detection.py`
-(for example "gonna end it with sleeping pills"); a missed crisis message gets an ordinary answer with the help
-sentence and without 911. The rules also show help for some ordinary messages on purpose (`HELP_SHOWN_ANYWAY`). A
+new ones. The misses known at release `2b0c7c1` are listed in `KNOWN_MISSES` in
+`services/api/tests/test_audit_assistant_detection.py` (for example "gonna end it with sleeping pills"). Others were
+found afterwards and are not in that list, for example the threat "im going to shoot up my school". A missed crisis
+message or threat gets an ordinary answer with the help sentence and without 911. The rules also show help for some ordinary messages on purpose (`HELP_SHOWN_ANYWAY`). A
 sturdier list would need a reviewed sample of real missed messages, which means storing what users type: a privacy
 decision for the Founder and counsel. Today no message text is stored; each support reply writes one log record,
 `assistant_support_reply`, holding only the case and whether the person was signed in.

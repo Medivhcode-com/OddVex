@@ -24,7 +24,8 @@ used against the preview while they were open.
 2. **Check.** Every finding went to independent checkers who traced the code, judged who could reach it, or reproduced
    it: three checkers for 6 findings, two for 30, and one for 16 (all 16 rated low by the auditor; the checker raised
    two of them to medium). Every one of the 52 was confirmed as real. Checkers could change the severity; the severity
-   below is the one after checking. The checkers' notes listed traps and the tests and documents pinned to the old
+   below is the one after checking. Where checkers disagreed, the majority was taken (api-auth#2 critical, quant-data#1
+   high); where two checkers split, the lower was taken (deploy-ops#4 and quant-data#5, low). The checkers' notes listed traps and the tests and documents pinned to the old
    behaviour.
 3. **Fix in lanes.** The fixes were grouped into lanes by the files they touch. In each lane an engineer first wrote a
    test that failed for the reason the finding gave, then made the change and saw the test pass. Two reviewers then
@@ -38,7 +39,8 @@ used against the preview while they were open.
    run on the combined code: API 4,627 tests passed on SQLite (4 skipped, PostgreSQL-only) and 4,636 on PostgreSQL
    (1 skipped); web lint, types, 195 unit tests, build and 387 of 387 end-to-end tests against the working-tree API;
    mobile lint, types, 528 tests and the bundle export; 168 infrastructure tests; a secret pre-check. One reviewer
-   approved it. Continuous integration then passed 9 of 9 jobs, pull request 19 was squash-merged as `2b0c7c1`
+   approved it. Continuous integration then passed 9 of 9 jobs (these figures are as the lanes and the release check
+   reported them; they were not re-run for this report), pull request 19 was squash-merged as `2b0c7c1`
    (D-028) and deployed. The server checks after that deploy are in `docs/product/BUILD_STATUS.md`.
 
 Pull requests:
@@ -88,8 +90,8 @@ here; every row was checked against the code at `2b0c7c1` for this report.
 | web-security#3 | Every unknown `/blog/<anything>` was rendered, cached and written to disk | medium | fixed | 18 | — |
 | web-security#4 | The error screen could never say the data service was unreachable in a production build | low | fixed | 18 | — |
 | web-security#5 | A revoked session cookie was never cleared | low | fixed | 18 | When the API is also failing, the person lands on the login page and the cookie is kept |
-| compliance#1 | The assistant had none of the documented responsible-gambling behaviours | medium | partly | 19, 20 | Fixed rules for crisis, under 21, distress and certainty, and a help sentence with the helpline and 988 on every other answer. The rules miss some wordings (`KNOWN_MISSES`). The AG-03 under-21 flag is not built. Support card on the clients and the documents in PR 20. Wording needs review (OQ-08) |
-| compliance#2 | Every surface gave 1-800-GAMBLER, the Council on Compulsive Gambling of New Jersey's line, and called it the national helpline | medium | fixed | 18, 19, 20 | Code gives 1-800-MY-RESET (1-800-697-3738), text 800GAM, 988 and 911. Documents corrected in PR 20. The only Android test APK predates the fix (OQ-20). Facts must be checked again before each release |
+| compliance#1 | The assistant had none of the documented responsible-gambling behaviours | medium | partly | 19, 20 | Fixed rules for crisis, under 21, distress and certainty, and a help sentence with the helpline and 988 on every answer that is not a support reply. The rules miss some wordings (`KNOWN_MISSES`, and threats such as "im going to shoot up my school", found after release). The AG-03 under-21 flag is not built. Support card on the clients and the documents in PR 20. Wording needs review (OQ-08) |
+| compliance#2 | Every surface gave 1-800-GAMBLER, the Council on Compulsive Gambling of New Jersey's line, and called it the national helpline | medium | fixed (PR 20) | 18, 19, 20 | Code gives 1-800-MY-RESET (1-800-697-3738), text 800GAM, 988 and 911. Documents corrected in PR 20; at `2b0c7c1` `docs/compliance/RESPONSIBLE_GAMBLING.md` and `docs/product/SUPPORT_READINESS.md` still called the New Jersey line the national helpline, and nine more documents gave 1-800-GAMBLER as the helpline without naming it (COMPLIANCE_OVERVIEW, LAUNCH_READINESS_CHECKLIST, the counsel packet, APP_STORE_LISTING_DRAFT, BRAND_VOICE, PRODUCT_REQUIREMENTS, ROADMAP, SCREEN_MAP, USER_JOURNEYS), so this row is partly fixed at `2b0c7c1` alone. The only Android test APK predates the fix (OQ-20). Facts must be checked again before each release |
 | compliance#3 | The privacy page misdescribed the export and what deletion leaves | medium | fixed | 19 | The page now says what the export omits and what is kept. Nothing removes audit entries (IP addresses kept with no end date, OQ-10); backups keep deleted accounts about 14 days plus pre-deploy copies (OQ-15) |
 | compliance#4 | A suspended user could not export or delete their data, though the API description said they could | medium | partly | 19, 20 | Staff export and delete routes exist in the API. Their web screens and the suspended notice are in PR 20. No administrator exists on the preview and the procedure is not written (OQ-09) |
 | compliance#5 | Below 1024 px no 21+ or helpline line; no help link on tracker and sync | low | fixed | 18, 19 | — |
@@ -113,8 +115,8 @@ here; every row was checked against the code at `2b0c7c1` for this report.
 | docs-truth#6 | Mobile documents said Expo Go on an iPhone opens the app and that no EAS profiles exist | medium | partly (PR 20) | 20 | Store prep, screen map and the phone test guide corrected in PR 20. Still saying Expo Go: `apps/mobile/README.md` ("Run it") and decision-log row O-02, outside this lane |
 
 Counts: 2 critical, 3 high, 27 medium, 20 low. As the table stands, with PR 20's documents as they are in the working
-tree: 39 fixed (6 of them only through PR 20), 9 partly (1 of them only through PR 20), 4 documented, 0 open. At
-`2b0c7c1` alone, before PR 20: 33 fixed, 8 partly, 2 documented (api-data#6, mobile#3) and 9 open, all nine being
+tree: 39 fixed (7 of them only fully through PR 20), 9 partly (1 of them only through PR 20), 4 documented, 0 open. At
+`2b0c7c1` alone, before PR 20: 32 fixed, 9 partly (compliance#2 among them: its code was fixed, its documents were not), 2 documented (api-data#6, mobile#3) and 9 open, all nine being
 documents that PR 20 corrects (api-auth#4, api-auth#6, deploy-ops#5, mobile#2, docs-truth#2 to #6). "Partly" rows
 whose remaining part is in PR 20 count as partly in both.
 
@@ -136,16 +138,17 @@ Each needs code, a server action or a document outside the audit lanes.
 | 10 | Live vendor must report score-change times, or the live threshold comes down | quant-data#2 | Founder at G-01 (OQ-17) |
 | 11 | Preview database graded on old synthetic scores | quant-data#4 | Founder (OQ-18) |
 | 12 | `apps/mobile/README.md` and decision-log row O-02 still describe Expo Go on an iPhone | docs-truth#6 | Mobile and docs-ops owners |
+| 13 | The draft `/privacy` page does not mention the server logs (on the preview the API request line holds the proxy's or web server's address, not the visitor's), the shared reverse proxy's own logs (not inspected; may hold visitors' addresses), the assistant's support log record, restore leftovers or copies of reported text | docs-truth#2, compliance#3 | Web owner; Founder and counsel (OQ-22) |
 
 ## 5. Decisions for the Founder
 
-Recorded in `docs/backlog/owner-questions.md` (OQ-07 to OQ-21) and in the decision log (O-12, O-17, O-18). Those that
+Recorded in `docs/backlog/owner-questions.md` (OQ-07 to OQ-22) and in the decision log (O-12, O-17, O-18). Those that
 also need counsel are asked in `COUNSEL_REVIEW_PACKET.md` section 6 (questions 15 and 21 to 26).
 
 | Question | Where |
 |---|---|
 | Responsible-gambling page wording and its "checked on" date; any state helpline text | OQ-07 |
-| Assistant reply wording, threats getting the crisis reply, accepting known misses, logging user messages to improve the rules, the AG-03 flag | OQ-08 |
+| Assistant reply wording, threats getting the crisis reply when the rules catch them, the under-21 log line, accepting known misses, logging user messages to improve the rules, the AG-03 flag | OQ-08 |
 | Staff export and delete procedure, second approver, reason retention | OQ-09 |
 | IP addresses and action details kept in the audit log after deletion | OQ-10 |
 | First administrator by `services/api/scripts/bootstrap_admin.py`: account takeover, attestation by command, printed password, no admin MFA | OQ-11, O-12 |
@@ -159,6 +162,7 @@ also need counsel are asked in `COUNSEL_REVIEW_PACKET.md` section 6 (questions 1
 | Chart labels in Decimal mode and touch tooltips | OQ-19 |
 | Rebuilding the Android test APK | OQ-20 |
 | Keeping the preview's sign-up open under draft legal pages | OQ-21 |
+| What the draft `/privacy` page leaves out (server logs and the shared reverse proxy's logs, support log record, restore leftovers, report copies) | OQ-22 |
 | What the gate waiver of 2026-11-19 covers | O-17 |
 | Forwarded-address trust on the shared server | O-18 |
 

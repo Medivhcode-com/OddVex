@@ -60,7 +60,7 @@ community module now exists in code and is switched off by default; see `BUILD_S
 
 ## Primary references
 
-- Counsel packet, reissued 2026-11-21: `docs/compliance/COUNSEL_REVIEW_PACKET.md` on `main`
+- Counsel packet, reissued 2026-11-21: `docs/compliance/COUNSEL_REVIEW_PACKET.md` (on `main` once PR 20 is merged; until then `main` holds the 2026-11-16 version)
 - [Counsel packet as pinned on 2026-11-16 (superseded, do not send)](https://github.com/Medivhcode-com/OddVex/blob/c044583f9d1dd063311aff71d296fe62a04f04df/docs/compliance/COUNSEL_REVIEW_PACKET.md)
 - [Decision log, pinned build revision](https://github.com/Medivhcode-com/OddVex/blob/c044583f9d1dd063311aff71d296fe62a04f04df/docs/product/DECISION_LOG.md)
 - [Michelle Cohen, Ifrah Law](https://www.ifrahlaw.com/team/michelle-cohen/)
