@@ -17,6 +17,7 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import DateTime, bindparam, func, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 
 from oddvex_api.auth.security import hash_password
 from oddvex_api.community.content_rules import check_text
@@ -47,7 +48,12 @@ from oddvex_api.seed import (
     seed_demo,
 )
 
-from .conftest import EXTERNAL_DATABASE_URL, AppFactory, _reset_external_database
+from .conftest import (
+    EXTERNAL_DATABASE_URL,
+    AppFactory,
+    _reset_external_database,
+    mark_email_verified,
+)
 from .test_provider_synthetic import REAL_NAMES
 
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +79,7 @@ TABLES = {
     "community_likes",
     "community_blocks",
     "community_reports",
+    "community_reserved_handles",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -506,6 +513,10 @@ def test_upgrade_from_0003_with_existing_data_then_downgrade(
             },
         ).json()
         admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        # The list alone gives nobody the role: the address has to be verified, and in
+        # production that is an operator step.
+        assert client.get("/v1/admin/users", headers=admin_headers).status_code == 403
+        mark_email_verified(client, "boss@example.test")
         turned_on = client.put(
             "/v1/admin/flags/email_flows", json={"enabled": True}, headers=admin_headers
         )
@@ -717,6 +728,7 @@ def test_upgrade_from_0004_with_existing_data_then_downgrade(
             },
         ).json()
         admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        mark_email_verified(client, "boss@example.test")  # the admin role needs it
         searched = client.get("/v1/admin/users", params={"q": "ZOË ünsal"}, headers=admin_headers)
         assert [u["email"] for u in searched.json()["items"]] == ["old@example.test"]
         searched = client.get("/v1/admin/users", params={"q": "josé"}, headers=admin_headers)
@@ -799,6 +811,380 @@ def test_upgrade_from_0004_with_existing_data_then_downgrade(
             text("SELECT count(*) FROM users WHERE search_key IS NULL")
         ).scalar()
         assert missing == 0
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+    command.check(config)
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0005_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0006.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0005")
+    engine = make_engine(url)
+    assert "client_request_id" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+    assert "uq_bets_user_client_request" not in {
+        index["name"] for index in inspect(engine).get_indexes("bets")
+    }
+
+    # Rows written by the 0005 release: one user with three bets and their legs. One of
+    # the bets holds what that release could store and the current one refuses: a price
+    # rounded to exactly 1.000000 and a stake rounded to 0.00.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    bets = (
+        ("a" * 32, "Northline", "10", "2.0"),
+        ("b" * 32, "Harbor", "25", "1.909091"),
+        ("c" * 32, "Rounded", "0", "1.000000"),
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, "
+                "is_active, age_confirmed_at, created_at, token_version, plan, status, "
+                "search_key) VALUES (:id, :email, :hash, 'Old', 'user', :active, :at, :at, 0, "
+                "'free', 'active', :key)"
+            ).bindparams(at),
+            {
+                "id": "u" * 32,
+                "email": "old@example.test",
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+                "key": "old@example.test\nold",
+            },
+        )
+        for bet_id, sportsbook, stake, odds in bets:
+            connection.execute(
+                text(
+                    "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, "
+                    "sportsbook_key, stake, odds_decimal, odds_source, placed_at, source, "
+                    "created_at, updated_at) VALUES (:id, :user, 'straight', 'pending', 'nba', "
+                    ":sportsbook, :key, :stake, :odds, 'legs', :at, 'manual', :at, :at)"
+                ).bindparams(at),
+                {
+                    "id": bet_id,
+                    "user": "u" * 32,
+                    "sportsbook": sportsbook,
+                    "key": sportsbook.lower(),
+                    "stake": stake,
+                    "odds": odds,
+                    "at": stamp,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO bet_legs (id, bet_id, position, selection, market, "
+                    "odds_decimal) VALUES (:id, :bet, 0, 'Tides ML', 'moneyline', :odds)"
+                ),
+                {"id": bet_id.upper(), "bet": bet_id, "odds": odds},
+            )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    columns = {c["name"]: c for c in inspect(engine).get_columns("bets")}
+    assert columns["client_request_id"]["nullable"] is True
+    indexes = {index["name"]: index for index in inspect(engine).get_indexes("bets")}
+    assert indexes["uq_bets_user_client_request"]["column_names"] == [
+        "user_id",
+        "client_request_id",
+    ]
+    assert bool(indexes["uq_bets_user_client_request"]["unique"]) is True
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # Nothing existing was touched: every old bet is still there, without an id.
+        rows = connection.execute(
+            text("SELECT id, sportsbook, client_request_id FROM bets ORDER BY id")
+        ).all()
+        assert [tuple(row) for row in rows] == [(b[0], b[1], None) for b in bets]
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 3
+    command.check(config)  # `alembic check`: models and migrations agree
+
+    # The index does its job in the database itself: one bet per user and id, any number
+    # of bets without one.
+    duplicate = text(
+        "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, stake, "
+        "odds_decimal, odds_source, placed_at, source, created_at, updated_at, "
+        "client_request_id) VALUES (:id, :user, 'straight', 'pending', 'nba', 'Dup', 10, 2.0, "
+        "'legs', :at, 'manual', :at, :at, :request)"
+    ).bindparams(at)
+    with engine.begin() as connection:
+        connection.execute(
+            duplicate, {"id": "d" * 32, "user": "u" * 32, "at": stamp, "request": "request-0001"}
+        )
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            duplicate, {"id": "e" * 32, "user": "u" * 32, "at": stamp, "request": "request-0001"}
+        )
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM bets WHERE id = :id"), {"id": "d" * 32})
+    engine.dispose()
+
+    # The current app on the upgraded data: the old account's bets load everywhere,
+    # including the one this release would refuse, and a create can be repeated safely.
+    app = make_app(database_url=url, env="production", jwt_secret="k" * 48)
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        listed = client.get("/v1/bets", headers=headers)
+        assert listed.status_code == 200, listed.text
+        by_book = {b["sportsbook"]: b for b in listed.json()}
+        assert set(by_book) == {"Northline", "Harbor", "Rounded"}
+        assert by_book["Rounded"]["stake"] == 0 and by_book["Rounded"]["potential_payout"] == 0
+        assert by_book["Rounded"]["combined_price"]["american"] == -100000000
+        assert client.get("/v1/bets/summary", headers=headers).status_code == 200
+        assert client.get("/v1/bets/analytics", headers=headers).status_code == 200
+        export = client.get("/v1/me/export", headers=headers)
+        assert export.status_code == 200 and len(export.json()["bets"]) == 3
+
+        body = {
+            "bet_type": "straight",
+            "stake": 10,
+            "sportsbook": "Northline",
+            "legs": [{"selection": "x", "market": "moneyline", "odds": -110}],
+            "client_request_id": "after-upgrade-0001",
+        }
+        first = client.post("/v1/bets", json=body, headers=headers)
+        again = client.post("/v1/bets", json=body, headers=headers)
+        assert (first.status_code, again.status_code) == (201, 200), (first.text, again.text)
+        assert again.json() == first.json()
+        assert len(client.get("/v1/bets", headers=headers).json()) == 4
+        # The old bet that could not be stored today can still be corrected or deleted.
+        assert (
+            client.delete(f"/v1/bets/{by_book['Rounded']['id']}", headers=headers).status_code
+            == 204
+        )
+        assert client.get("/health").json()["database"] == "ok"
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0006 added; every bet, old and new, is kept.
+    command.downgrade(config, "0005")
+    engine = make_engine(url)
+    assert "client_request_id" not in {c["name"] for c in inspect(engine).get_columns("bets")}
+    assert "uq_bets_user_client_request" not in {
+        index["name"] for index in inspect(engine).get_indexes("bets")
+    }
+    assert set(inspect(engine).get_table_names()) >= TABLES_0005
+    with engine.connect() as connection:
+        books = connection.execute(text("SELECT sportsbook FROM bets ORDER BY sportsbook"))
+        assert list(books.scalars()) == ["Harbor", "Northline", "Northline"]
+        assert connection.execute(text("SELECT count(*) FROM bet_legs")).scalar() == 3
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0005"
+        )
+    engine.dispose()
+
+    # Up again: the column comes back empty and the models and migrations agree.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        with_id = connection.execute(
+            text("SELECT count(*) FROM bets WHERE client_request_id IS NOT NULL")
+        ).scalar()
+        assert with_id == 0
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 3
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+    command.check(config)
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
+SNAPSHOT_COLUMNS = {"target_text_snapshot", "target_summary_snapshot"}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0006_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0007.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0006")
+    engine = make_engine(url)
+    assert "community_reserved_handles" not in inspect(engine).get_table_names()
+    columns = {c["name"] for c in inspect(engine).get_columns("community_reports")}
+    assert not SNAPSHOT_COLUMNS & columns
+
+    # Rows written by the 0006 release: two members, a reported pick and an open report
+    # on it, and a profile of the first member.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    with engine.begin() as connection:
+        for user_id, email in (("u" * 32, "old@example.test"), ("v" * 32, "other@example.test")):
+            connection.execute(
+                text(
+                    "INSERT INTO users (id, email, password_hash, display_name, role, "
+                    "is_active, age_confirmed_at, created_at, token_version, plan, status, "
+                    "search_key) VALUES (:id, :email, :hash, 'Old', 'user', :active, :at, "
+                    ":at, 0, 'free', 'active', :key)"
+                ).bindparams(at),
+                {
+                    "id": user_id,
+                    "email": email,
+                    "hash": hash_password("correct-horse-battery"),
+                    "active": True,
+                    "at": stamp,
+                    "key": f"{email}\nold",
+                },
+            )
+        connection.execute(
+            text(
+                "INSERT INTO community_profiles (user_id, handle, bio, is_public, "
+                "moderation_status, created_at, updated_at) VALUES (:user, 'old_timer', "
+                "'Totals.', :public, 'visible', :at, :at)"
+            ).bindparams(at),
+            {"user": "u" * 32, "public": True, "at": stamp},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO community_reports (id, reporter_id, target_type, target_id, "
+                "target_user_id, reason, details, status, created_at) VALUES (:id, :reporter, "
+                "'profile', 'old_timer', :author, 'spam', 'old report', 'open', :at)"
+            ).bindparams(at),
+            {"id": "r" * 32, "reporter": "v" * 32, "author": "u" * 32, "at": stamp},
+        )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    columns = {c["name"]: c for c in inspect(engine).get_columns("community_reports")}
+    assert all(columns[name]["nullable"] is True for name in SNAPSHOT_COLUMNS)
+    assert "community_reserved_handles" in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # The old report is kept as it was: nothing was copied then, nothing is invented.
+        row = connection.execute(
+            text(
+                "SELECT id, details, status, target_text_snapshot, target_summary_snapshot "
+                "FROM community_reports"
+            )
+        ).one()
+        assert tuple(row) == ("r" * 32, "old report", "open", None, None)
+        assert (
+            connection.execute(text("SELECT count(*) FROM community_reserved_handles")).scalar()
+            == 0
+        )
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: the old report shows no copy, and the new
+    # features work for the old accounts.
+    app = make_app(
+        database_url=url,
+        env="production",
+        jwt_secret="k" * 48,
+        admin_emails="boss@example.test",
+        community_grade_min_seconds=0,
+    )
+    with TestClient(app) as client:
+        admin = client.post(
+            "/v1/auth/register",
+            json={
+                "email": "boss@example.test",
+                "password": "correct-horse-battery",
+                "display_name": "Boss",
+                "age_confirmed": True,
+            },
+        ).json()
+        admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        mark_email_verified(client, "boss@example.test")  # the admin role needs it
+        turned_on = client.put(
+            "/v1/admin/flags/community", json={"enabled": True}, headers=admin_headers
+        )
+        assert turned_on.status_code == 200, turned_on.text
+        (old,) = client.get("/v1/admin/community/reports", headers=admin_headers).json()["items"]
+        assert (old["id"], old["target_text"], old["reported_text"]) == ("r" * 32, "Totals.", None)
+        assert old["target_changed_since_report"] is False and old["author_edit"] is False
+
+        def login(email: str) -> dict[str, str]:
+            response = client.post(
+                "/v1/auth/login", json={"email": email, "password": "correct-horse-battery"}
+            )
+            assert response.status_code == 200, response.text
+            return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+        old_headers, other_headers = login("old@example.test"), login("other@example.test")
+        profile = client.put(
+            "/v1/community/profile",
+            json={"handle": "other_one", "bio": "Spreads.", "is_public": True},
+            headers=other_headers,
+        )
+        assert profile.status_code == 201, profile.text
+        reported = client.post(
+            "/v1/community/reports",
+            json={"target_type": "profile", "target_id": "other_one", "reason": "other"},
+            headers=old_headers,
+        )
+        assert reported.status_code == 201, reported.text
+        items = client.get("/v1/admin/community/reports", headers=admin_headers).json()["items"]
+        assert [i["reported_text"] for i in items] == [None, "Spreads."]
+
+        # Suspended, then deleted: the handle is kept and nobody can take it.
+        suspended = client.post(
+            f"/v1/admin/users/{'u' * 32}/suspend", json={"reason": "abusive"}, headers=admin_headers
+        )
+        assert suspended.status_code == 200, suspended.text
+        assert client.delete("/v1/me", headers=old_headers).status_code == 204
+        taken = client.put(
+            "/v1/community/profile",
+            json={"handle": "old_timer", "is_public": True},
+            headers=other_headers,
+        )
+        assert taken.status_code == 409 and taken.json()["error"]["code"] == "handle_taken"
+        assert client.get("/health").json()["database"] == "ok"
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0007 added; the reports and profiles are kept.
+    command.downgrade(config, "0006")
+    engine = make_engine(url)
+    assert "community_reserved_handles" not in inspect(engine).get_table_names()
+    columns = {c["name"] for c in inspect(engine).get_columns("community_reports")}
+    assert not SNAPSHOT_COLUMNS & columns
+    with engine.connect() as connection:
+        # The old account's report went with it; the other member's profile is still there.
+        handles = connection.execute(text("SELECT handle FROM community_profiles")).scalars()
+        assert list(handles) == ["other_one"]
+        assert connection.execute(text("SELECT count(*) FROM community_reports")).scalar() == 0
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0006"
+        )
+    engine.dispose()
+
+    # Up again: an empty table and empty columns, and the models and migrations agree.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT count(*) FROM community_reserved_handles")).scalar()
+            == 0
+        )
         diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
         assert diff == [], diff
     command.check(config)
@@ -1294,6 +1680,44 @@ def test_seed_verifies_the_demo_user_and_only_creates_a_listed_admin(
         assert db.scalar(select(Bet.id).where(Bet.user_id == admin.id)) is None
 
 
+def test_seed_admin_and_an_account_that_already_exists(
+    session_factory,
+    make_settings,  # type: ignore[no-untyped-def]
+) -> None:
+    """The seed keeps an existing account's password. In a demo database it still makes
+    that account the demo administrator; in production the account may be anybody's, so
+    an unverified one is left exactly as it is."""
+    listed = make_settings(admin_emails="admin@oddvex.test")
+    production = make_settings(
+        admin_emails="admin@oddvex.test", env="production", jwt_secret="k" * 48
+    )
+    with session_factory() as db:
+        squatter = User(
+            email=DEMO_ADMIN_EMAIL,
+            password_hash=hash_password("somebody-elses-password"),
+            display_name="Somebody",
+            age_confirmed_at=NOW,
+        )
+        db.add(squatter)
+        db.commit()
+        first_hash = squatter.password_hash
+
+        seed_demo(db, "pw-one-1234", NOW, settings=production)
+        db.refresh(squatter)
+        assert (squatter.role, squatter.email_verified_at) == ("user", None)
+        assert squatter.password_hash == first_hash
+
+        # Outside production it is the demo administrator, verified by the seed.
+        seed_demo(db, "pw-one-1234", NOW, settings=listed)
+        db.refresh(squatter)
+        assert (squatter.role, squatter.email_verified_at) == ("admin", NOW)
+        assert squatter.password_hash == first_hash
+        # Verified once, production keeps it as it is.
+        seed_demo(db, "pw-one-1234", NOW, settings=production)
+        db.refresh(squatter)
+        assert squatter.role == "admin"
+
+
 # -------------------------------------------------------------------- OpenAPI
 EXPECTED_OPERATIONS = {
     ("GET", "/health"): "get_health",
@@ -1361,6 +1785,8 @@ EXPECTED_OPERATIONS = {
     ("POST", "/v1/admin/users/{user_id}/suspend"): "admin_suspend_user",
     ("POST", "/v1/admin/users/{user_id}/unsuspend"): "admin_unsuspend_user",
     ("PUT", "/v1/admin/users/{user_id}/plan"): "admin_set_user_plan",
+    ("POST", "/v1/admin/users/{user_id}/export"): "admin_export_user",
+    ("POST", "/v1/admin/users/{user_id}/delete"): "admin_delete_user",
     ("GET", "/v1/admin/flags"): "admin_list_flags",
     ("PUT", "/v1/admin/flags/{key}"): "admin_set_flag",
     ("GET", "/v1/admin/audit"): "admin_list_audit",
@@ -1397,6 +1823,7 @@ EXPECTED_OPERATIONS = {
     ("GET", "/v1/admin/community/overview"): "admin_community_overview",
     ("GET", "/v1/admin/community/reports"): "admin_list_reports",
     ("POST", "/v1/admin/community/reports/{report_id}/resolve"): "admin_resolve_report",
+    ("POST", "/v1/admin/community/restore"): "admin_restore_content",
 }
 
 

@@ -15,6 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from ..helpline import HELPLINE_AVAILABLE
 from ..quant import describe_price
 
 #: ``kind -> {name: template}``. Every user-visible string is built from these.
@@ -48,6 +49,15 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "sync_finished": {
         "title": "Import finished",
         "body": "{label} import finished: {imported} new, {duplicates} already imported.",
+        # When the run left bets out (at the bet cap, or with a value that cannot be stored).
+        "body_left_out_one": (
+            "{label} import finished: {imported} new, {duplicates} already imported. "
+            "1 bet was not imported; the import history says why."
+        ),
+        "body_left_out": (
+            "{label} import finished: {imported} new, {duplicates} already imported. "
+            "{not_imported} bets were not imported; the import history says why."
+        ),
         "title_failed": "Import did not finish",
         "body_failed": (
             "{label} import did not finish after {attempts} attempt(s). No bets were added."
@@ -57,8 +67,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
         "title": "Weekly staking reminder",
         "body": (
             "You have staked {staked} this week, at or above the {threshold} reminder you "
-            "set. This is a reminder, not a limit. Free, confidential help is available at "
-            "1-800-GAMBLER."
+            "set. This is a reminder, not a limit. " + HELPLINE_AVAILABLE
         ),
     },
     # Community. Facts only: who did what, and how a pick was graded. No comment text, no
@@ -348,14 +357,26 @@ def sync_finished(
     imported: int,
     duplicates: int,
     attempts: int,
+    not_imported: int = 0,
 ) -> NotificationDraft:
-    values = {"label": label, "imported": imported, "duplicates": duplicates, "attempts": attempts}
+    """``not_imported``: bets the run left out, at the bet cap or because a value could not
+    be recorded. A finished run that left bets out says how many in one more sentence."""
+    values = {
+        "label": label,
+        "imported": imported,
+        "duplicates": duplicates,
+        "attempts": attempts,
+        "not_imported": not_imported,
+    }
     template = TEMPLATES["sync_finished"]
     suffix = "" if succeeded else "_failed"
+    body = f"body{suffix}"
+    if succeeded and not_imported > 0:
+        body = "body_left_out_one" if not_imported == 1 else "body_left_out"
     return NotificationDraft(
         kind="sync_finished",
         title=template[f"title{suffix}"].format(**values),
-        body=template[f"body{suffix}"].format(**values),
+        body=template[body].format(**values),
         href=TRACKER_HREF,
         dedupe_key=f"sync_finished:{run_id}",
         data={

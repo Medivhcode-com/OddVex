@@ -109,20 +109,65 @@ def test_game_log_normalizes_and_sorts_newest_first() -> None:
     assert newest.provider_id == "plr_nba_hct_1:evt_nba_20260108_3"
 
 
+#: The reason code each fixture case must be rejected with, by the case's own description.
+#: A case that is added to the fixture file later and is not listed here only has to be
+#: rejected.
+EVENT_REASONS = {
+    "unknown state": "unknown_value",
+    "timestamp without timezone": "invalid_timestamp",
+    "live event without score": "missing_field",
+}
+SNAPSHOT_REASONS = {
+    "american price inside (-100, 100)": "invalid_price",
+    "spread without handicap": "missing_field",
+    "unknown market type": "unknown_value",
+    "single selection": "missing_side",
+}
+#: What each of those snapshot cases must be rejected for: the error message names it.
+SNAPSHOT_MESSAGES = {
+    "american price inside (-100, 100)": "priceAmerican",
+    "spread without handicap": "handicap",
+    "unknown market type": "market type",
+    "single selection": "sides",
+}
+
+
 @pytest.mark.parametrize(
     "case", load("invalid_payloads.sample.json")["events"], ids=lambda case: case["reason"]
 )
 def test_invalid_events_are_rejected(case: dict[str, Any]) -> None:
-    with pytest.raises(ProviderContractError):
+    with pytest.raises(ProviderContractError) as caught:
         normalize_event(case["payload"], "fixture", FETCHED)
+    if case["reason"] in EVENT_REASONS:
+        assert caught.value.reason == EVENT_REASONS[case["reason"]]
 
 
 @pytest.mark.parametrize(
     "case", load("invalid_payloads.sample.json")["snapshots"], ids=lambda case: case["reason"]
 )
 def test_invalid_snapshots_are_rejected(case: dict[str, Any]) -> None:
-    with pytest.raises(ProviderContractError):
-        normalize_odds_snapshot(case["payload"], "fixture", FETCHED)
+    """Each case is rejected for the defect it is named after.
+
+    A priced quote without ``updatedAt`` is rejected for that alone, and the four original
+    cases do not carry one. They are given a valid timestamp here, so the check each case
+    is about is the one that has to reject it.
+    """
+    payload = case["payload"]
+    known = case["reason"] in SNAPSHOT_REASONS
+    if known:
+        payload = {"updatedAt": "2026-01-10T18:05:30Z", **payload}
+    with pytest.raises(ProviderContractError) as caught:
+        normalize_odds_snapshot(payload, "fixture", FETCHED)
+    if known:
+        assert caught.value.reason == SNAPSHOT_REASONS[case["reason"]]
+        assert caught.value.reason != "missing_timestamp"
+        assert SNAPSHOT_MESSAGES[case["reason"]] in str(caught.value)
+
+
+def test_the_original_invalid_cases_are_all_still_in_the_fixture_file() -> None:
+    invalid = load("invalid_payloads.sample.json")
+    assert {case["reason"] for case in invalid["events"]} >= set(EVENT_REASONS)
+    assert {case["reason"] for case in invalid["snapshots"]} >= set(SNAPSHOT_REASONS)
 
 
 def test_missing_fields_and_bad_values_are_rejected() -> None:

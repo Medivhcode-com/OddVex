@@ -34,8 +34,9 @@ ODDVEX_ADMIN_EMAILS=admin@oddvex.test .venv/bin/python scripts/seed_demo.py   # 
   verified.
 - Administrator: there is no default one. `scripts/seed_demo.py` creates `admin@oddvex.test`
   (same password, email counted as confirmed) **only** when `ODDVEX_ADMIN_EMAILS` lists that
-  address. Any other listed address becomes an administrator once its email is confirmed
-  (see "Admin role" below).
+  address. Any other listed address becomes an administrator once its email is verified, and
+  never before. Where no confirmation link can be followed (production), the operator runs
+  `python scripts/bootstrap_admin.py --email <address>` (see "Admin role" below).
 - Docker: `docker build -t oddvex-api .` then run with `DATABASE_URL` and `ODDVEX_JWT_SECRET`
   set. The image runs `alembic upgrade head` and then uvicorn on port 8000 as a non-root user.
 
@@ -86,13 +87,14 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_JWT_SECRET` | dev-only value | HS256 signing secret. **Production refuses to start with the default or a secret shorter than 32 characters** |
 | `ODDVEX_JWT_TTL_MINUTES` | `60` | Access token lifetime |
 | `ODDVEX_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated CORS allowlist. `*` is rejected in production |
-| `ODDVEX_TRUST_PROXY` | `false` | Use the last `X-Forwarded-For` entry (the one your proxy appends) as the rate-limit client IP. Only behind exactly one trusted proxy |
+| `ODDVEX_TRUST_PROXY` | `false` | Use the last `X-Forwarded-For` entry (the one your proxy appends) as the client IP for rate limiting, for the login lockout's client network and for audit rows. Only behind exactly one trusted proxy |
 | `ODDVEX_RATE_LIMIT_ENABLED` | `true` | Turn the limiter off (tests) |
 | `ODDVEX_RATE_LIMIT_AUTH_PER_MINUTE` | `10` | Per-IP limit shared by register, login and password change |
 | `ODDVEX_RATE_LIMIT_ASSISTANT_PER_MINUTE` | `20` | Per-IP limit on the assistant |
 | `ODDVEX_RATE_LIMIT_WINDOW_SECONDS` | `60` | Sliding window length |
 | `ODDVEX_ACCOUNT_LIMIT_WINDOW_SECONDS` | `900` | Window of the per-account limits below |
-| `ODDVEX_LOGIN_MAX_FAILURES` | `8` | Failed logins for one email inside that window before further attempts get `429`, from any IP |
+| `ODDVEX_LOGIN_MAX_FAILURES` | `8` | Failed logins for one email from one client network (an IPv4 address, or the /64 prefix of an IPv6 address) inside that window before further attempts for that email from that network get `429`. Other networks are not affected |
+| `ODDVEX_LOGIN_MAX_FAILURES_PER_EMAIL` | `50` | Failed logins for one email from all networks together inside that window before every attempt for that email gets `429`. For guessing spread over many addresses |
 | `ODDVEX_EMAIL_REQUESTS_PER_WINDOW` | `3` | Verification emails per user and password-reset emails per address inside that window |
 | `ODDVEX_EMAIL_PROVIDER` | `outbox` | `outbox`: write emails to the `email_outbox` table, send nothing. `resend`: a stub; the app refuses to start (`NotImplementedError`). Real email needs Founder approval |
 | `ODDVEX_WEB_BASE_URL` | `http://localhost:3000` | Base of the links in emails (`/verify-email?token=`, `/reset-password?token=`) |
@@ -101,11 +103,16 @@ Everything comes from the environment (a local `.env` file is also read). See `.
 | `ODDVEX_STALE_LIVE_SECONDS` | `120` | Live quotes older than this are stale |
 | `ODDVEX_STALE_PREGAME_SECONDS` | `900` | Pre-game quotes older than this are stale |
 | `ODDVEX_SYNTHETIC_SEED` | `20260101` | Seed of the synthetic data generator |
-| `ODDVEX_ADMIN_EMAILS` | empty | The only source of the `admin` role. A listed address gets it (once its email is confirmed, while `email_flows` is on); an address taken off the list loses it at its next login or token use. The seed script creates `admin@oddvex.test` only if it is listed |
+| `ODDVEX_ADMIN_EMAILS` | empty | The addresses that may hold the `admin` role. Listing an address gives nobody the role by itself: an account gets it only when its address is listed **and** verified, in every environment. An address taken off the list loses it at its next login or token use. `scripts/bootstrap_admin.py` makes a listed address an administrator where nothing can be verified through the API; the seed script creates `admin@oddvex.test` only if it is listed |
 | `ODDVEX_AUTO_SEED_DEMO` | `false` | Seed the demo account on startup. Ignored in production |
 | `ODDVEX_DEMO_PASSWORD` | `oddvex-demo-2026` | Demo account password (documented dev default) |
 | `ODDVEX_DB_AUTO_CREATE` | unset | Create tables on startup. On by default outside production, always off in production |
 | `ODDVEX_SYNC_MAX_ATTEMPTS` | `3` | Fetch attempts per import run |
+| `ODDVEX_MAX_BETS_PER_USER` | `5000` | Most bets one account can hold, manual and imported together. At the cap `POST /v1/bets` answers `409 bet_limit_reached` and an import stops adding |
+| `ODDVEX_RATE_LIMIT_USER_WRITES_PER_MINUTE` | `120` | Bet and sync writes one user can make in a minute, from any address |
+| `ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY` | `2000` | The same, in 24 hours (counted in hourly buckets) |
+| `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR` | `10` | `GET /v1/me/export` requests one user can make in an hour |
+| `ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE` | `8` | Streamed responses (`GET /v1/bets` and the export) one user can have in progress at the same moment |
 | `ODDVEX_ALERT_EVAL_MIN_SECONDS` | `30` | Minimum seconds between two alert evaluations triggered by one user reading their notifications. `0` evaluates on every read (tests) |
 | `ODDVEX_COMMUNITY_PICKS_PER_DAY` | `20` | Community picks one user can post in 24 hours |
 | `ODDVEX_COMMUNITY_COMMENTS_PER_HOUR` | `30` | Community comments one user can post in an hour |
@@ -145,8 +152,8 @@ Errors always use one envelope, including validation errors and 404s:
 | Sync | `GET /v1/sync/providers`, `GET/POST /v1/sync/connections`, `POST .../{id}/sync`, `GET .../{id}/runs`, `DELETE .../{id}?delete_data=` |
 | Assistant | `POST /v1/assistant/query` |
 | Community (flag `community`) | `GET /v1/community/guidelines`, `PUT/GET /v1/community/profile`, `GET /v1/community/profiles/{handle}`, `POST/GET /v1/community/picks`, `GET/DELETE /v1/community/picks/{id}`, `GET /v1/community/feed`, `PUT/DELETE /v1/community/picks/{id}/like`, `POST/GET /v1/community/picks/{id}/comments`, `DELETE /v1/community/comments/{id}`, `POST/DELETE /v1/community/follows/{handle}`, `GET /v1/community/following`, `GET /v1/community/followers`, `PUT/DELETE /v1/community/blocks/{handle}`, `GET /v1/community/blocks`, `POST /v1/community/reports`, `GET /v1/community/leaderboard` (also flag `community_leaderboard`) |
-| Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
-| Moderation (admin, flag `community`) | `GET /v1/admin/community/overview`, `GET /v1/admin/community/reports`, `POST /v1/admin/community/reports/{id}/resolve` |
+| Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `POST /v1/admin/users/{id}/export`, `POST /v1/admin/users/{id}/delete`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
+| Moderation (admin, flag `community`) | `GET /v1/admin/community/overview`, `GET /v1/admin/community/reports`, `POST /v1/admin/community/reports/{id}/resolve`, `POST /v1/admin/community/restore` |
 | Dev (404 in production) | `GET /v1/dev/email-outbox/latest?to=` |
 
 ### Feature flags
@@ -164,7 +171,7 @@ that is off answers `404 feature_disabled` with `details.flag`. In code:
 | `community_leaderboard` | off | `GET /v1/community/leaderboard`, in addition to `community`. **Off until a responsible-gambling review approves leaderboards** (`docs/compliance/RESPONSIBLE_GAMBLING.md`, section 8: a review gate "before build"; the roadmap allows leaderboards "only if RG review approves"). A ranking of bettors is the part of a community most likely to push people to bet more, so it has its own switch |
 | `value_screen` | on | `GET /v1/value` |
 | `tracker_analytics` | on | `GET /v1/bets/analytics` |
-| `email_flows` | on, **off when `ODDVEX_ENV=production`** | The four email-flow routes, the verification email queued at registration, and whether the admin role waits for a confirmed email. Off in production because no email provider is connected there: a reset request would be accepted and go nowhere. Turn it on in production only together with a real sender |
+| `email_flows` | on, **off when `ODDVEX_ENV=production`** | The four email-flow routes and the verification email queued at registration. It has no say in the admin role, which needs a verified address whether the flag is on or off. Off in production because no email provider is connected there: a reset request would be accepted and go nowhere. Turn it on in production only together with a real sender |
 | `premium_gating` | off | Whether plan entitlements are enforced. **Turning it on is a pricing decision: Founder approval first** |
 
 ### Plans and entitlements (no billing)
@@ -190,6 +197,41 @@ Behaviour worth knowing:
 - **Best price.** `is_best` and `best` only consider books that are `open` and not stale. For
   spread and total, prices are only compared between books on the consensus (most common)
   line. The consensus is the mean no-vig probability of those same books.
+- **Stale quotes.** One rule (`Board.is_stale`) decides it for event markets, prop offers,
+  the best moneyline in event lists and the best price used by alerts and community picks. A
+  quote is stale when it is older than the threshold (`ODDVEX_STALE_PREGAME_SECONDS`,
+  `ODDVEX_STALE_LIVE_SECONDS`), has no timestamp, has a timestamp more than 60 seconds in the
+  future, or, in a live game, was last updated before the score last changed (the provider
+  reports that time as `Event.score_updated_at`; without it only the age rule applies). A stale
+  quote is still listed with `is_stale: true`, but it is never marked best and never counts
+  in a consensus.
+- **Prop board filters.** `GET /v1/props?league=&market=`: an unknown `league` is a 422. A
+  `market` that is not a prop market of the chosen league (of any league without `league`) is
+  answered with an empty list; a blank `market` means no filter. The board is cached for 10
+  seconds per filter combination, keyed on the validated values, and nothing is cached for a
+  value that does not exist.
+- **Parlay calculator.** `POST /v1/quant/parlay` always returns the combined price. A combined
+  probability is only computed when every active leg carries a `win_probability` and the
+  active legs are from distinct known events (a single active leg needs no `event_id`).
+  `probability_status` says which case applies, as one of `computed`,
+  `needs_leg_probabilities`, `same_event_legs`, `unverified_legs`,
+  `no_active_legs` (when several apply: `no_active_legs`, then `same_event_legs`, then
+  `unverified_legs`, then `needs_leg_probabilities`). `probability_note` is the same reason
+  as a sentence. `steps` ends with a combined-probability line only when one was computed.
+- **Vendor payloads.** `providers/normalize.py` is the seam for a future data vendor; no feed
+  is connected to it. It rejects a payload instead of guessing: a priced quote without
+  `updatedAt`, a timestamp more than 60 seconds after the fetch time, a line or statistic
+  that is not a finite number in plain decimal form, sides that do not fit the market, spread
+  lines that are not mirrored, total lines that differ or are not above 0, negative or
+  fractional scores, an identifier that is not a short text or a whole number, a text with
+  control or invisible characters, a league the API does not serve, the same team on both
+  sides, two keys for the same statistic, and values far outside any real range (a price
+  beyond +/-1,000,000, a line or score beyond 1,000, a statistic beyond 100,000). A number
+  sent as text may have 40 characters, a timestamp 64, and an identifier, a label or the
+  clock of a live event 200; a longer one is rejected without being parsed, so a field of
+  any size is refused at once. Rejections are counted per provider, record type and reason
+  (`rejection_counts()`) and logged as `provider_payload_rejected` with those three values,
+  never with the payload.
 - **Finished events.** Their markets are reported as `unavailable` with no outcomes. Line
   history still runs up to the close.
 - **Hit rate.** Historical frequency with a Wilson 95% interval. Games that land exactly on the
@@ -197,10 +239,76 @@ Behaviour worth knowing:
 - **Bets.** `status` is `pending` or `settled`; `result` carries the outcome. Odds are accepted
   as American, decimal or fractional and stored as decimal. Every bet query is filtered by the
   authenticated user, so another user's bet id returns 404.
+- **What a bet can hold.** Prices are stored with six decimal places and at most ten digits
+  before the point, money in cents with at most twelve. A bet is rounded to that and checked
+  completely before anything is written, on create, update, settle and import: a price (of a
+  leg, of the bet, or a closing price) that would be stored as 1.000000 or less is
+  `422 invalid_decimal_odds`; a price or a combined parlay price above 9999999999.999999 is
+  `422 odds_out_of_range`; a stake that would be stored as 0.00 is `422 invalid_stake` (0.005
+  still rounds up to 0.01); a stake and price, or a settlement, that would pay more than
+  999999999999.99 is `422 payout_out_of_range`. Every write route builds its answer before it
+  commits, so a request that ends in an error has stored nothing. A row written before these
+  checks (a price of exactly 1.000000 or a stake of 0.00) still loads in the list, the
+  summary, the analytics and the export: its price is read as the shortest price there is,
+  1.000001 (shown as `decimal: 1.0`, `american: -100000000`), a stake of 0 has a potential
+  payout and profit of 0, and no CLV is computed from such a price. It cannot be settled as
+  it is (422); it can be edited or deleted. The rules are in `bets/storage.py`. A bet with
+  its own price is not checked for the product of its leg prices; when that product (taken
+  or closing) is above 9999999999.999999 the bet has no CLV (`clv: null`) and is left out of
+  the CLV averages.
+- **Bet cap.** An account holds at most `ODDVEX_MAX_BETS_PER_USER` bets (default 5,000), manual
+  and imported together. At the cap `POST /v1/bets` answers `409 bet_limit_reached` with
+  `details.max_bets`, like the watchlist and alert caps. Editing, settling and deleting still
+  work. An import takes the provider's bets in order and stops adding at the cap: the run
+  succeeds, its `error_message` says how many bets were left out and why (the number is also
+  `fetched_count - imported_count - duplicate_count`), and a later import is offered them
+  again. Creates and imports of one account that arrive together wait for each other on a
+  row lock, so the cap is exact on PostgreSQL. SQLite (development) has no row locks: there,
+  requests that arrive together can each see room, and the cap can be passed by as many
+  bets as there are requests in progress at that moment.
+- **Repeating a create safely.** `POST /v1/bets` takes an optional `client_request_id` (8 to 64
+  characters from `A-Z a-z 0-9 _ -`). The first request with an id stores the bet and answers
+  201. A later request from the same account with the same id answers 200 with the bet stored
+  the first time: no second bet, audit entry or staking reminder, even if the repeated body
+  differs and even when the retry arrives while the first request is still running (a unique
+  index on `bets (user_id, client_request_id)` decides). That includes the case where the
+  first request takes the account's last free place: the retry is answered with the stored
+  bet, not with `409 bet_limit_reached`. A repeat is still a request: one whose body does not
+  pass the request schema is a 422 and one over the write limit is a 429, like any other
+  create. The id is not part of the response and is free again once the bet is deleted.
+  Imported bets have none.
+- **Write and export limits.** Bet writes (create, edit, delete, settle, auto-settle) and sync
+  writes (connect, import, disconnect) share a limit per user id, whatever the address:
+  `ODDVEX_RATE_LIMIT_USER_WRITES_PER_MINUTE` and `ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY`.
+  `GET /v1/me/export` has its own, `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`. Over a limit the answer
+  is `429 rate_limited` with `Retry-After`. A request that passes the limit counts whether
+  or not it then succeeds (a 422 or a 404 counts). A request refused by a ceiling is not
+  counted by that ceiling; the per-minute ceiling is checked first, so a request the daily
+  ceiling refuses has been counted for its minute. In memory, per process, and off with `ODDVEX_RATE_LIMIT_ENABLED=false`, like the other
+  limiters. The dependency is `ratelimit.user_rate_limit("writes")`. These limits cover the
+  bet and sync routes only: the other routes that write for a signed-in user (watchlist,
+  alert rules, notifications, the staking reminder) have their caps on stored items but no
+  per-user write limit yet.
+- **In progress at once.** Two things are also limited by how many one account has running at
+  the same moment, because each holds memory for as long as it runs. Streamed responses
+  (`GET /v1/bets` and `GET /v1/me/export` together): at most
+  `ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE` (default 8); a response counts from its start
+  until it has been sent in full or the client has gone. Auto-settle: one per account; a call
+  that arrives while another is still running is not started. Both answer
+  `429 rate_limited` with `Retry-After: 1`. In memory, per process, and off with
+  `ODDVEX_RATE_LIMIT_ENABLED=false` (`ratelimit.take_user_stream_slot`,
+  `ratelimit.user_exclusive`).
 - **Bet list.** `GET /v1/bets` takes `status`, `sport`, `market` (any leg), `sportsbook` (exact,
   case-insensitive for any script: see "Case-insensitive matching" below), `bet_type`, `sort` (`placed_at`, `stake`, `profit`, each with a `-` prefix
   for descending; default `-placed_at`), `limit` (1 to 1000, default 500) and `offset`. Pending
-  bets have no profit and sort last either way. An unknown `sort` is a 422.
+  bets have no profit and sort last either way. An unknown `sort` is a 422. The page is
+  streamed: one statement decides which bets are on it and in what order (their ids), then
+  the bets are read and sent 50 at a time, each batch in a database session of its own. The
+  response is still one JSON array of `BetOut`, without a `Content-Length`. A request holds
+  one batch in memory, not the page, and no database connection while the client reads. A
+  bet deleted while its page is being sent is left out of that page. As with the export, a
+  page whose batches cannot all be read ends without its closing bracket and does not
+  parse; the status is already 200 by then.
 - **Structured legs.** A leg may carry `outcome_key` (`home`, `away`, `draw`, `over`, `under`)
   next to `event_id`, `market` and, for spread and total, `line`. A spread `line` is the handicap
   of the selected side. Such a leg is validated when the bet is created or its legs are replaced:
@@ -215,7 +323,14 @@ Behaviour worth knowing:
   are `"user"`; bets imported already settled have `null`). Everything else is returned under
   `skipped` with `not_gradeable`, `event_not_final`, `event_unavailable` or
   `manual_result_required` (a bet with its own price where a leg pushed). Calling it again
-  settles nothing new. Rules: `docs/QUANT_METHODOLOGY.md`.
+  settles nothing new. One call settles at most 200 bets, oldest first, reading pending bets
+  100 at a time; when it stops there with pending bets left unexamined `has_more` is true and
+  the next call continues (it is false otherwise, and always sent). One account
+  runs one auto-settle at a time (see "In progress at once"). Rules:
+  `docs/QUANT_METHODOLOGY.md`.
+- **Summary and analytics.** `GET /v1/bets/summary` and `GET /v1/bets/analytics` read a few
+  columns per bet and per leg (`bets.service.load_bet_facts`), never the mapped bets with
+  their notes and selections, so their memory grows with the number of bets only.
 - **Watchlist.** Teams, players and events, at most 200 per user. Adding validates the id
   against the provider (`404 not_found`), and adding the same thing twice returns the existing
   item with 200 instead of 201. Items embed the current `team`, `player` or `event`; when the
@@ -277,14 +392,80 @@ Behaviour worth knowing:
   current ISO week, Monday to Sunday in UTC, void bets excluded), `week_start` and `exceeded`.
   When `POST /v1/bets` or a sync import takes the weekly total from below the threshold to at or
   above it, one `stake_reminder` notification is created for that week, stating the amount
-  staked, the user's own threshold and that free, confidential help is available at
-  1-800-GAMBLER. **OddVex never blocks, rejects or delays a bet because of it: the bet is always
+  staked, the user's own threshold and how to reach the helpline (see "Helpline facts"
+  below). **OddVex never blocks, rejects or delays a bet because of it: the bet is always
   saved.** At most one reminder per user and week, even if the threshold changes or the
   notification is deleted.
+- **Helpline facts.** `oddvex_api/helpline.py` is the one place that spells out a helpline:
+  the National Problem Gambling Helpline is 1-800-MY-RESET (1-800-697-3738), call, or text
+  800GAM (800426); it is confidential and answers 24 hours a day, every day; it is not an
+  emergency service, and in a crisis the numbers are 988 (the Suicide and Crisis Lifeline,
+  call or text) and 911. The module also records the date the facts were verified
+  (2026-11-19). The assistant, the staking reminder, the email footer and the community
+  guidelines import their wording from it, and `tests/test_audit_helpline.py` fails if any
+  other module spells a number out. The number that was the national helpline before
+  2026-01-29 is run by the New Jersey council and is not given anywhere.
+- **Assistant: responsible-gambling replies.** `POST /v1/assistant/query` checks every message
+  against fixed patterns (`assistant/safeguards.py`) before any intent is matched, so a team
+  name, a player name or "my record" in the same message cannot pull in betting data. The
+  rows are those of `docs/compliance/RESPONSIBLE_GAMBLING.md`, section 5:
+
+  | The message | The answer |
+  | --- | --- |
+  | Crisis or self-harm language ("I want to end it tonight", "I'd be better off not being here", "I took a bunch of pills") | Only support: 988 and 911 first, then the gambling helpline, and a line asking the user to tell someone they trust. One link, to `/responsible-gambling` |
+  | The user says they are under 21 ("I'm 17", "I turn 21 in March", "I'm in high school", "I was born in 2009") | OddVex is for adults 21 and over; no betting information; the helpline |
+  | Distress about gambling (cannot stop, lost more than they can afford, borrowed money, hiding it) | An acknowledgement without judgement, the helpline, the weekly staking reminder and the bet tracker, the crisis line. No prices |
+  | Wanting to win losses back ("how much should I bet to recover my losses?") | The distress answer, which also declines to size or pick a bet and says that chasing losses is a recognised warning sign |
+  | A request for a certain winner | No result is certain; no picks or predictions; market data is offered |
+
+  When several apply, crisis comes first, then under 21, then distress. The first three kinds
+  have `intent: "support"`, `data: null`, no sources and `support: {"case": "crisis" |
+  "underage" | "distress"}`; every other answer has `support: null`. The last row keeps
+  `intent: "fallback"`. The wording is fixed in code and is not passed through the
+  `Explainer`. Each support reply is logged as `assistant_support_reply` with the case and
+  whether a token was sent: never the message, never a user id. The patterns read the
+  message and, for a birth year, today's date; nothing else. Where a message could be read
+  either way they lean towards the support reply ("the Tides can't lose this one" is
+  declined as a request for a certain winner).
+
+  **The limits, and the help sentence.** Detection is a fixed list of rules (regular
+  expressions), not an understanding of the message, and the list is open-ended: it can
+  never catch every wording. Every review round found wordings it missed, and each fix for
+  a miss risked new false alarms on sports talk ("gonna end it with a 3" is a game, "gonna
+  end it with pills" is not). With no "I" in the message, "end it" counts only when the
+  clause ends there or a time, a means or a place from a fixed list follows it.
+  `KNOWN_MISSES` in `tests/test_audit_assistant_detection.py` lists the misses known today,
+  and `HELP_SHOWN_ANYWAY` lists sports talk that gets help it did not ask for.
+
+  The safety net for every miss is the help sentence. Every answer that is not a support
+  reply (ordinary answers, the fallback, the refusal above and every "couldn't find" answer,
+  including the general help answer) ends with one sentence, `safeguards.HELP_SENTENCE`,
+  built from `oddvex_api/helpline.py`: "If gambling is causing problems, call the National
+  Problem Gambling Helpline at 1-800-MY-RESET (1-800-697-3738) or text 800GAM; in a crisis,
+  call or text 988 (the Suicide and Crisis Lifeline)." The engine adds it after the
+  `Explainer`, so no explainer can leave it out. Support replies keep their own wording
+  without it. A message the rules miss therefore still shows the helpline and the crisis
+  line in the answer itself, not only in the small disclaimer line.
+
+  **Adding a wording.** The final pass on these rules (2026-11-21) closed a fixed list of
+  items. A wording found after it goes into `KNOWN_MISSES`. A new rule is added only with a
+  test: the rule goes into the matching group in `assistant/safeguards.py` (crisis, under
+  21, distress or loss chasing) and, in the same change, the wording goes into the matching
+  list in `tests/test_audit_assistant_detection.py` and an entry into `MUTATIONS` there,
+  which removes the rule from the source and fails if no message changes. A word added to
+  one of the word lists (the drug names, or the prepositions, counts and means and places
+  after "end it", which are tuples with one entry per line) gets its own `MUTATIONS` entry
+  and a message that only that word decides. The sports talk
+  closest to the new rule goes into an ordinary list, so the rule cannot start firing on
+  it, and one example goes through the API with a team name in
+  `tests/test_audit_assistant_support.py`. If a wording cannot be caught without catching
+  sports talk, it stays in `KNOWN_MISSES`.
 - **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
-  (public, flag `value_screen`). For every outcome of every live or upcoming event, the best
+  (public, flag `value_screen`). For every outcome of every upcoming event, the best
   open, non-stale price is compared with the mean no-vig probability of the **other** open,
-  non-stale books quoting the same line. The book with the best price is left out of its own
+  non-stale books quoting the same line. Live and finished events are never listed: in play
+  each price follows the score, so two quotes taken moments apart are not comparable and their
+  difference would be listed as an edge. The book with the best price is left out of its own
   consensus, and an outcome with fewer than 2 other books is skipped. `edge` is the quant
   engine's EV per unit staked at the best price if the consensus probability were true
   (`quant.value` on top of `quant.ev`); rows with `edge` above 0 and at least `min_edge`
@@ -292,9 +473,9 @@ Behaviour worth knowing:
   `books_in_consensus`, `breakeven_probability`, `last_updated` and `stale_after_seconds`.
   The response carries `as_of`, `data_mode`, `method` and a `caveat`: a price above the
   consensus is not proof of an edge, the consensus can be wrong, limits and availability vary,
-  and it is not a prediction. On the synthetic data the screen is often short or empty
-  (typically 0 to 6 rows, mostly live games where the simulated books update at different
-  moments); the synthetic model gives no book a real edge.
+  and it is not a prediction. On the synthetic data the screen is often short or empty and
+  every edge on it is small (a few percent at most): the rows come from the simulated margin
+  and noise, and the synthetic model gives no book a real edge.
 - **Tracker analytics.** `GET /v1/bets/analytics` (flag `tracker_analytics`) is computed only
   from the caller's settled bets: `by_odds_band` (-200 or shorter, -199 to -110, -109 to
   +100, +101 to +200, longer than +200, by the bet's rounded American price), `by_weekday`
@@ -326,13 +507,26 @@ Behaviour worth knowing:
 - **Email limits.** The four routes share the per-IP auth limit. In addition a user can
   request 3 verification emails and one address 3 reset emails per 15 minutes; the reset
   limit is keyed on the address as typed, so it does not reveal whether an account exists.
-- **Login throttling.** After 8 failed logins for the same email within 15 minutes, further
-  attempts for that email get `429 rate_limited` (standard envelope, `Retry-After`) until the
-  window moves on, from any IP and even with the right password. It is keyed on the email as
-  typed, so the answer is the same for an address without an account. A successful login or
-  a completed password reset clears the count. In memory, per process, like the IP limiter,
-  and off when `ODDVEX_RATE_LIMIT_ENABLED=false`. Trade-off to know: someone who knows an
-  email can keep that account locked out of password login; the reset flow is the way back in.
+- **Login throttling.** Failed logins are counted per email **and client network**: an IPv4
+  address, or the /64 prefix of an IPv6 address (one host usually has a whole /64), taken
+  from the client IP described under `ODDVEX_TRUST_PROXY`. After 8 failed logins for the
+  same email from the same network within 15 minutes, further attempts for that email from
+  that network get `429 rate_limited` (standard envelope, `Retry-After`) until the window
+  moves on, even with the right password. Attempts from other networks are not affected,
+  so someone who knows an email and sends wrong passwords locks out only themselves, not
+  the owner. A second ceiling counts the failures for one email from all networks together
+  (`ODDVEX_LOGIN_MAX_FAILURES_PER_EMAIL`, 50 in the same window): over it every attempt for
+  that email gets the same `429`, which stops guessing spread over many addresses. Both are
+  keyed on the email as typed, so the answer is the same for an address without an account.
+  An attempt made while refused is not counted. A successful login clears the count of the
+  caller's own network only; a completed password reset clears every count for the email.
+  In memory, per process, like the IP limiter, and off when
+  `ODDVEX_RATE_LIMIT_ENABLED=false`. What is left: someone who can send 50 failures every 15
+  minutes from at least seven networks can still keep one email locked out, and in
+  production the reset flow is switched off (`email_flows`), so the ways back in are to
+  wait for the window, to restart the API process (the counts are in its memory) or to
+  raise the ceiling. A client that reaches the API through a server which does not pass
+  the visitor's address on shares that server's address with everyone else behind it.
 - **Suspension.** `POST /v1/admin/users/{id}/suspend` `{reason}` sets `users.status` to
   `suspended`: the user's existing tokens get `401 account_suspended` and login gets
   `403 account_suspended` with a neutral message (only after the correct password). The data
@@ -342,25 +536,60 @@ Behaviour worth knowing:
 - **Data rights of a suspended account.** A suspended user's token still works on exactly two
   routes, `GET /v1/me/export` and `DELETE /v1/me`, and on nothing else (one dependency,
   `get_data_rights_user`, used by those two routes only; a test walks every other route).
-  Both calls are audited with `details.account_status: "suspended"`. Known gap: a suspended
-  account cannot sign in, so this only helps while it still holds an unexpired token (60
-  minutes by default). After that the export or deletion has to be requested from support;
-  there is no admin route that does it yet.
+  Both calls are audited with `details.account_status: "suspended"`. A suspended account
+  cannot sign in, so this only helps while it still holds an unexpired token (60 minutes by
+  default), and the web and mobile apps drop the session of a suspended account. After
+  that the owner asks support, and an administrator meets the request with the two routes
+  below. When an account that is suspended at that moment is deleted, by its owner or by an
+  administrator, its community handle is kept in `community_reserved_handles` and nobody
+  can take it again (see "Account lifecycle" under Community). That is all that is kept:
+  nothing about the email address. So it stops the person from coming back under the same
+  handle, not from coming back: a suspended person can register again with another email
+  address, or the same one, and choose a new handle.
+- **Data requests met by an administrator.** For an owner who cannot sign in (suspended,
+  closed because under 21, lost password). `POST /v1/admin/users/{id}/export` `{reason}`
+  returns the same document as `GET /v1/me/export` for that user, from the same code and
+  streamed the same way. `POST /v1/admin/users/{id}/delete` `{reason, confirm_email}`
+  deletes the account through the same function as `DELETE /v1/me`
+  (`account/service.py`), so what is removed and the `account.deleted` entry that stays are
+  the same; it answers `204`. `confirm_email` must be the account's address, compared as
+  login compares addresses (`422 confirm_email_mismatch` otherwise, nothing deleted). Both
+  work for an active and for a suspended account, and both refuse another administrator
+  or the caller's own account (`409 cannot_export_admin`, `cannot_export_self`,
+  `cannot_delete_admin`, `cannot_delete_self`). `reason` is required (3 to 500 characters)
+  and must not contain the account's email address (`422 reason_contains_email`), because
+  the audit entry stays after the account is gone. The entries are `admin.user_exported`
+  and `admin.user_deleted`: the acting administrator as `user_id`, the user's opaque id as
+  `entity_id`, `details.reason` and `details.account_status`, and nothing of the exported
+  data. The export counts among the administrator's streamed responses in progress, not
+  against the hourly export limit. Checking that a request really comes from the owner is
+  up to the person handling it; the API cannot.
 - **Admin.** Every route needs the `admin` role (`403 forbidden` otherwise). Every change
   (suspend, unsuspend, plan, flag) writes an audit entry with the acting administrator as
   `user_id`, the target as `entity_type`/`entity_id` and `details.before` / `details.after`
-  (plus `details.reason` for a suspension). Reads are audited too, coarsely: one `admin.read`
+  (plus `details.reason` for a suspension). The export and the deletion of a user's account
+  are audited with their reason (see above). Reads are audited too, coarsely: one `admin.read`
   row per request to the overview, the user list, the email outbox or the community report
   queue, with the resource as `entity_type` and no payload (not the search term, not the rows
   returned). Reading the audit log and the flag list is not recorded.
-- **Admin role.** `ODDVEX_ADMIN_EMAILS` is the only source of the role. It is checked at
-  registration, at login and on every token use, so taking an address off the list demotes
-  that user at their next request (`role.removed` in the audit log) and adding one promotes
-  it (`role.granted`). While `email_flows` is on, the role is only granted once the address
-  has been confirmed, so registering a listed address first gains nothing. With `email_flows`
-  off (the production default, because nothing can be confirmed without a sender) a listed
-  address is an administrator from registration: **in production, only list addresses that
-  are already registered by their owners, or register them yourself first.** There is still
+- **Admin role.** An account is an administrator exactly when its address is in
+  `ODDVEX_ADMIN_EMAILS` **and** its email address is verified. That is the rule in every
+  environment and whatever `email_flows` says: the list alone gives nobody the role, so
+  having registered a listed address first gains nothing. The rule is applied at login,
+  when an address is confirmed and on every token use: an account that meets it is
+  promoted (`role.granted` in the audit log), and one that holds the role without meeting
+  it is demoted at its next request (`role.removed`, with the reason `not_in_admin_emails`
+  or `email_not_verified`). Outside production an address is verified with the link from
+  the outbox. In production no link can be followed, so the first administrator comes
+  from an operator command, run where the API runs (in the container:
+  `python scripts/bootstrap_admin.py --email <address>`). It refuses an address that is
+  not in `ODDVEX_ADMIN_EMAILS`. For a listed address it creates the account, or takes over
+  the one that exists, whoever registered it: it sets a new random password, marks the
+  address verified, ends every earlier token and every outstanding email link of the
+  account, lifts a suspension, gives the role and writes `admin.bootstrap` to the audit
+  log. The password is printed once on standard output: sign in and change it at once.
+  Whoever held the address before can no longer sign in. Do not list an address that is
+  published anywhere. There is still
   no second factor for administrators. `GET /v1/admin/users?q=&status=&plan=&limit=&offset=`
   returns `{items, total, limit, offset}` with `bet_count` and `last_login_at`.
   `GET /v1/admin/audit?action=&user_id=&before=&limit=` is newest first with a `next_before`
@@ -399,18 +628,53 @@ Behaviour worth knowing:
   liked pick ids, handles blocked and reports made; present with empty lists for an account
   that never used the community, and whether or not the flag is on). The profile includes
   `plan` and `email_verified`. It never contains the password hash, email tokens or outbox
-  emails. Each export is itself audited.
+  emails. Each export is itself audited. The document is streamed (`account/export.py`): bets
+  are read 50 at a time, import runs and audit entries 1,000 at a time, and of the community
+  part the picks 200 and the comments and reports 1,000 at a time, and written as
+  they are read, and no database connection is held while the client is reading. The
+  response therefore has no `Content-Length`; it is still one JSON document of the
+  `AccountExportOut` schema, with the keys in the same order, to be read to the end and
+  parsed once. The status is 200 as soon as the response starts. If the connection breaks
+  part-way, or a batch cannot be read (for example no database connection inside 30
+  seconds), the text ends there: the closing bracket is only sent last, so what arrived is
+  not valid JSON and a partial export cannot be mistaken for a whole one. The batches are separate reads, not one
+  snapshot: a bet whose `placed_at` is edited while its own account is being exported can be
+  in that document twice or not at all. Limited to `ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`
+  requests per user, and counted among the streamed responses one account can have in
+  progress (see "In progress at once").
 - **Sync.** Re-running an import never duplicates a bet: bets are keyed on user + provider +
   external bet id. A provider failure that survives the retries is recorded as a failed run and
   returned as `502 sync_failed` with `details.run_id` and `details.retryable`. Two imports of
   the same account at the same moment cannot both write: the one that loses the race gets
   `409 sync_conflict` (`details.retryable: true`), writes nothing, and can simply be retried.
+  Imported bets count against the bet cap and are checked like bets entered by hand: a bet
+  the provider sends with a price, stake or amount no column can hold, with no legs or more
+  than twenty, or with an unknown type or result is left out and counted in the run's
+  `error_message` (see "Bet cap" above).
 - **Request size.** Bodies over `ODDVEX_MAX_BODY_BYTES` are refused with `413 payload_too_large`
   in the usual envelope, whether the size is declared or the body is streamed.
 - **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
   notifications, notification preferences, the staking reminder, sync connections, import
   runs, email tokens and outbox emails, and all of the account's community data (see
-  "Community" below). The audit log keeps an entry with the opaque user id only.
+  "Community" below). The audit log keeps the account's entries and one `account.deleted`
+  entry: each holds the opaque user id, the action, the id of the item acted on, the request
+  id, the IP address and the details of the action, never the email address. When the
+  account is suspended at that moment its community handle stays reserved, so nobody can take
+  it again. An administrator's `POST /v1/admin/users/{id}/delete` runs the same function.
+- **NUL characters.** Text with a NUL character (U+0000) in it is refused with
+  `422 validation_error` (`details[0].type: "nul_character"`, `loc` naming the place)
+  before the route runs, on every route: in a path value, in a query name or value, and in
+  any string or key of a JSON body, in whatever encoding the body was sent. PostgreSQL
+  cannot store the character, so it used to end as a failed statement and a `500`. The six
+  characters `\u0000` as ordinary text are not affected.
+- **Database errors in the log.** A failed statement is logged with its class, the place
+  it was raised, the SQLSTATE, the table, column and constraint names the driver reports
+  and the statement with its placeholders, and without the values bound to it: both
+  engines run with `hide_parameters`, and the tracebacks the application writes
+  (`logging_config.py`) leave out the message of every exception in a chain that contains a
+  database error, because the driver's own text can quote a key or a whole row. The same
+  treatment is put on uvicorn's error logger. The worker scripts print Python's standard
+  traceback if they crash: no parameter list, but the driver's message as it is.
 
 ### Community (flags `community` and `community_leaderboard`, both off by default)
 
@@ -424,7 +688,8 @@ a user id or anything from the bet tracker.
 - **Profiles are opt-in.** `PUT /v1/community/profile` `{handle, bio?, is_public}` creates
   (201) or updates (200) the caller's profile. `handle`: 3 to 20 characters of `a-z`, `0-9`
   and `_` (`422 invalid_handle`), lowered on the way in so it is unique whatever the case
-  (`409 handle_taken`), not a reserved word such as `admin`, `oddvex`, `support`,
+  (`409 handle_taken`, also the answer for the handle of an account deleted while suspended,
+  so it does not say which), not a reserved word such as `admin`, `oddvex`, `support`,
   `moderator`, `staff`, `official`, `help`, `root` or `system`, alone or as an
   underscore-separated part (`422 handle_reserved`), and it goes through the content rules
   too. `bio`: plain text, at most 280 characters. `GET /v1/community/profile` is the caller's
@@ -488,6 +753,11 @@ a user id or anything from the bet tracker.
   `personal_information`, `other`. For a profile `target_id` is the handle. One open report
   per reporter and target (the open one is returned with 200), 10 per user per hour, not on
   your own content, and only on something you can see. The reported person is not told.
+  The report keeps a copy of what was reported (`target_text_snapshot`,
+  `target_summary_snapshot`: the analysis and "selection (event)" of a pick, the body of a
+  comment, the bio and "@handle" of a profile), so a moderator can still judge it after its
+  author deleted or edited it. The copy is never shown to the reporter, and it goes when
+  the report goes: with the reporter's account or with the author's.
 - **Content rules** (`community/content_rules.py`, one module, a pure function). Every bio,
   analysis and comment, and every handle, is checked before it is stored:
   - links: any text containing `http://`, `https://` or `www.` is `422 links_not_allowed`.
@@ -513,16 +783,33 @@ a user id or anything from the bet tracker.
   profile disappears from every public read; its author still sees their own item with the
   text replaced by "Removed by moderators."; every other open report on it is closed with
   the same decision) or `suspend_author` (the existing account suspension, same code path, so
-  an administrator cannot be suspended). `note` is required. There is no "restore" action
-  yet: `hidden` and `removed` behave the same today and differ only as a label. A hidden
-  profile becomes visible again when its owner changes the handle or the bio.
+  an administrator cannot be suspended). `note` is required. `hidden` and `removed` behave
+  the same and differ only as a label. Only an administrator makes moderated content
+  visible again: `POST /v1/admin/community/restore` `{target_type, target_id, note}`
+  (`target_id` is the pick id, the comment id or the profile's current handle; `404` when
+  it does not exist, `409 content_not_moderated` when it is visible) restores it and closes
+  every open report on it as `restore_content`, audited as `community.content_restored`.
+  An author cannot undo a decision: a hidden or removed profile stays that way when its
+  owner edits it. A changed handle or bio is saved and the API opens one queue entry for it
+  (`author_edit: true`, the author as `reporter`, a copy of the new handle and bio), so the
+  owner is not shut out for good. An author can still delete their own pick (before the
+  event) or comment, moderated or not, and post again; that cannot be stopped item by item.
+  Each queue row therefore carries `author_earlier_removals`, how many decisions hid or
+  removed that author's content before, so a repeat offender shows and can be suspended.
+  Each row also has the live text (`target_text`, null once deleted) and the copy taken
+  with the report (`reported_text`, `reported_summary`, `target_changed_since_report`).
   `GET /v1/admin/community/overview` counts profiles, picks, comments and open reports.
 - **Leaderboard.** `GET /v1/community/leaderboard?league=&window=30d|90d|all`, behind its own
   flag. Only profiles with at least 30 graded picks in the window are ranked, by the **lower
   bound of the Wilson 95% interval** of their win rate: not by the raw win rate, so a short
-  lucky run cannot rank first, and not by ROI. Each row shows the sample size and the
-  interval, and the response carries a `method` and a `caveat` that past results do not
-  predict future results and that a ranking is not a recommendation.
+  lucky run cannot rank first, and not by ROI. The price of the picks is not part of the
+  order either, so a high win rate at short prices can rank first and still lose money
+  (24 wins in 30 at -500 ranks above 114 in 200 at -110 and loses 1.2 units). Each row
+  shows the sample size, the interval, `average_price` and `flat_stake_roi`, and the
+  response carries a `method` that says all this and a `caveat` that past results do not
+  predict future results and that a ranking is not a recommendation. Whether to require a
+  minimum average price or to order by something that includes the price is open, for the
+  responsible-gambling review that comes before the flag is turned on.
 - **Notifications.** Three kinds were added to the in-app system, each with its own switch
   in the preferences: `new_follower` (once per follower, ever), `pick_comment` (someone else
   commented on your pick; the comment text is not repeated) and `pick_graded`. Same copy
@@ -530,7 +817,18 @@ a user id or anything from the bet tracker.
 - **Account lifecycle.** `DELETE /v1/me` deletes the profile, follows in both directions,
   likes, blocks, reports made, comments and **every pick, graded ones included**: no public
   record is left behind without an account. Comments and likes other people left on those
-  picks go with them, and so do reports about the deleted account's content.
+  picks go with them, and so do reports about the deleted account's content, with the copy
+  of the content each report holds. When the account is suspended at that moment (deleted by
+  its owner or by an administrator, through the same function), its handle is written to
+  `community_reserved_handles` (the handle and the date, nothing else) and creating or
+  renaming a profile to it answers `409 handle_taken`, the same as a handle in use.
+  Handles are compared as the uniqueness rule compares them (lower case), so a look-alike
+  that the handle rules allow (`k1nd_kai`, `kind__kai` for `kind_kai`) is still free. Only
+  the handle the profile holds at deletion is kept, not earlier ones. A removed profile
+  whose owner was not suspended is not covered: the owner can delete the account, register
+  again and take the same handle, so `suspend_author` is the decision that keeps a handle
+  off the platform. There is no route to release a reserved handle; that is a database
+  edit today.
 - **Guidelines.** `GET /v1/community/guidelines` returns the rules as a structured list (be
   civil; no guarantees or pressure to bet; no selling picks and no links; no personal
   information; 21 and over; picks are opinions, not advice) plus the helpline line, so every
@@ -550,7 +848,8 @@ src/oddvex_api/
                      record.py: flat-stake record of graded picks)
   providers/         SportsDataProvider protocol, SyntheticProvider, vendor-payload normalizer
   board.py           read models: odds comparison, best price, consensus, prop research, value screen
-  api/               public data routes, calculators, admin (overview, users, flags, audit, outbox)
+  api/               public data routes, calculators, admin (overview, users and their data
+                     requests, flags, audit, outbox)
   community/         profiles, picks, grading, records, follows, feed, comments, likes, blocks,
                      reports (service.py, router.py), moderation (admin_router.py), the content
                      rules (content_rules.py, pure), the guidelines and the demo seed
@@ -560,15 +859,18 @@ src/oddvex_api/
   entitlements/      plan catalog, require_entitlement, GET /v1/me/entitlements. No billing
   mailer/            EmailSender protocol, OutboxEmailSender, ResendEmailSender stub, email
                      templates (all wording), hashed single-use tokens, dev outbox route
-  account/           data export
-  bets/              tracker: schemas, service (settlement, auto-settlement, summary),
-                     analytics, routes
+  account/           data export (export.py streams the document) and account deletion
+                     (service.py, shared by the owner's route and the administrator's)
+  bets/              tracker: schemas, storage (what the columns can hold), service
+                     (settlement, auto-settlement, summary), analytics, routes
   watchlist/         watched teams, players and events
   alerts/            alert rules: schemas, pure evaluator, service (provider facts, state), throttle, routes
   notifications/     templates (all wording), NotificationChannel + InAppChannel, preferences,
                      staking reminder, routes
   sync/              SyncProvider protocol, MockSyncProvider, idempotent import
-  assistant/         intent router, data tools, Explainer protocol + TemplateExplainer
+  assistant/         responsible-gambling checks and replies (safeguards.py), intent router,
+                     data tools, Explainer protocol + TemplateExplainer
+  helpline.py        the helpline and crisis-line facts; every text that names one imports them
   db/                SQLAlchemy 2 models, portable UTC datetime type, session factory
   textnorm.py        caseless text keys folded in Python, the same on every database
   errors.py middleware.py ratelimit.py cache.py logging_config.py deps.py
@@ -580,8 +882,10 @@ alembic/             migrations (0001: users, bets, bet_legs, sync_connections, 
                      users.plan/status/last_login_at/email_verified_at;
                      0005: community_profiles, community_picks, community_comments,
                      community_follows, community_likes, community_blocks, community_reports,
-                     users.search_key, bets.sportsbook_key)
-scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py
+                     users.search_key, bets.sportsbook_key;
+                     0006: bets.client_request_id and its unique index)
+scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py,
+                     bootstrap_admin.py (the first administrator; see "Admin role")
 docs/QUANT_METHODOLOGY.md
 ```
 
@@ -592,8 +896,8 @@ docs/QUANT_METHODOLOGY.md
   `provider`, `provider_id` and `fetched_at`.
 - Cross-cutting: request id on every response and log line, one JSON log line per request,
   security headers, CORS allowlist, request body size limit, in-memory sliding-window rate
-  limits (per IP, per account for failed logins and emails, and per user for community
-  picks, comments, reports and follows), audit log for auth events including logout,
+  limits (per IP, per account and client network for failed logins, per account for emails, and per user for community
+  picks, comments, reports and follows, bet and sync writes and the data export), audit log for auth events including logout,
   email verification, password resets, every admin change, admin reads, role grants and
   removals, community posts, follows, blocks, reports and moderation decisions, password changes, bet create/settle/auto-settle/delete,
   watchlist changes, alert rule changes and firings, notification deletion, preference and
@@ -604,10 +908,10 @@ docs/QUANT_METHODOLOGY.md
 | Thing | Status |
 | --- | --- |
 | Leagues, teams, players, sportsbooks, events, scores | Synthetic. Fictional names, seeded, relative to the current time so there are always live, upcoming and final events |
-| Odds, lines, line history, prop offers, game logs | Synthetic. A simple internally consistent model with a margin and noise. No book or prop has a real edge |
-| Stale / suspended / unavailable books | Simulated on purpose. One book (`oldmill`) is always stale |
+| Odds, lines, line history, prop offers, game logs | Synthetic. One scoring model produces both the results and the prices: each side scores as a Poisson process, a fair price is the exact probability of the final result given the score and the time left, and final scores are drawn from the same model (`tests/test_audit_board_calibration.py` checks that every side wins as often as its price says, before the start and in play). Book prices add a margin and noise. No book or prop has a real edge |
+| Stale / suspended / unavailable books | Simulated on purpose. One book (`oldmill`) is always stale. In a live game a book is stale for a few seconds after each score change, until it requotes, and it suspends a market once one outcome is more than 98% likely |
 | Sportsbook sync | `MockSyncProvider` only: a fictional account with a fixed bet history and a simulated failure switch. No credentials, no real sportsbook |
-| Assistant | Keyword/regex intent router and templates. **No language model is connected** |
+| Assistant | Fixed patterns for the responsible-gambling replies, then a keyword/regex intent router and templates. **No language model is connected** |
 | `data/fixtures/*.json` | Synthetic vendor-format payloads for the provider-normalization contract tests |
 | Community demo data | Six fictional profiles (`fictional_fox`, `sample_sam`, `madeup_mara`, `placeholder_pat`, `notreal_nia`, `example_eli`) and the demo user's `demo_bettor`, with graded and upcoming picks, comments, follows and likes. Seeded only when the `community` flag is on in that database or `--with-community` is passed. Graded picks are written as posted before events that are final by now, priced from the synthetic line history, and graded by the API's own grading code |
 | Demo account | Seeded sample bets, development only. Four of the pending ones have structured legs on already finished synthetic events, so auto-settle has something to settle. With a provider it also gets five alert rules (one price alert that is already met and fires, the others stay active) and the notifications the engine produces for them |
@@ -622,13 +926,15 @@ docs/QUANT_METHODOLOGY.md
 | Plans | `users.plan` (`free` / `premium`), set by an administrator; an entitlement catalog and `require_entitlement`, enforced only with the `premium_gating` flag (off) and gating nothing as shipped | Prices, a purchase or subscription route, a payment provider, invoices, trials, webhooks. All of it needs Founder approval |
 | Email | The verification and reset flows end to end against an `EmailSender` protocol. `OutboxEmailSender` (the default) writes `to`, `template`, `subject`, `body_text`, `created_at` and a `dev_link` to `email_outbox` | Delivery. Nothing leaves the process. `ResendEmailSender` is a class that raises `NotImplementedError("Requires Founder approval and a Resend account")`; it is only selected by `ODDVEX_EMAIL_PROVIDER=resend`, and then the app refuses to start. No email SDK is installed and no HTTP call is made |
 | Email in production | `email_flows` is **off by default in production**, so the four routes answer `404 feature_disabled` and no email is queued. If an operator turns it on, the outbox row is written with the link replaced by a placeholder and `dev_link` empty, so the database never holds a usable token | A way for a real user to receive a link: **in production the verification and reset flows cannot be completed until a provider is approved and connected**, which is why the flag is off there |
-| Community | Everything described under "Community", behind the `community` flag (off) and, for the leaderboard, `community_leaderboard` (off). The demo seed adds fictional profiles only when the flag is on or `--with-community` is passed | Self-reported or free-text picks, stakes or units, paid picks, links, direct messages, images, mentions, editing a pick or a comment, a "restore" moderation action, appeals, per-moderator roles, and any review of the guidelines by counsel or of the leaderboard by a responsible-gambling adviser |
+| Community | Everything described under "Community", behind the `community` flag (off) and, for the leaderboard, `community_leaderboard` (off). The demo seed adds fictional profiles only when the flag is on or `--with-community` is passed | Self-reported or free-text picks, stakes or units, paid picks, links, direct messages, images, mentions, editing a pick or a comment, appeals, per-moderator roles, and any review of the guidelines by counsel or of the leaderboard by a responsible-gambling adviser |
 
 ## Limitations
 
 - No real odds, scores or statistics. Nothing here should be used to make a betting decision.
 - Email is not delivered, so nobody outside development can verify an address or reset a
-  password yet. An administrator cannot reset a password either.
+  password yet. An administrator cannot reset a password either. The one exception is the
+  operator command `scripts/bootstrap_admin.py`, which sets a new password for an address
+  in `ODDVEX_ADMIN_EMAILS` and marks it verified.
 - `GET /v1/dev/email-outbox/latest` is unauthenticated outside production by design.
 - Flags are global: no per-user or percentage rollout. Each flagged request reads the flag
   from the database.
@@ -638,8 +944,7 @@ docs/QUANT_METHODOLOGY.md
 - Community: grading has no background worker (it runs on reads and from
   `scripts/grade_picks.py`), the per-user limits are in process memory like the other
   limiters, the content rules match phrases and can be evaded or over-match (see above),
-  moderation has no restore action, and the feed and the leaderboard are computed per request
-  without caching. The leaderboard reads every eligible profile's graded picks: fine for a
+  and the feed and the leaderboard are computed per request without caching. The leaderboard reads every eligible profile's graded picks: fine for a
   demo, not designed for a large community. Prices are snapshots of synthetic data.
 - Rate limiting and caching are in process memory. With several workers each has its own
   counters; move them to a shared store before scaling out.
@@ -657,6 +962,14 @@ docs/QUANT_METHODOLOGY.md
   not stored, so a condition that was only true between two evaluations is missed.
 - Notifications are in-app only. Push, email and SMS need third-party services and Founder
   approval.
+- The assistant's responsible-gambling replies depend on fixed patterns. They miss messages
+  that are worded differently, they can fire on a message that meant something else (the
+  user then gets help resources instead of the answer), and they read one message at a time:
+  nothing is remembered, so a later message in the same chat is answered normally. A missed
+  message still gets the help sentence (helpline and 988) at the end of its answer. A user who
+  says they are under 21 is told OddVex is for adults 21 and over; nothing is recorded against
+  an account and no account is closed, because conversations are not stored and the under-21
+  procedure does not exist yet.
 - The staking reminder is a reminder, never a limit. It looks at bets recorded in OddVex only,
   is checked when a bet is created or imported (not when a bet is edited, settled or deleted),
   and the "current week" is the ISO week in UTC, not the user's time zone.
@@ -664,8 +977,33 @@ docs/QUANT_METHODOLOGY.md
   serves expires on its next evaluation.
 - The watchlist stores provider ids. A watched event the provider no longer serves stays on the
   list as `available: false` until the user removes it.
-- The data export is built in memory in one response; fine for a personal bet history, not
-  designed for very large accounts.
+- The data export is streamed and bounded in memory, but its size still grows with the
+  account: the bet cap bounds the bets (about 115 MB of JSON for 5,000 bets of the largest
+  size), while nothing bounds how many audit entries, import runs and community comments,
+  picks and reports an account accumulates over time. Import runs, and the audit entries
+  written by bet and sync routes, can only grow as fast as the per-user write limit allows
+  (`ODDVEX_RATE_LIMIT_USER_WRITES_PER_DAY` a day); community posts as fast as the community
+  limits allow (30 comments an hour by default). Audit entries are also written by the
+  watchlist, alert, notification and staking-reminder routes, which have no per-user
+  write limit: one account can add those as fast as it can send requests, and they stay
+  in the database and in its export. Sign-in routes write audit entries too and are
+  limited per address only.
+- Nothing limits how many requests are in progress across accounts, or how many
+  connections the server accepts. The per-account ceilings above bound what one account
+  can hold in memory; many accounts together are bounded only by the registration limit
+  and by whatever sits in front of the API.
+- A request holds a database connection from the moment the signed-in user is looked up
+  until it has answered, and the pool has 15 (SQLAlchemy's default: 5 plus 10 overflow).
+  When more requests than that are in progress at once, from one account or from many,
+  the rest wait; one that has waited 30 seconds for a connection answers `500
+  internal_error`. Measured with one account sending 125 requests at the same moment
+  (summary, analytics, list, export, auto-settle; 5,000 bets of the largest size): 36 of
+  them answered 500 after 30 seconds, the process peaked at 228 MiB and answered normally
+  afterwards. The streamed responses give their connection back between batches.
+- The bet cap and the write limits are per account. They do not limit how many accounts one
+  person creates; that is the registration limit's job (per IP).
+- A sync import still holds the bets of one run in memory until it commits. The mock provider
+  has twelve; a real provider would need to page.
 - Age is a self-attestation checkbox (`age_confirmed`), not verification.
 - Odds are not persisted; they are generated on request. The `providers` contract is where an
   `odds_snapshots` table would attach.

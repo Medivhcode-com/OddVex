@@ -5,8 +5,63 @@ export const SITE = {
   description:
     "Compare odds across sportsbooks, research player props, measure expected value and track every bet. OddVex is research and analytics only. It never takes wagers.",
   company: "Medivh Code",
-  helpline: "1-800-GAMBLER",
 } as const;
+
+/**
+ * Where to get help with problem gambling. The one place these facts are written: every page,
+ * component, link and sentence that gives the helpline reads them from here.
+ *
+ * Checked on 2026-11-19 against the National Council on Problem Gambling's own pages:
+ * - The National Problem Gambling Helpline is 1-800-MY-RESET (1-800-697-3738), in service since
+ *   2026-01-29.
+ * - It takes calls, and texts to 800GAM (800426). It is confidential and answers 24 hours a
+ *   day, every day.
+ * - It is not an emergency service. In a crisis the numbers are 988 (the Suicide and Crisis
+ *   Lifeline, call or text) and 911.
+ * - Online chat is offered on the Council's website. The site links to the front page only,
+ *   because deeper addresses move.
+ *
+ * The number the site gave before is not the national helpline. It is named once, on the
+ * responsible-gambling page, as the line of the state council that runs it.
+ *
+ * Check these again before each release and change `verifiedOn` when you do.
+ */
+export const HELPLINE = {
+  name: "National Problem Gambling Helpline",
+  /** The number as the Council writes it. */
+  number: "1-800-MY-RESET",
+  /** The same number in digits. */
+  digits: "1-800-697-3738",
+  /** Both spellings, as the number is shown wherever it appears. */
+  display: "1-800-MY-RESET (1-800-697-3738)",
+  tel: "tel:+18006973738",
+  /** The text line, as letters and as the digits they stand for. */
+  textTo: "800GAM",
+  textDigits: "800426",
+  sms: "sms:800426",
+  /** The day the number came into service. */
+  inServiceSince: "2026-01-29",
+  inServiceSinceText: "January 29, 2026",
+  council: "National Council on Problem Gambling",
+  site: "https://www.ncpgambling.org",
+  /** The address as shown on the link. */
+  siteLabel: "ncpgambling.org",
+  crisisName: "Suicide and Crisis Lifeline",
+  crisisNumber: "988",
+  crisisTel: "tel:988",
+  crisisSms: "sms:988",
+  emergencyNumber: "911",
+  emergencyTel: "tel:911",
+  /** The day the facts above were last checked against the Council's own pages. */
+  verifiedOn: "2026-11-19",
+  verifiedOnText: "November 19, 2026",
+} as const;
+
+/** The short line before the number, so the number itself can be a phone link. */
+export const RESPONSIBLE_GAMBLING_LEAD = "21+. OddVex does not take wagers. Gambling problem? Call";
+
+/** The short line shown wherever a compact notice gives the helpline. */
+export const RESPONSIBLE_GAMBLING_LINE = `${RESPONSIBLE_GAMBLING_LEAD} ${HELPLINE.display}.`;
 
 export const MARKETING_NAV = [
   { href: "/odds-comparison", label: "Odds" },

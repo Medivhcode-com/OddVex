@@ -12,6 +12,9 @@ ODDVEX_ADMIN_EMAILS lists that address. Without it no administrator is created:
 
     ODDVEX_ADMIN_EMAILS=admin@oddvex.test python scripts/seed_demo.py
 
+The admin role only goes to a verified address, so the seed marks that address verified.
+For a real administrator use scripts/bootstrap_admin.py, not this script.
+
 Community demo data (fictional profiles with picks, comments, follows and likes, and a
 public profile ``demo_bettor`` for the demo user) is added when the ``community`` flag is
 on in the target database. ``--with-community`` turns the ``community`` and
@@ -89,8 +92,14 @@ def main(argv: list[str]) -> int:
         )
     else:
         print("Community flag is off: no community data (pass --with-community to add it).")
-    if DEMO_ADMIN_EMAIL in settings.admin_email_set:
+    if DEMO_ADMIN_EMAIL in settings.admin_email_set and admin_role == "admin":
         print(f"Admin user {DEMO_ADMIN_EMAIL} ready (role: {admin_role}).")
+    elif DEMO_ADMIN_EMAIL in settings.admin_email_set:
+        print(
+            f"{DEMO_ADMIN_EMAIL} already has an account whose address is not verified. In "
+            "production the seed leaves such an account alone: it was not made an "
+            "administrator. Use scripts/bootstrap_admin.py for a real administrator."
+        )
     else:
         print(f"No admin user created: add {DEMO_ADMIN_EMAIL} to ODDVEX_ADMIN_EMAILS to get one.")
     return 0

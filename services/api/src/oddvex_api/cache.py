@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable
@@ -62,8 +63,24 @@ class InMemoryTTLCache:
             self._data.clear()
 
 
+def cache_key(prefix: str, *parts: str | None) -> str:
+    """The key of one cached read: the prefix and every parameter the answer depends on.
+
+    The parts are JSON-encoded, so they stay apart whatever characters they contain, and
+    "no filter" (``None``, written ``null``) can never equal a value somebody typed. Pass
+    validated, normalised parameters only. A value the data does not know must be answered
+    without the cache: stored under its own key it would take one of the bounded slots, and
+    enough made-up values would push the real entries out.
+    """
+    return json.dumps([prefix, *parts], separators=(",", ":"))
+
+
 def cached[T](cache: Cache, key: str, ttl_seconds: float, compute: Callable[[], T]) -> T:
-    """Return the cached value for ``key`` or compute and store it."""
+    """Return the cached value for ``key`` or compute and store it.
+
+    Build ``key`` with :func:`cache_key`. A cached ``None`` counts as a miss; an empty
+    list is a value like any other.
+    """
     hit = cache.get(key)
     if hit is not None:
         return hit  # type: ignore[no-any-return]

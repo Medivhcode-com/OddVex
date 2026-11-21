@@ -375,7 +375,10 @@ def test_a_colliding_concurrent_import_is_a_clean_409(
     real_run_import = sync_service.run_import
     raced: list[str] = []
 
-    def run_import_then_lose_the_race(db, conn, provider, max_attempts, now=None):  # type: ignore[no-untyped-def]
+    def run_import_then_lose_the_race(db, conn, provider, max_attempts, now=None, **options):  # type: ignore[no-untyped-def]
+        # ``max_bets`` is left out on purpose: with it the import takes a row lock on the
+        # user (PostgreSQL), and the "other request" below runs inside this one's call
+        # and would wait for that lock for ever. Without the lock the two really race.
         run = real_run_import(db, conn, provider, max_attempts, now)
         if not raced:
             # The "other request": same account, its own transaction, commits first.

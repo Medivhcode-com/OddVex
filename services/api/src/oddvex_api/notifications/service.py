@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..db import Bet, Notification, NotificationPreference, StakeReminder, utcnow
 from ..deps import write_audit
 from ..errors import ApiError
+from ..quant import money
 from . import templates
 from .channels import DEFAULT_CHANNELS, NotificationChannel
 from .schemas import (
@@ -223,14 +224,28 @@ def stake_reminder_out(db: Session, user_id: str, now: datetime) -> StakeReminde
     )
 
 
+#: Smallest threshold the money column holds above zero.
+MIN_STAKE_THRESHOLD = Decimal("0.01")
+
+
 def set_stake_threshold(db: Session, user_id: str, threshold: float | None) -> None:
+    """Store ``threshold`` in cents, rounded half up as a stake is. One that would be
+    stored as 0.00 is a 422 (``invalid_threshold``) and nothing is written: a reminder at
+    zero would fire every week."""
+    stored = money(Decimal(str(threshold))) if threshold is not None else None
+    if stored is not None and stored < MIN_STAKE_THRESHOLD:
+        raise ApiError(
+            422,
+            "invalid_threshold",
+            f"The weekly stake threshold must be at least {MIN_STAKE_THRESHOLD}: a smaller "
+            "amount rounds to 0.00",
+            details={"min_weekly_stake_threshold": str(MIN_STAKE_THRESHOLD)},
+        )
     setting = db.get(StakeReminder, user_id)
     if setting is None:
         setting = StakeReminder(user_id=user_id)
         db.add(setting)
-    setting.weekly_stake_threshold = (
-        Decimal(str(threshold)).quantize(Decimal("0.01")) if threshold is not None else None
-    )
+    setting.weekly_stake_threshold = stored
     setting.updated_at = utcnow()
 
 

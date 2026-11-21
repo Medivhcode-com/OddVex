@@ -37,9 +37,11 @@ class Settings(BaseSettings):
     stale_live_seconds: int = 120
     stale_pregame_seconds: int = 900
 
-    #: Trust ``X-Forwarded-For`` for the rate-limit client IP (only behind a trusted proxy).
+    #: Trust ``X-Forwarded-For`` for the client IP used by the rate limits, the login
+    #: lockout and audit rows (only behind a trusted proxy).
     trust_proxy: bool = False
-    #: Comma-separated emails that receive the admin role at registration / login.
+    #: Comma-separated emails that may hold the admin role. An account gets it only when
+    #: its address is listed here and verified (``deps.sync_admin_role``).
     admin_emails: str = ""
 
     rate_limit_enabled: bool = True
@@ -47,11 +49,17 @@ class Settings(BaseSettings):
     rate_limit_assistant_per_minute: int = 20
     rate_limit_window_seconds: int = 60
 
-    #: Per-account limits. They are keyed on the email address (or user id), not the IP,
-    #: and share one window. Disabled together with ``rate_limit_enabled``.
+    #: Per-account limits. They are keyed on the email address (or user id) and share one
+    #: window. Disabled together with ``rate_limit_enabled``.
     account_limit_window_seconds: int = Field(default=900, ge=1)
-    #: Failed logins for one email inside the window before further attempts get 429.
+    #: Failed logins for one email from one client network (an IPv4 address, or the /64
+    #: prefix of an IPv6 address) inside the window before further attempts for that
+    #: email from that network get 429. Other networks are not affected.
     login_max_failures: int = Field(default=8, ge=1)
+    #: Failed logins for one email from all networks together inside the window before
+    #: every attempt for that email gets 429. Much higher than ``login_max_failures``:
+    #: it is there for guessing spread over many addresses.
+    login_max_failures_per_email: int = Field(default=50, ge=1)
     #: Verification or password-reset emails one address can request inside the window.
     email_requests_per_window: int = Field(default=3, ge=1)
 
@@ -76,6 +84,22 @@ class Settings(BaseSettings):
     demo_password: str = DEV_DEMO_PASSWORD
 
     sync_max_attempts: int = 3
+
+    #: Most bets one account can hold, manual and imported together. ``POST /v1/bets``
+    #: answers 409 ``bet_limit_reached`` at the cap and an import stops there. It bounds
+    #: the disk one account can use (a bet with 20 legs and 2,000 characters of notes is
+    #: about 22 KiB of database) and what the summary, analytics and export read.
+    max_bets_per_user: int = Field(default=5000, ge=1)
+    #: Per-user ceilings on bet writes (create, update, delete, settle, auto-settle) and
+    #: sync writes, keyed on the user id whatever the address. In process memory, off
+    #: with ``rate_limit_enabled``.
+    rate_limit_user_writes_per_minute: int = Field(default=120, ge=1)
+    rate_limit_user_writes_per_day: int = Field(default=2000, ge=1)
+    #: ``GET /v1/me/export`` requests one user can make in an hour.
+    rate_limit_export_per_hour: int = Field(default=10, ge=1)
+    #: Streamed responses (the bet list and the export) one user can have in progress at
+    #: the same moment. Each holds one batch of bets while the client reads.
+    rate_limit_user_streams_at_once: int = Field(default=8, ge=1)
 
     #: Minimum seconds between two lazy alert evaluations for one user (triggered by the
     #: notification read routes). 0 evaluates on every request.

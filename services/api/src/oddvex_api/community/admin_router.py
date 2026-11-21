@@ -1,8 +1,10 @@
 """Community moderation (role ``admin`` only), behind the ``community`` flag.
 
-Every action is written to the audit log with the acting administrator, the report, the
-target, the author of the reported content and the moderator's note. Reading the report
-queue is audited as ``admin.read``.
+Every action is written to the audit log with the acting administrator, the report (or,
+for a restore, the content), the target, the author of the reported content and the
+moderator's note. Reading the report queue is audited as ``admin.read``. Only an
+administrator can make hidden or removed content visible again (``restore``); its author
+cannot.
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ from .schemas import (
     AdminReportOut,
     ReportStatus,
     ResolveReportRequest,
+    RestoreContentRequest,
+    RestoredContentOut,
 )
 
 _RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -58,8 +62,14 @@ def admin_community_overview(admin: AdminDep, db: DbDep) -> AdminCommunityOvervi
     description=(
         "`status=open` (the default) lists what is waiting, oldest first; "
         "`status=resolved` lists what was decided, most recent first. Each row carries "
-        "the reported text as stored, its author and the reporter, by user id and "
-        "handle. Each call is recorded in the audit log as `admin.read`."
+        "the reported text as stored now (`target_text`, null once it was deleted) and "
+        "as it was when the report was made (`reported_text`, kept with the report), "
+        "its author and the reporter, by user id and handle, and "
+        "`author_earlier_removals`, how often moderators hid or removed that author's "
+        "content before. An entry with `author_edit` true was opened by the API because "
+        "the author edited a profile that moderators hid or removed; the profile stays "
+        "that way until it is restored. Each call is recorded in the audit log as "
+        "`admin.read`."
     ),
 )
 def admin_list_reports(
@@ -106,7 +116,8 @@ def admin_list_reports(
         "`dismiss`: nothing happens to the content. `hide_content` and `remove_content`: "
         "the pick, comment or profile disappears from every public read (its author "
         "sees a 'removed by moderators' placeholder on their own item); a hidden pick "
-        "still counts in its author's record. `suspend_author`: the author's account is "
+        "still counts in its author's record. Editing does not bring it back: only "
+        "`POST /v1/admin/community/restore` does. `suspend_author`: the author's account is "
         "suspended through the same code as `POST /v1/admin/users/{id}/suspend`, so an "
         "administrator cannot be suspended (`409`). Every other open report on the same "
         "content is resolved with the same decision, except after `dismiss`. A report "
@@ -172,3 +183,60 @@ def admin_resolve_report(
     )
     db.commit()
     return service.admin_report_out(db, report)
+
+
+@router.post(
+    "/restore",
+    response_model=RestoredContentOut,
+    operation_id="admin_restore_content",
+    summary="Make hidden or removed content visible again",
+    description=(
+        "Undoes `hide_content` or `remove_content` on a pick, a comment or a profile "
+        "(`target_id`: the pick id, the comment id or the profile's current handle). The "
+        "content becomes visible to everyone who could see it before, and every open "
+        "report on it, such as the entry opened when its author edited a moderated "
+        "profile, is resolved as `restore_content` with the note. `404` when the content "
+        "does not exist, `409 content_not_moderated` when it is visible already. `note` "
+        "is required and is stored on the reports it closes and in the audit log "
+        "(`community.content_restored`)."
+    ),
+    responses={409: {"model": ErrorResponse, "description": "The content is visible already"}},
+)
+def admin_restore_content(
+    body: RestoreContentRequest,
+    admin: AdminDep,
+    db: DbDep,
+    request: Request,
+    now: NowDep,
+) -> RestoredContentOut:
+    note = body.note.strip()
+    if len(note) < 3:
+        raise ApiError(422, "validation_error", "A note of at least 3 characters is required")
+    target = service.find_moderation_target(db, body.target_type, body.target_id)
+    before, closed = service.restore_content(db, target, body.target_type, admin.id, note, now)
+    target_id = service.target_key(target)
+    write_audit(
+        db,
+        request,
+        "community.content_restored",
+        user_id=admin.id,
+        entity_type=f"community_{body.target_type}",
+        # A profile is named by its owner's id, as in the profile's own audit entries.
+        entity_id=target.user_id if body.target_type == "profile" else target_id,
+        details={
+            "reason": note,
+            "target_type": body.target_type,
+            "target_id": target_id,
+            "target_user_id": target.user_id,
+            "before": {"moderation_status": before},
+            "after": {"moderation_status": "visible"},
+            "reports_closed": closed,
+        },
+    )
+    db.commit()
+    return RestoredContentOut(
+        target_type=body.target_type,
+        target_id=target_id,
+        moderation_status="visible",
+        reports_closed=closed,
+    )

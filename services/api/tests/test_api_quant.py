@@ -136,6 +136,7 @@ def test_parlay_distinct_events(client: TestClient) -> None:
     assert (result["active_legs"], result["dropped_legs"]) == (2, 1)
     assert (result["payout"], result["profit"]) == (50.0, 40.0)
     assert result["combined_probability"] == pytest.approx(0.2)
+    assert result["probability_status"] == "computed"
     assert "assumes independence" in result["probability_note"]
     assert result["correlation_warnings"] == []
     assert [leg["counted"] for leg in result["legs"]] == [True, True, False]
@@ -156,6 +157,8 @@ def test_parlay_same_event_has_null_probability_and_a_warning(client: TestClient
         },
     )
     assert result["combined_probability"] is None
+    assert result["probability_status"] == "same_event_legs"
+    assert not any(step.startswith("Combined probability") for step in result["steps"])
     assert len(result["correlation_warnings"]) == 1
     assert "game1" in result["correlation_warnings"][0]
     assert result["combined_decimal"] == pytest.approx(3.6446, abs=1e-4)
@@ -169,12 +172,14 @@ def test_parlay_without_event_ids_has_null_probability(client: TestClient) -> No
         {"legs": [{"odds": -110, "win_probability": 0.5}, {"odds": -110, "win_probability": 0.5}]},
     )
     assert result["combined_probability"] is None
+    assert result["probability_status"] == "unverified_legs"
     assert result["correlation_warnings"]
 
 
 def test_parlay_with_every_leg_dropped(client: TestClient) -> None:
     result = post(client, "parlay", {"stake": 20, "legs": [{"odds": -110, "result": "void"}]})
     assert result["combined_price"] is None
+    assert result["probability_status"] == "no_active_legs"
     assert result["combined_decimal"] == 1.0
     assert result["payout"] == 20.0 and result["profit"] == 0.0
 

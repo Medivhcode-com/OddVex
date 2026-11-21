@@ -42,7 +42,7 @@ from .api.schemas import (
     ValueRowOut,
     ValueScreenOut,
 )
-from .cache import Cache, cached
+from .cache import Cache, cache_key, cached
 from .config import Settings
 from .providers import (
     Event,
@@ -53,6 +53,7 @@ from .providers import (
     SportsDataProvider,
     Team,
 )
+from .providers.base import MAX_CLOCK_SKEW_SECONDS
 from .quant import american_to_decimal, hit_rate, no_vig
 from .quant.value import MIN_CONSENSUS_BOOKS, BookQuote, best_price_vs_consensus
 from .schemas import BestPriceOut, PriceOut, SportsbookRef, TeamRef, price_out
@@ -68,11 +69,13 @@ SYNTHETIC_NOTICE = (
 )
 
 VALUE_METHOD = (
-    "For each outcome, the best open, non-stale price is compared with the mean no-vig "
-    "probability of the other open, non-stale sportsbooks quoting the same line. The "
-    "sportsbook with the best price is left out of that consensus, and at least "
+    "For each outcome of an upcoming event, the best open, non-stale price is compared with "
+    "the mean no-vig probability of the other open, non-stale sportsbooks quoting the same "
+    "line. The sportsbook with the best price is left out of that consensus, and at least "
     f"{MIN_CONSENSUS_BOOKS} other sportsbooks are required. Edge is the expected value per "
-    "1 unit staked at the best price if the consensus probability were the true probability."
+    "1 unit staked at the best price if the consensus probability were the true probability. "
+    "Events in progress are not listed: their prices move with the score, so quotes taken "
+    "moments apart are not comparable."
 )
 VALUE_CAVEAT = (
     "A price above the consensus is not proof of an edge. The consensus can be wrong, "
@@ -166,11 +169,30 @@ class Board:
             return self.settings.stale_live_seconds
         return self.settings.stale_pregame_seconds
 
-    def is_stale(self, last_updated: datetime | None, event_status: str) -> bool:
+    def is_stale(
+        self,
+        last_updated: datetime | None,
+        event_status: str,
+        score_updated_at: datetime | None = None,
+    ) -> bool:
+        """Whether a quote may not be compared with other quotes or counted in a consensus.
+
+        A quote is stale when it has no timestamp, when its timestamp is further in the
+        future than a small clock-skew allowance, when it is older than the threshold for
+        the event's status, or when the event is live and the quote was made before the
+        score last changed (``score_updated_at``, when the provider reports it): a price
+        from before a score change is a price for another game state.
+        """
         if last_updated is None:
-            return False
+            return True
         age = (self.now - last_updated).total_seconds()
-        return age > self.stale_after_seconds(event_status)
+        if age < -MAX_CLOCK_SKEW_SECONDS or age > self.stale_after_seconds(event_status):
+            return True
+        return (
+            event_status == "live"
+            and score_updated_at is not None
+            and last_updated < score_updated_at
+        )
 
     @staticmethod
     def _api_status(provider_status: str) -> str:
@@ -179,23 +201,17 @@ class Board:
 
     # ----------------------------------------------------------------- events
     def _best_moneyline(self, event: Event) -> BestMoneylineOut | None:
+        """Best moneyline per side: the same usable quotes as :meth:`event_odds`."""
         if event.status == "final":
             return None
-        best: dict[str, tuple[Decimal, str]] = {}
-        for snap in self.provider.get_odds(event.id, "moneyline"):
-            if snap.status != "open" or self.is_stale(snap.last_updated, event.status):
-                continue
-            for outcome in snap.outcomes:
-                price = american_to_decimal(outcome.price_american)
-                if outcome.key not in best or price > best[outcome.key][0]:
-                    best[outcome.key] = (price, snap.sportsbook_id)
+        best = self._best_prices(self._usable(self._quote_rows(event, "moneyline")))
         if not best:
             return None
 
         def side(key: str) -> BestPriceOut | None:
             if key not in best:
                 return None
-            price, book = best[key]
+            price, book, _ = best[key]
             return BestPriceOut(price=price_out(price), sportsbook=self.book_ref(book))
 
         return BestMoneylineOut(home=side("home"), away=side("away"), draw=side("draw"))
@@ -241,7 +257,9 @@ class Board:
         rows: list[_QuoteRow] = []
         for snap in self.provider.get_odds(event.id, market):
             status = self._api_status(snap.status)
-            stale = status != "unavailable" and self.is_stale(snap.last_updated, event.status)
+            stale = status != "unavailable" and self.is_stale(
+                snap.last_updated, event.status, event.score_updated_at
+            )
             prices = (
                 []
                 if status == "unavailable"
@@ -386,12 +404,17 @@ class Board:
     def value_screen(
         self, league: str | None, market: str | None, min_edge: float, limit: int
     ) -> ValueScreenOut:
-        rows = cached(
-            self.cache,
-            f"value:{league or '*'}:{market or '*'}",
-            _BOARD_TTL_SECONDS,
-            lambda: self._value_rows(league, market),
-        )
+        """``None`` means no filter. A league the provider does not have or a market that
+        is not an event market matches nothing: no rows, and nothing is cached for it."""
+        rows: list[ValueRowOut] = []
+        known_league = league is None or league in {lg.key for lg in self.provider.list_leagues()}
+        if known_league and (market is None or market in _VALUE_MARKETS):
+            rows = cached(
+                self.cache,
+                cache_key("value", league, market),
+                _BOARD_TTL_SECONDS,
+                lambda: self._value_rows(league, market),
+            )
         return ValueScreenOut(
             rows=[row for row in rows if row.edge >= min_edge][:limit],
             min_edge=min_edge,
@@ -402,12 +425,18 @@ class Board:
         )
 
     def _value_rows(self, league: str | None, market: str | None) -> list[ValueRowOut]:
-        """Every outcome whose best price beats the consensus of the other books, largest
-        edge first. The same usable quotes as :meth:`event_odds` and :meth:`best_price`."""
+        """Every outcome of an upcoming event whose best price beats the consensus of the
+        other books, largest edge first. The same usable quotes as :meth:`event_odds` and
+        :meth:`best_price`.
+
+        Live events are left out. In play each book's price follows the score, so two quotes
+        taken moments apart can differ by a whole score change, and that difference would
+        be listed as an edge.
+        """
         rows: list[ValueRowOut] = []
         markets = [market] if market else list(_VALUE_MARKETS)
         for event in self.provider.list_events(league=league):
-            if event.status == "final":
+            if event.status != "upcoming":
                 continue
             for event_market in markets:
                 if event_market in event.markets:
@@ -508,17 +537,24 @@ class Board:
         )
 
     def _game_log(self, player_id: str) -> list[GameLogEntry]:
+        """The player's game log. ``player_id`` is the id of a player the provider
+        returned, never a raw request value."""
         return cached(
             self.cache,
-            f"gamelog:{player_id}",
+            cache_key("gamelog", player_id),
             _GAME_LOG_TTL_SECONDS,
             lambda: self.provider.get_player_game_log(player_id),
         )
 
     def _prop_offers(
-        self, offers: Sequence[PropOffer], event_status: str
+        self,
+        offers: Sequence[PropOffer],
+        event_status: str,
+        score_updated_at: datetime | None = None,
     ) -> tuple[list[PropOfferOut], float | None, BestPriceOut | None, BestPriceOut | None]:
-        """Offer rows, consensus line, and best over / under at that line."""
+        """Offer rows, consensus line, and best over / under at that line.
+
+        The same staleness rule as the event markets (:meth:`is_stale`)."""
         rows: list[tuple[PropOffer, str, bool, Decimal | None, Decimal | None]] = []
         for offer in offers:
             status = self._api_status(offer.status)
@@ -533,7 +569,9 @@ class Board:
                 if priced and offer.under_american is not None
                 else None
             )
-            stale = status != "unavailable" and self.is_stale(offer.last_updated, event_status)
+            stale = status != "unavailable" and self.is_stale(
+                offer.last_updated, event_status, score_updated_at
+            )
             rows.append((offer, status, stale, over, under))
 
         usable = [r for r in rows if r[1] == "open" and not r[2] and r[0].line is not None]
@@ -575,7 +613,11 @@ class Board:
     ) -> PlayerPropsOut:
         event, opponent = self._next_event(player)
         offers = self.provider.get_prop_offers(player.id, market) if event else []
-        offer_rows, line, _, _ = self._prop_offers(offers, event.status if event else "upcoming")
+        offer_rows, line, _, _ = self._prop_offers(
+            offers,
+            event.status if event else "upcoming",
+            event.score_updated_at if event else None,
+        )
 
         log = [entry for entry in self._game_log(player.id) if market in entry.stats]
         season_values = [entry.stats[market] for entry in log]
@@ -652,9 +694,26 @@ class Board:
         )
 
     def props_board(self, league: str | None, market: str | None) -> list[PropBoardRowOut]:
+        """The prop board, optionally for one league and one prop market.
+
+        ``None`` means no filter. A league the provider does not have, or a market that is
+        not a prop market of the chosen league (of any league without a league filter),
+        matches no row: the answer is an empty list and nothing is computed or cached for
+        it. The cache therefore only ever holds entries for filter values that exist, each
+        under its own key.
+        """
+        prop_markets = {lg.key: set(lg.prop_markets) for lg in self.provider.list_leagues()}
+        if league is not None and league not in prop_markets:
+            return []
+        if market is not None:
+            offered = (
+                prop_markets[league] if league is not None else set().union(*prop_markets.values())
+            )
+            if market not in offered:
+                return []
         return cached(
             self.cache,
-            f"propsboard:{league or '*'}:{market or '*'}",
+            cache_key("propsboard", league, market),
             _BOARD_TTL_SECONDS,
             lambda: self._props_board(league, market),
         )
@@ -675,7 +734,9 @@ class Board:
                 if not market_offers:
                     # No sportsbook lists this player for this game (replay: did not play).
                     continue
-                _, line, best_over, best_under = self._prop_offers(market_offers, event.status)
+                _, line, best_over, best_under = self._prop_offers(
+                    market_offers, event.status, event.score_updated_at
+                )
                 l10_rate: float | None = None
                 over_count = sample = 0
                 if line is not None:

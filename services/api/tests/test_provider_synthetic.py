@@ -181,6 +181,68 @@ def test_some_books_are_suspended_or_unavailable_and_one_is_stale(
             assert max(values) < 900, book
 
 
+def test_a_live_event_reports_when_its_score_last_changed() -> None:
+    seen = 0
+    for minute in range(0, 600, 37):
+        now = FROZEN_NOW + timedelta(minutes=minute)
+        provider = at(now)
+        for event in provider.list_events():
+            if event.status != "live":
+                assert event.score_updated_at is None
+                continue
+            seen += 1
+            assert event.score_updated_at is not None
+            assert event.start_time <= event.score_updated_at <= now
+            if event.score == (0, 0) or (event.score.home, event.score.away) == (0, 0):  # type: ignore[union-attr]
+                assert event.score_updated_at == event.start_time  # the start counts
+            # A moment before the change the score was different (or the game had not begun).
+            earlier = at(event.score_updated_at - timedelta(seconds=1)).get_event(event.id)
+            assert earlier is not None
+            assert earlier.status == "upcoming" or earlier.score != event.score
+    assert seen > 30
+
+
+def test_in_play_quotes_are_a_few_seconds_old_or_from_before_the_last_score_change() -> None:
+    fresh = waiting = 0
+    for minute in range(0, 600, 5):
+        now = FROZEN_NOW + timedelta(minutes=minute, seconds=11)
+        provider = at(now)
+        for event in provider.list_events(status="live"):
+            assert event.score_updated_at is not None
+            for market in event.markets:
+                for snapshot in provider.get_odds(event.id, market):
+                    if snapshot.last_updated is None or snapshot.sportsbook_id == "oldmill":
+                        continue
+                    if snapshot.last_updated >= event.score_updated_at:
+                        fresh += 1
+                        assert (now - snapshot.last_updated).total_seconds() <= 3.0
+                    else:
+                        waiting += 1  # the book has not requoted since the score changed
+                        assert (now - event.score_updated_at).total_seconds() <= 6.0
+    assert fresh > 2000 and 0 < waiting < fresh / 4
+
+
+def test_a_market_that_is_all_but_decided_is_suspended_not_open() -> None:
+    """Past 98% the price grid could not stay at or below the fair price."""
+    decided = 0
+    for minute in range(0, 900, 23):
+        provider = at(FROZEN_NOW + timedelta(minutes=minute))
+        for event in provider.list_events(status="live"):
+            for market in event.markets:
+                for snapshot in provider.get_odds(event.id, market):
+                    if not snapshot.outcomes:
+                        continue
+                    fair = no_vig(
+                        [american_to_decimal(o.price_american) for o in snapshot.outcomes]
+                    ).fair_probabilities
+                    if snapshot.status == "open":
+                        # 98% fair, plus the book's noise and the rounding of the price.
+                        assert max(fair) < 0.985, (event.id, market, snapshot.sportsbook_id)
+                    elif max(fair) > 0.975:
+                        decided += 1
+    assert decided > 20
+
+
 def test_final_events_are_closed(provider: SyntheticProvider) -> None:
     event = provider.list_events(status="final")[0]
     assert {s.status for s in provider.get_odds(event.id, "moneyline")} <= {"closed", "unavailable"}

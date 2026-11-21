@@ -45,6 +45,82 @@ def get_db(request: Request) -> Iterator[Session]:
         session.close()
 
 
+# ------------------------------------------------------------- NUL characters
+_NUL = "\x00"
+#: Methods whose body is looked at. The others carry none that a route reads.
+_BODY_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _nul_error(*loc: str) -> ApiError:
+    """The 422 of the validation handler, naming where the character was found."""
+    return ApiError(
+        422,
+        "validation_error",
+        "Request validation failed",
+        details=[
+            {
+                # A name with the character in it is shown with the escape as text.
+                "loc": [part.replace(_NUL, "\\u0000") for part in loc],
+                "message": "Text cannot contain the NUL character",
+                "type": "nul_character",
+            }
+        ],
+    )
+
+
+def _nul_in_document(document: Any) -> tuple[str, ...] | None:
+    """Where a parsed JSON document has a NUL character, in a value or in a key; None
+    when it has none. Walks without recursion: a body can be nested deeply."""
+    pending: list[tuple[tuple[str, ...], Any]] = [((), document)]
+    while pending:
+        loc, value = pending.pop()
+        if isinstance(value, str):
+            if _NUL in value:
+                return loc
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                if _NUL in key:
+                    return (*loc, key)
+                pending.append(((*loc, key), item))
+        elif isinstance(value, list):
+            pending.extend(((*loc, str(index)), item) for index, item in enumerate(value))
+    return None
+
+
+async def reject_nul_characters(request: Request) -> None:
+    """422 when any text the client sent contains a NUL character (U+0000).
+
+    PostgreSQL cannot store the character in a text column and the driver refuses to
+    send it, so before this check it ended as a failed statement and a 500. No field of
+    this API has a use for it. This runs for every route (it is a dependency of the
+    application itself, see ``main.py``) and before the route's own dependencies, so the
+    answer is the same whether or not the caller is signed in and whatever the text was
+    meant for: path values, query values and names, and every string and key of a JSON
+    body, in whatever encoding the body was sent.
+    """
+    for name, value in request.path_params.items():
+        if isinstance(value, str) and _NUL in value:
+            raise _nul_error("path", name)
+    for name, value in request.query_params.multi_items():
+        if _NUL in name or _NUL in value:
+            raise _nul_error("query", name)
+    if request.method not in _BODY_METHODS:
+        return
+    body = await request.body()
+    # A body without a zero byte and without the escape cannot decode to the character:
+    # in UTF-8 it is one of those two, and UTF-16 and UTF-32 text is full of zero bytes.
+    if b"\x00" not in body and b"\\u0000" not in body:
+        return
+    try:
+        # The same parser, and the same parsed document, the route's body is read with.
+        document = await request.json()
+    except (ValueError, RecursionError):
+        return  # not JSON: nothing in it is read as text
+    found = _nul_in_document(document)
+    if found is not None:
+        raise _nul_error("body", *found)
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 ProviderDep = Annotated[SportsDataProvider, Depends(get_provider)]
 CacheDep = Annotated[Cache, Depends(get_cache)]
@@ -74,18 +150,31 @@ def write_audit(
     )
 
 
-def sync_admin_role(db: Session, request: Request | None, user: User, settings: Settings) -> bool:
-    """Make ``user.role`` agree with ``ODDVEX_ADMIN_EMAILS``. Returns whether it changed.
+def sync_admin_role(
+    db: Session,
+    request: Request | None,
+    user: User,
+    settings: Settings,
+    source: str = "admin_emails",
+) -> bool:
+    """Make ``user.role`` agree with the rule for the admin role. Returns whether it changed.
 
-    The allowlist is the single source of the admin role. An address on it gets the role
-    (audited as ``role.granted``); an address no longer on it loses the role (audited as
-    ``role.removed``). While the ``email_flows`` flag is on, the role is only granted
-    once the email address has been confirmed, so registering a listed address first
-    proves nothing. Called at registration, at login and on every token use. Nothing is
-    committed here.
+    The rule: an account is an administrator exactly when its address is in
+    ``ODDVEX_ADMIN_EMAILS`` **and** its email address is verified. That holds in every
+    environment and whatever the ``email_flows`` flag says: the list alone gives nobody
+    the role, so having registered a listed address first gains nothing. Where no
+    confirmation email can be followed (production today), the address is verified by
+    the operator command ``scripts/bootstrap_admin.py``.
+
+    An account that meets the rule gets the role (audited as ``role.granted`` with
+    ``source``); an account that holds the role without meeting it loses it (audited as
+    ``role.removed`` with the reason: the address left the list, or it is not
+    verified). Called at login, when an address is confirmed and on every token use.
+    Nothing is committed here.
     """
     listed = user.email in settings.admin_email_set
-    if user.role == "admin" and not listed:
+    entitled = listed and user.email_verified
+    if user.role == "admin" and not entitled:
         user.role = "user"
         write_audit(
             db,
@@ -94,14 +183,13 @@ def sync_admin_role(db: Session, request: Request | None, user: User, settings: 
             user_id=user.id,
             entity_type="user",
             entity_id=user.id,
-            details={"role": "admin", "reason": "not_in_admin_emails"},
+            details={
+                "role": "admin",
+                "reason": "email_not_verified" if listed else "not_in_admin_emails",
+            },
         )
         return True
-    if user.role != "admin" and listed:
-        from .flags import service as flags  # imported here: flags.service imports this module
-
-        if flags.is_enabled(db, "email_flows", settings) and not user.email_verified:
-            return False
+    if user.role != "admin" and entitled:
         user.role = "admin"
         write_audit(
             db,
@@ -110,7 +198,7 @@ def sync_admin_role(db: Session, request: Request | None, user: User, settings: 
             user_id=user.id,
             entity_type="user",
             entity_id=user.id,
-            details={"role": "admin", "source": "admin_emails"},
+            details={"role": "admin", "source": source},
         )
         return True
     return False

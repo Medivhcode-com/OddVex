@@ -10,13 +10,14 @@ const skip = (bet_id: string, reason: AutoSettle['skipped'][number]['reason']) =
 
 describe('autoSettleMessage', () => {
   it('counts what was settled, with the right plural', () => {
-    expect(autoSettleMessage({ checked: 1, settled: [wonBet], skipped: [] })).toBe('1 bet settled from final scores.');
-    expect(autoSettleMessage({ checked: 0, settled: [], skipped: [] })).toBe('0 bets settled from final scores.');
+    expect(autoSettleMessage({ checked: 1, has_more: false, settled: [wonBet], skipped: [] })).toBe('1 bet settled from final scores.');
+    expect(autoSettleMessage({ checked: 0, has_more: false, settled: [], skipped: [] })).toBe('0 bets settled from final scores.');
   });
 
   it('says why the rest were left open, grouped by reason', () => {
     const out: AutoSettle = {
       checked: 6,
+      has_more: false,
       settled: [wonBet, wonBet],
       skipped: [
         skip('a', 'event_not_final'),

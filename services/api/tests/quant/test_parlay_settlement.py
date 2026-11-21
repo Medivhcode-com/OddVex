@@ -64,6 +64,7 @@ def test_combined_probability_for_distinct_events_assumes_independence() -> None
     result = combine_parlay([leg("2.0", "a", 0.5), leg("2.5", "b", 0.4)])
     assert result.combined_probability == pytest.approx(0.2)
     assert result.probability_note == INDEPENDENCE_NOTE
+    assert result.probability_status == "computed"
     assert "assumes independence" in result.probability_note
     assert result.correlation_warnings == []
     assert result.payout is None
@@ -81,6 +82,7 @@ def test_same_event_legs_have_no_combined_probability() -> None:
         [leg("2.0", "game1", 0.5), leg("2.5", "game1", 0.4), leg("1.8", "g2", 0.55)]
     )
     assert result.combined_probability is None
+    assert result.probability_status == "same_event_legs"
     assert len(result.correlation_warnings) == 1
     assert "game1" in result.correlation_warnings[0]
     assert "correlated" in result.correlation_warnings[0]
@@ -91,6 +93,7 @@ def test_same_event_legs_have_no_combined_probability() -> None:
 def test_unknown_event_ids_block_the_combined_probability() -> None:
     result = combine_parlay([leg("2.0", None, 0.5), leg("2.5", "b", 0.4)])
     assert result.combined_probability is None
+    assert result.probability_status == "unverified_legs"
     assert any("no event_id" in warning for warning in result.correlation_warnings)
 
 
@@ -98,6 +101,7 @@ def test_missing_leg_probability_blocks_the_combined_probability() -> None:
     result = combine_parlay([leg("2.0", "a", 0.5), leg("2.5", "b")])
     assert result.combined_probability is None
     assert result.correlation_warnings == []
+    assert result.probability_status == "needs_leg_probabilities"
     assert "required" in result.probability_note
 
 

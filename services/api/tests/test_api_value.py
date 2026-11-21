@@ -299,7 +299,7 @@ def test_the_board_is_sorted_and_consistent(client: TestClient, populated: list[
     assert edges == sorted(edges, reverse=True)
     for row in rows:
         assert row["edge"] > 0 and row["books_in_consensus"] >= 2
-        assert row["event"]["status"] in ("live", "upcoming")
+        assert row["event"]["status"] == "upcoming"  # games in progress are never listed
         assert row["sportsbook"]["key"] != "oldmill"  # the always-stale book
         assert row["breakeven_probability"] == pytest.approx(
             1 / row["best_price"]["decimal"], abs=1e-4

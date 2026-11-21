@@ -1,38 +1,50 @@
-"""Intent routing and data tools for the assistant. Deterministic; no model calls."""
+"""Intent routing and data tools for the assistant. Deterministic; no model calls.
+
+Every message goes through the responsible-gambling checks in :mod:`.safeguards` before
+any intent is matched. When one applies, no data tool runs and the reply is fixed wording.
+Those checks are a fixed list of rules and miss some wordings, so every other answer ends
+with :data:`.safeguards.HELP_SENTENCE` (the gambling helpline and the crisis line), added
+here after the explainer so that no explainer can leave it out.
+"""
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..bets.service import summarize
+from ..bets.service import load_bet_facts, summarize
 from ..board import Board
-from ..db import Bet, User
+from ..db import User
+from ..helpline import HELPLINE_CONTACT
 from ..providers import Player, Team
 from ..quant import QuantError, american_to_decimal, expected_value, no_vig
 from ..schemas import price_out
+from . import safeguards
 from .explainer import Explainer, TemplateExplainer
 from .schemas import (
     AssistantResponse,
     AssistantSourceOut,
     AssistantSuggestionOut,
+    AssistantSupportOut,
 )
+
+logger = logging.getLogger("oddvex.assistant")
+
+_HELP_LINE = f"For adults 21+. If gambling is causing problems, {HELPLINE_CONTACT} (US)."
 
 DISCLAIMER = (
     "OddVex gives information and math, not betting advice or predictions. All sports data "
-    "shown is synthetic sample data. For adults 21+. If gambling is causing problems, help is "
-    "available at 1-800-GAMBLER (US)."
+    f"shown is synthetic sample data. {_HELP_LINE}"
 )
 
 REPLAY_DISCLAIMER = (
     "OddVex gives information and math, not betting advice or predictions. The games shown "
-    "are a replay of past results; sportsbook prices and prop lines are simulated. For adults "
-    "21+. If gambling is causing problems, help is available at 1-800-GAMBLER (US)."
+    f"are a replay of past results; sportsbook prices and prop lines are simulated. {_HELP_LINE}"
 )
 
 _BET_SUMMARY_RE = re.compile(
@@ -73,17 +85,31 @@ _MARKET_WORDS: tuple[tuple[str, str], ...] = (
 
 @dataclass
 class ToolResult:
-    """What a tool found. ``facts`` is the only input the explainer gets."""
+    """What a tool found. ``facts`` is the only input the explainer gets.
+
+    ``fixed_answer`` is set by the responsible-gambling replies: it is the whole answer and
+    the explainer is not asked. ``support_case`` says which support reply it is.
+    """
 
     intent: str
     facts: dict[str, Any]
     sources: list[AssistantSourceOut] = field(default_factory=list)
     suggestions: list[AssistantSuggestionOut] = field(default_factory=list)
     has_data: bool = True
+    fixed_answer: str | None = None
+    support_case: safeguards.SupportCase | None = None
 
 
 def _suggest(label: str, href: str) -> AssistantSuggestionOut:
     return AssistantSuggestionOut(label=label, href=href)
+
+
+def with_help_sentence(answer: str) -> str:
+    """``answer`` with :data:`.safeguards.HELP_SENTENCE` as its last paragraph, once."""
+    answer = answer.rstrip()
+    if answer.endswith(safeguards.HELP_SENTENCE):
+        return answer
+    return f"{answer}\n\n{safeguards.HELP_SENTENCE}" if answer else safeguards.HELP_SENTENCE
 
 
 def _word_in(needle: str, haystack: str) -> bool:
@@ -106,19 +132,45 @@ class Assistant:
     # ------------------------------------------------------------------ entry
     def answer(self, message: str) -> AssistantResponse:
         result = self.route(message)
+        if result.support_case is not None:
+            # A count for operations. Never the message, and nothing that identifies anyone.
+            logger.info(
+                "assistant_support_reply",
+                extra={"case": result.support_case, "signed_in": self.user is not None},
+            )
+        answer = (
+            result.fixed_answer
+            if result.fixed_answer is not None
+            else self.explainer.explain(result.intent, result.facts)
+        )
+        if result.support_case is None:
+            answer = with_help_sentence(answer)
         return AssistantResponse(
             intent=result.intent,  # type: ignore[arg-type]
-            answer=self.explainer.explain(result.intent, result.facts),
+            answer=answer,
             data=result.facts if result.has_data else None,
             sources=result.sources,
             suggestions=result.suggestions,
             disclaimer=DISCLAIMER
             if self.board.provider.data_mode == "synthetic"
             else REPLAY_DISCLAIMER,
+            support=AssistantSupportOut(case=result.support_case)
+            if result.support_case is not None
+            else None,
         )
 
     def route(self, message: str) -> ToolResult:
-        """Keyword / regex intent router. First match wins, most specific first."""
+        """Responsible-gambling checks first, then the keyword / regex intent router.
+
+        In the router the first match wins, most specific first. The checks run before it
+        so that a team name, a player name or "my record" in the same message cannot pull
+        in betting data.
+        """
+        signals = safeguards.detect(message)
+        if signals.case is not None:
+            return self.support(signals)
+        if signals.certainty:
+            return self.no_certainty()
         text = " ".join(message.lower().split())
         if _BET_SUMMARY_RE.search(text):
             return self.bet_summary()
@@ -169,6 +221,44 @@ class Assistant:
             data_mode = self.board.provider.data_mode
             label = f"{data_mode.capitalize()} {label}"
         return AssistantSourceOut(label=label, as_of=self.board.now, data_mode=data_mode)
+
+    # ----------------------------------------------- responsible-gambling replies
+    def support(self, signals: safeguards.Signals) -> ToolResult:
+        """Crisis, under 21 or distress: help only. No data tool runs and no bet is read."""
+        case = signals.case
+        if case is None:
+            raise ValueError("no support case")
+        suggestions = [_suggest(safeguards.RESOURCES_LABEL, safeguards.RESOURCES_HREF)]
+        if case == "distress":
+            suggestions += [
+                _suggest(safeguards.REMINDER_LABEL, safeguards.REMINDER_HREF),
+                _suggest(safeguards.TRACKER_LABEL, safeguards.TRACKER_HREF),
+            ]
+        return ToolResult(
+            "support",
+            {
+                "case": case,
+                "distress": signals.distress,
+                "chasing_losses": signals.chasing_losses,
+            },
+            suggestions=suggestions,
+            has_data=False,
+            fixed_answer=safeguards.reply(signals),
+            support_case=case,
+        )
+
+    def no_certainty(self) -> ToolResult:
+        """A request for a certain winner: no result is certain; market data is on offer."""
+        return ToolResult(
+            "fallback",
+            {"reason": "certainty"},
+            suggestions=[
+                _suggest("Odds board", "/app/odds"),
+                _suggest("Calculators", "/app/tools"),
+            ],
+            has_data=False,
+            fixed_answer=safeguards.NO_CERTAINTY_REPLY,
+        )
 
     # ------------------------------------------------------------------ tools
     def compare_odds(self, team: Team | None, text: str) -> ToolResult:
@@ -370,7 +460,9 @@ class Assistant:
                 suggestions=[_suggest("Log in", "/login"), _suggest("Bet tracker", "/app/tracker")],
                 has_data=False,
             )
-        bets = list(self.db.scalars(select(Bet).where(Bet.user_id == self.user.id)))
+        # Plain columns, as GET /v1/bets/summary reads them: mapped rows with their legs and
+        # notes would cost hundreds of MiB for an account at the bet cap.
+        bets = load_bet_facts(self.db, self.user.id)
         suggestions = [_suggest("Open your tracker", "/app/tracker")]
         if not bets:
             return ToolResult(

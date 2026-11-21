@@ -8,12 +8,14 @@ import { api } from "@/lib/api";
 import type { Schemas } from "@oddvex/types";
 import { OddsFormatToggle } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
+import { HelplineLink } from "@/components/ui/helpline";
 import { Badge, Button, ButtonLink, Panel, PanelHeader } from "@/components/ui/primitives";
 import { titleCase } from "@/lib/format";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { logoutEverywhereAction } from "@/lib/auth-actions";
 import { flagOn, getFlags } from "@/lib/flags";
 import { currentUser } from "@/lib/session";
+import { HELPLINE } from "@/lib/site";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -102,8 +104,9 @@ export default async function SettingsPage() {
         <Panel>
           <PanelHeader title="Play within your limits" />
           <p className="p-4 text-sm leading-relaxed text-muted sm:p-5">
-            If betting stops being fun, free and confidential help is available 24/7. Call or text{" "}
-            <a href="tel:18004262537" className="text-ink underline">1-800-GAMBLER</a>, or read our{" "}
+            If betting stops being fun, the {HELPLINE.name} is confidential and answers 24 hours a day, every day. Call{" "}
+            <HelplineLink className="text-ink underline" /> or text{" "}
+            <a href={HELPLINE.sms} className="text-ink underline">{HELPLINE.textTo}</a> ({HELPLINE.textDigits}), or read our{" "}
             <Link href="/responsible-gambling" className="text-ink underline">responsible gambling page</Link>.
           </p>
         </Panel>
@@ -126,7 +129,7 @@ export default async function SettingsPage() {
               </form>
             </Panel>
             <Panel>
-              <PanelHeader title="Your data" description="A JSON file with your account details, bets, watchlist, sync history and security log." />
+              <PanelHeader title="Your data" description="A JSON file with your account details, bets, watchlist, alerts, notifications, staking reminder, sync history, community data and your own security log entries. It never contains your password." />
               <div className="p-4 sm:p-5">
                 <ExportDataButton />
               </div>

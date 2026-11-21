@@ -80,7 +80,7 @@ def test_role_claim_in_a_token_is_not_trusted(make_app: AppFactory) -> None:
 def test_existing_user_is_promoted_on_login_when_listed(make_app: AppFactory, tmp_path) -> None:  # type: ignore[no-untyped-def]
     with TestClient(make_app()) as client:
         auth_headers(client, "boss@example.test")
-        # The role is only granted to a confirmed address while ``email_flows`` is on.
+        # The role is only ever granted to a verified address.
         verify_email(client, "boss@example.test")
     with TestClient(make_app(admin_emails="boss@example.test")) as client:
         login = client.post(

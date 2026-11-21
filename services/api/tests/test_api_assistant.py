@@ -5,24 +5,55 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from oddvex_api.assistant import Assistant, Explainer, TemplateExplainer
 from oddvex_api.board import Board
 from oddvex_api.cache import InMemoryTTLCache
 from oddvex_api.config import Settings
+from oddvex_api.db import Bet
 from oddvex_api.providers import SyntheticProvider
 
 ALLOWED_HREF = re.compile(r"^/(app/(games/evt_\w+|props(/plr_\w+)?|tools|tracker|odds)|login)$")
+
+#: The sentence that ends every answer except a support reply (defence in depth: the
+#: responsible-gambling rules are a fixed list and miss some wordings).
+HELP_SENTENCE = (
+    "If gambling is causing problems, call the National Problem Gambling Helpline at "
+    "1-800-MY-RESET (1-800-697-3738) or text 800GAM; in a crisis, call or text 988 (the "
+    "Suicide and Crisis Lifeline)."
+)
+
+
+def without_help_sentence(answer: str) -> str:
+    """The answer with its closing help sentence removed; fails if the sentence is missing."""
+    assert answer.endswith("\n\n" + HELP_SENTENCE), answer
+    return answer.removesuffix("\n\n" + HELP_SENTENCE)
 
 
 def ask(client: TestClient, message: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
     response = client.post("/v1/assistant/query", json={"message": message}, headers=headers or {})
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == {"intent", "answer", "data", "sources", "suggestions", "disclaimer"}
+    assert set(body) == {
+        "intent",
+        "answer",
+        "data",
+        "sources",
+        "suggestions",
+        "disclaimer",
+        "support",
+    }
     assert body["answer"]
+    # Set only on a responsible-gambling reply: tests/test_audit_assistant_support.py.
+    assert body["support"] is None and body["intent"] != "support"
     assert "not betting advice" in body["disclaimer"]
     assert "synthetic" in body["disclaimer"].lower()
+    assert "call 1-800-MY-RESET (1-800-697-3738) or text 800GAM" in body["disclaimer"]
+    # Every answer that is not a support reply ends with the help sentence, in the answer
+    # itself: clients show the disclaimer as a separate small line.
+    assert body["answer"].count(HELP_SENTENCE) == 1
+    without_help_sentence(body["answer"])
     for source in body["sources"]:
         assert set(source) == {"label", "as_of", "data_mode"}
     for suggestion in body["suggestions"]:
@@ -220,6 +251,45 @@ def test_bet_summary_for_a_logged_in_user(
     assert reply["suggestions"] == [{"label": "Open your tracker", "href": "/app/tracker"}]
 
 
+def test_bet_summary_reads_plain_columns_not_mapped_bet_rows(
+    client: TestClient, headers: dict[str, str]
+) -> None:
+    """At the bet cap, mapped Bet rows with their legs and notes cost hundreds of MiB. The
+    assistant's summary reads bets.service.load_bet_facts, as GET /v1/bets/summary does."""
+    for stake in (10, 20, 30):
+        bet = client.post(
+            "/v1/bets",
+            json={
+                "bet_type": "straight",
+                "stake": stake,
+                "sportsbook": "Northline",
+                "legs": [{"selection": "x", "market": "moneyline", "odds": 100}],
+            },
+            headers=headers,
+        ).json()
+        client.post(f"/v1/bets/{bet['id']}/settle", json={"result": "won"}, headers=headers)
+
+    loaded: list[object] = []
+
+    def count(target: object, _context: object) -> None:
+        loaded.append(target)
+
+    event.listen(Bet, "load", count)
+    try:
+        reply = ask(client, "what's my record?", headers)
+    finally:
+        event.remove(Bet, "load", count)
+    assert reply["intent"] == "bet_summary" and reply["data"]["settled_count"] == 3
+    assert loaded == []
+    # The listener does see a mapped load, so the empty list above means something.
+    event.listen(Bet, "load", count)
+    try:
+        client.get("/v1/bets", headers=headers)
+    finally:
+        event.remove(Bet, "load", count)
+    assert loaded
+
+
 def test_invalid_token_is_rejected_rather_than_treated_as_anonymous(client: TestClient) -> None:
     response = client.post(
         "/v1/assistant/query", json={"message": "my bets"}, headers={"Authorization": "Bearer nope"}
@@ -232,6 +302,9 @@ def test_help(client: TestClient) -> None:
         reply = ask(client, message)
         assert reply["intent"] == "help", message
         assert reply["data"] is None and reply["sources"] == []
+        assert reply["support"] is None
+        # "help" may not be about the product; like every answer it ends with the helpline.
+        assert without_help_sentence(reply["answer"]).startswith("I can: find the best")
     hrefs = {s["href"] for s in ask(client, "help")["suggestions"]}
     assert hrefs == {"/app/odds", "/app/props", "/app/tools", "/app/tracker"}
 
@@ -240,19 +313,36 @@ def test_help(client: TestClient) -> None:
     "message",
     [
         "Who will win the championship this year?",
-        "Give me a lock for tonight",
         "What's the weather in Paris?",
         "Write me a poem",
         "asdf qwer zxcv",
     ],
 )
-def test_fallback_is_honest_and_number_free(client: TestClient, message: str) -> None:
+def test_fallback_is_honest_and_its_only_numbers_are_the_help_lines(
+    client: TestClient, message: str
+) -> None:
+    """The fallback makes up no figure. Its only digits are the helpline's and the crisis
+    line's, in the help sentence every non-support answer ends with: a message the
+    responsible-gambling rules miss lands here, so this is where the help matters most."""
     reply = ask(client, message)
     assert reply["intent"] == "fallback"
     assert reply["data"] is None and reply["sources"] == []
-    assert "can't answer" in reply["answer"]
-    assert "predictions" in reply["answer"]
-    assert not re.search(r"\d", reply["answer"])
+    text = without_help_sentence(reply["answer"])
+    assert "can't answer" in text
+    assert "predictions" in text
+    assert not re.search(r"\d", text)
+
+
+def test_a_request_for_a_certain_winner_is_declined_without_numbers(client: TestClient) -> None:
+    """RESPONSIBLE_GAMBLING.md section 5, row 3. More phrasings in the audit test file."""
+    reply = ask(client, "Give me a lock for tonight")
+    assert reply["intent"] == "fallback"
+    assert reply["data"] is None and reply["sources"] == []
+    text = without_help_sentence(reply["answer"])
+    assert "No result in sports is certain" in text
+    assert "can't answer" in text and "predictions" in text
+    assert not re.search(r"\d", text)  # the only digits are the help sentence's
+    assert "lock" not in reply["answer"].lower()
 
 
 def test_request_validation(client: TestClient) -> None:
@@ -297,7 +387,8 @@ def test_answers_only_contain_numbers_the_tools_produced(
             return found
 
         allowed = numbers(reply["data"]) | {"95", "1"}  # "95% interval", "(1 - p)" in the formula
-        for token in re.findall(r"\d+(?:\.\d+)?", reply["answer"]):
+        # The help sentence's phone numbers are fixed text, not figures.
+        for token in re.findall(r"\d+(?:\.\d+)?", without_help_sentence(reply["answer"])):
             assert token in allowed, (message, token, reply["answer"])
 
 
@@ -313,5 +404,13 @@ def test_explainer_is_pluggable_and_only_sees_tool_facts(provider: SyntheticProv
     reply = Assistant(board, explainer=ShoutingExplainer()).answer("what is ev")
     assert reply.intent == "explain_ev"
     assert reply.answer.startswith("EXPLAIN_EV:")
+    # A pluggable explainer cannot drop the help sentence: the engine adds it.
+    assert reply.answer.endswith("\n\n" + HELP_SENTENCE)
     assert reply.data is not None and reply.data["ev_percent"] == 12.5
     assert TemplateExplainer().explain("unknown_intent", {}).startswith("I can't answer that")
+
+    class SilentExplainer:
+        def explain(self, intent: str, facts: dict[str, Any]) -> str:
+            return "  "
+
+    assert Assistant(board, explainer=SilentExplainer()).answer("hello").answer == HELP_SENTENCE

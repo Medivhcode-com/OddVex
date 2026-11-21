@@ -18,7 +18,7 @@ from .schemas import (
     CurrentStreakOut,
     StakeBucketOut,
 )
-from .service import bet_clv
+from .service import BetFacts, as_facts
 
 #: Below this many settled bets the response carries ``sample_note``.
 SMALL_SAMPLE = 30
@@ -62,15 +62,22 @@ def sample_note(settled_count: int) -> str | None:
     )
 
 
-def _settled_when(bet: Bet) -> datetime:
+def _settled_when(bet: BetFacts) -> datetime:
     return (bet.settled_at or bet.placed_at).astimezone(UTC)
+
+
+def _month_key(bet: BetFacts) -> str:
+    """``YYYY-MM`` of the day the bet was settled. Built from the numbers: ``strftime``
+    does not pad a year before 1000 to four digits everywhere."""
+    when = _settled_when(bet)
+    return f"{when.year:04d}-{when.month:02d}"
 
 
 def _round(value: float | None, places: int = 6) -> float | None:
     return round(value, places) if value is not None else None
 
 
-def _row(key: str, label: str, bets: Sequence[Bet]) -> AnalyticsRowOut:
+def _row(key: str, label: str, bets: Sequence[BetFacts]) -> AnalyticsRowOut:
     staked = sum((b.stake for b in bets if b.result != "void"), Decimal(0))
     total_profit = sum((b.profit or Decimal(0) for b in bets), Decimal(0))
     wins = sum(1 for b in bets if (b.profit or 0) > 0)
@@ -87,37 +94,44 @@ def _row(key: str, label: str, bets: Sequence[Bet]) -> AnalyticsRowOut:
 
 
 def _grouped(
-    bets: Sequence[Bet], key_of: Callable[[Bet], str], labels: Sequence[tuple[str, str]]
+    bets: Sequence[BetFacts],
+    key_of: Callable[[BetFacts], str],
+    labels: Sequence[tuple[str, str]],
 ) -> list[AnalyticsRowOut]:
     """One row per ``labels`` entry, in that order, including empty ones."""
-    groups: dict[str, list[Bet]] = {key: [] for key, _ in labels}
+    groups: dict[str, list[BetFacts]] = {key: [] for key, _ in labels}
     for bet in bets:
         groups[key_of(bet)].append(bet)
     return [_row(key, label, groups[key]) for key, label in labels]
 
 
-def analyze(bets: Sequence[Bet]) -> BetAnalyticsOut:
-    """Analytics for ``bets``. Anything that is not settled is ignored."""
+def analyze(bets: Sequence[Bet | BetFacts]) -> BetAnalyticsOut:
+    """Analytics for ``bets``. Anything that is not settled is ignored.
+
+    Takes loaded bets or :class:`BetFacts`; the route passes ``load_bet_facts``. Prices
+    are the ones ``BetFacts`` carries (read through ``storage.shown_odds``), so a row
+    stored before the storage checks is banded as the shortest price there is.
+    """
     settled = sorted(
-        (b for b in bets if b.status == "settled"),
+        (b for b in as_facts(bets) if b.status == "settled"),
         key=lambda b: (_settled_when(b), b.placed_at, b.id),
     )
     counted = [b for b in settled if b.result != "void"]
 
-    month_keys = sorted({_settled_when(b).strftime("%Y-%m") for b in settled})
+    month_keys = sorted({_month_key(b) for b in settled})
     month_labels = [(key, f"{_MONTHS[int(key[5:]) - 1]} {key[:4]}") for key in month_keys]
 
     runs = stats.streaks([b.profit or Decimal(0) for b in settled])
     average_stake = stats.mean([b.stake for b in counted])
     average_odds = stats.mean([b.odds_decimal for b in counted])
 
-    clvs = [value for value in (bet_clv(b) for b in settled) if value is not None]
+    clvs = [b.clv for b in settled if b.clv is not None]
     clv_counts = [0] * len(stats.CLV_BUCKETS)
     for value in clvs:
         clv_counts[stats.bucket_index(value, stats.CLV_BOUNDS)] += 1
     average_clv = stats.mean(clvs)
 
-    stake_groups: list[list[Bet]] = [[] for _ in stats.STAKE_BUCKETS]
+    stake_groups: list[list[BetFacts]] = [[] for _ in stats.STAKE_BUCKETS]
     for bet in counted:
         stake_groups[stats.bucket_index(bet.stake, stats.STAKE_BOUNDS)].append(bet)
 
@@ -129,7 +143,7 @@ def analyze(bets: Sequence[Bet]) -> BetAnalyticsOut:
             lambda b: _WEEKDAYS[b.placed_at.astimezone(UTC).weekday()],
             [(day, day.capitalize()) for day in _WEEKDAYS],
         ),
-        by_month=_grouped(settled, lambda b: _settled_when(b).strftime("%Y-%m"), month_labels),
+        by_month=_grouped(settled, _month_key, month_labels),
         longest_win_streak=runs.longest_win,
         longest_loss_streak=runs.longest_loss,
         current_streak=CurrentStreakOut(kind=runs.current_kind, length=runs.current_length),  # type: ignore[arg-type]

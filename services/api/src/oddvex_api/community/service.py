@@ -31,6 +31,7 @@ from sqlalchemy import ColumnElement, Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..bets.storage import stored_odds
 from ..board import Board
 from ..db import (
     CommunityBlock,
@@ -42,6 +43,7 @@ from ..db import (
     CommunityReport,
     User,
 )
+from ..db.base import new_id
 from ..deps import write_audit
 from ..errors import ApiError, not_found
 from ..notifications import service as notifications
@@ -50,7 +52,7 @@ from ..providers import Event, SportsDataProvider
 from ..quant import QuantError, grade_leg, valid_outcome_keys
 from ..quant.record import FLAT_STAKE_METHOD, SMALL_SAMPLE, PickRecord, pick_record
 from ..schemas import SportsbookRef, price_out
-from . import content_rules
+from . import content_rules, handles
 from .guidelines import (
     LEADERBOARD_CAVEAT,
     LEADERBOARD_METHOD,
@@ -456,13 +458,58 @@ def my_profile_out(db: Session, profile: CommunityProfile) -> MyProfileOut:
     )
 
 
+def handle_taken() -> ApiError:
+    """The one answer for a handle nobody else may take: in use by another profile, or
+    reserved because its account was deleted while suspended. It does not say which."""
+    return ApiError(409, "handle_taken", "This handle is already in use")
+
+
+#: ``details`` of the queue entry opened when an author edits a moderated profile.
+AUTHOR_EDIT_DETAILS = (
+    "The author edited this profile after moderators hid or removed it. Restore it if the "
+    "new handle and bio follow the guidelines."
+)
+
+
+def is_author_edit(report: CommunityReport) -> bool:
+    """An entry the API opened for an edited moderated profile. Members cannot report their
+    own content (``cannot_report_own_content``), so only these have the author as the
+    reporter."""
+    return report.reporter_id == report.target_user_id
+
+
+def _queue_author_edit(db: Session, profile: CommunityProfile, now: datetime) -> CommunityReport:
+    """Put an edited moderated profile back in the report queue: one open entry per
+    profile, holding a copy of the latest handle and bio."""
+    entry = open_report(db, profile.user_id, "profile", profile.user_id, profile.handle)
+    if entry is None:
+        entry = CommunityReport(
+            id=new_id(),
+            reporter_id=profile.user_id,
+            target_type="profile",
+            target_user_id=profile.user_id,
+            reason="other",
+            details=AUTHOR_EDIT_DETAILS,
+            status="open",
+            created_at=now,
+        )
+        db.add(entry)
+    entry.target_id = profile.handle
+    entry.target_text_snapshot, entry.target_summary_snapshot = target_view(profile)
+    return entry
+
+
 def upsert_profile(
     db: Session, request: Request, user: User, body: ProfileUpsert, now: datetime
 ) -> tuple[CommunityProfile, bool]:
     """Create or update the caller's profile. Returns ``(profile, created)``. Commits.
 
-    A profile moderators hid becomes visible again only when its owner changes the
-    handle or the bio, that is, replaces what was hidden.
+    A profile moderators hid or removed stays hidden or removed whatever its owner
+    changes: only an administrator restores it (:func:`restore_content`). A change to the
+    handle or the bio is saved and puts the profile back in the report queue, as an entry
+    that says the author edited it (:data:`AUTHOR_EDIT_DETAILS`), so the owner is not shut
+    out for good. A handle in use by another profile or reserved (:mod:`.handles`) is
+    ``409 handle_taken`` either way.
     """
     handle = validate_handle(body.handle)
     bio = checked_text("bio", body.bio)
@@ -472,9 +519,11 @@ def upsert_profile(
             CommunityProfile.handle == handle, CommunityProfile.user_id != user.id
         )
     )
-    if taken is not None:
-        raise ApiError(409, "handle_taken", "This handle is already in use")
+    keeps_own_handle = profile is not None and profile.handle == handle
+    if taken is not None or (not keeps_own_handle and handles.is_reserved(db, handle)):
+        raise handle_taken()
     created = profile is None
+    content_changed = False
     if profile is None:
         profile = CommunityProfile(
             user_id=user.id,
@@ -489,13 +538,19 @@ def upsert_profile(
     else:
         before = {"handle": profile.handle, "is_public": profile.is_public}
         content_changed = profile.handle != handle or profile.bio != bio
-        if profile.moderation_status != "visible" and content_changed:
-            before["moderation_status"] = profile.moderation_status
-            profile.moderation_status = "visible"
         profile.handle = handle
         profile.bio = bio
         profile.is_public = body.is_public
         profile.updated_at = now
+    details: dict[str, Any] = {
+        "before": before,
+        "after": {"handle": handle, "is_public": body.is_public},
+    }
+    if content_changed and profile.moderation_status != "visible":
+        details["moderation_status"] = profile.moderation_status
+        # No flush before the commit below, which turns a handle taken meanwhile into 409.
+        with db.no_autoflush:
+            details["review_report_id"] = _queue_author_edit(db, profile, now).id
     write_audit(
         db,
         request,
@@ -503,16 +558,13 @@ def upsert_profile(
         user_id=user.id,
         entity_type="community_profile",
         entity_id=user.id,
-        details={
-            "before": before,
-            "after": {"handle": handle, "is_public": body.is_public},
-        },
+        details=details,
     )
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise ApiError(409, "handle_taken", "This handle is already in use") from exc
+        raise handle_taken() from exc
     return profile, created
 
 
@@ -582,8 +634,8 @@ def build_pick(board: Board, user_id: str, body: PickCreate, analysis: str | Non
         outcome_key=body.outcome_key,
         line=line,
         # Rounded to what the column holds, so the pick reads the same before and after
-        # it is stored, on every database.
-        price_decimal=best.price.quantize(Decimal("0.000001")),
+        # it is stored, on every database; a price the column cannot hold is a 422.
+        price_decimal=stored_odds(best.price, "The current price"),
         sportsbook_key=best.sportsbook.key,
         sportsbook_name=best.sportsbook.name,
         analysis=analysis,
@@ -979,21 +1031,46 @@ def report_out(report: CommunityReport) -> ReportOut:
     )
 
 
-def resolve_report_target(db: Session, viewer_id: str, body: ReportCreate) -> tuple[str, str]:
-    """``(target id, author's user id)`` of something the reporter can actually see.
-    404 otherwise, 422 ``cannot_report_own_content`` for the reporter's own content."""
+@dataclass(frozen=True, slots=True)
+class ReportTarget:
+    #: The pick id, the comment id or the profile's handle.
+    target_id: str
+    author_id: str
+    #: What the moderator judges, copied onto the report (:func:`target_view`).
+    text: str | None
+    summary: str | None
+
+
+def target_view(
+    target: CommunityPick | CommunityComment | CommunityProfile,
+) -> tuple[str | None, str | None]:
+    """``(text, summary)`` a moderator judges: the analysis, the comment body or the bio;
+    for a pick "selection (event)", for a profile "@handle", for a comment nothing."""
+    if isinstance(target, CommunityPick):
+        return target.analysis, f"{target.selection} ({target.event_label})"
+    if isinstance(target, CommunityComment):
+        return target.body, None
+    return target.bio, f"@{target.handle}"
+
+
+def resolve_report_target(db: Session, viewer_id: str, body: ReportCreate) -> ReportTarget:
+    """The target of a new report: something the reporter can actually see, with a copy
+    of what it says. 404 otherwise, 422 ``cannot_report_own_content`` for the reporter's
+    own content."""
+    target: CommunityPick | CommunityComment | CommunityProfile
     if body.target_type == "pick":
-        pick, _ = find_pick(db, viewer_id, body.target_id)
-        target_id, author_id = pick.id, pick.user_id
+        target, _ = find_pick(db, viewer_id, body.target_id)
+        target_id = target.id
     elif body.target_type == "comment":
-        comment, _ = find_comment(db, viewer_id, body.target_id)
-        target_id, author_id = comment.id, comment.user_id
+        target, _ = find_comment(db, viewer_id, body.target_id)
+        target_id = target.id
     else:
-        profile = find_profile(db, viewer_id, body.target_id)
-        target_id, author_id = profile.handle, profile.user_id
-    if author_id == viewer_id:
+        target = find_profile(db, viewer_id, body.target_id)
+        target_id = target.handle
+    if target.user_id == viewer_id:
         raise invalid("cannot_report_own_content", "You cannot report your own content")
-    return target_id, author_id
+    text, summary = target_view(target)
+    return ReportTarget(target_id, target.user_id, text, summary)
 
 
 def open_report(
@@ -1033,16 +1110,45 @@ def _party(db: Session, user_id: str) -> AdminReportPartyOut:
     )
 
 
+_REMOVALS = ("hide_content", "remove_content")
+
+
+def earlier_removals(db: Session, report: CommunityReport) -> int:
+    """Decisions that hid or removed content of the report's author, one per decision
+    however many reports it closed. For a resolved report only the decisions made up to
+    its own, not counting the one that closed it.
+
+    Counted from the reports that are left: a decision whose every report went with a
+    deleted account is no longer counted."""
+    query = select(
+        CommunityReport.target_type, CommunityReport.target_id, CommunityReport.resolved_at
+    ).where(
+        CommunityReport.target_user_id == report.target_user_id,
+        CommunityReport.status == "resolved",
+        CommunityReport.resolution_action.in_(_REMOVALS),
+    )
+    if report.resolved_at is not None:
+        query = query.where(CommunityReport.resolved_at <= report.resolved_at)
+
+    def decision(
+        target_type: str, target_id: str, resolved_at: datetime | None
+    ) -> tuple[str, str, datetime | None]:
+        # Every report a decision closes gets the same time; a profile is one target
+        # whatever its handle was when it was reported.
+        return (target_type, "" if target_type == "profile" else target_id, resolved_at)
+
+    decisions = {decision(*row) for row in db.execute(query)}
+    if report.status == "resolved" and report.resolution_action in _REMOVALS:
+        decisions.discard(decision(report.target_type, report.target_id, report.resolved_at))
+    return len(decisions)
+
+
 def admin_report_out(db: Session, report: CommunityReport) -> AdminReportOut:
     target = _report_target(db, report)
-    text: str | None = None
-    summary: str | None = None
-    if isinstance(target, CommunityPick):
-        text, summary = target.analysis, f"{target.selection} ({target.event_label})"
-    elif isinstance(target, CommunityComment):
-        text = target.body
-    elif isinstance(target, CommunityProfile):
-        text, summary = target.bio, f"@{target.handle}"
+    text, summary = target_view(target) if target is not None else (None, None)
+    reported = (report.target_text_snapshot, report.target_summary_snapshot)
+    copied = reported != (None, None)
+    changed = target is None or (copied and (text, summary) != reported)
     return AdminReportOut(
         id=report.id,
         status=report.status,  # type: ignore[arg-type]
@@ -1055,6 +1161,11 @@ def admin_report_out(db: Session, report: CommunityReport) -> AdminReportOut:
         target_text=text,
         target_summary=summary,
         target_moderation_status=target.moderation_status if target else None,  # type: ignore[arg-type]
+        reported_text=report.target_text_snapshot,
+        reported_summary=report.target_summary_snapshot,
+        target_changed_since_report=changed,
+        author_edit=is_author_edit(report),
+        author_earlier_removals=earlier_removals(db, report),
         author=_party(db, report.target_user_id),
         reporter=_party(db, report.reporter_id),
         resolved_at=report.resolved_at,
@@ -1077,19 +1188,25 @@ def apply_moderation(
     return before, target.moderation_status
 
 
-def close_reports_on_target(
-    db: Session, report: CommunityReport, admin_id: str, action: str, note: str, now: datetime
-) -> int:
-    """Resolve ``report`` and every other open report on the same content the same way."""
-    same_target = select(CommunityReport).where(
+def _open_reports_on(
+    target_type: str, target_user_id: str, target_id: str
+) -> Select[tuple[CommunityReport]]:
+    """Open reports on one pick, comment or profile (a profile whatever its handle was)."""
+    query = select(CommunityReport).where(
         CommunityReport.status == "open",
-        CommunityReport.target_type == report.target_type,
-        CommunityReport.target_user_id == report.target_user_id,
+        CommunityReport.target_type == target_type,
+        CommunityReport.target_user_id == target_user_id,
     )
-    if report.target_type != "profile":
-        same_target = same_target.where(CommunityReport.target_id == report.target_id)
+    if target_type != "profile":
+        query = query.where(CommunityReport.target_id == target_id)
+    return query
+
+
+def _close(
+    rows: Iterable[CommunityReport], admin_id: str, action: str, note: str, now: datetime
+) -> int:
     closed = 0
-    for row in [report, *db.scalars(same_target.where(CommunityReport.id != report.id))]:
+    for row in rows:
         row.status = "resolved"
         row.resolved_at = now
         row.resolved_by = admin_id
@@ -1097,6 +1214,58 @@ def close_reports_on_target(
         row.resolution_note = note
         closed += 1
     return closed
+
+
+def close_reports_on_target(
+    db: Session, report: CommunityReport, admin_id: str, action: str, note: str, now: datetime
+) -> int:
+    """Resolve ``report`` and every other open report on the same content the same way."""
+    same_target = _open_reports_on(report.target_type, report.target_user_id, report.target_id)
+    others = db.scalars(same_target.where(CommunityReport.id != report.id))
+    return _close([report, *others], admin_id, action, note, now)
+
+
+def find_moderation_target(
+    db: Session, target_type: str, target_id: str
+) -> CommunityPick | CommunityComment | CommunityProfile:
+    """A pick or comment by id, or a profile by its current handle, whatever its state.
+    404 when there is none."""
+    target: CommunityPick | CommunityComment | CommunityProfile | None
+    if target_type == "pick":
+        target = db.get(CommunityPick, target_id)
+    elif target_type == "comment":
+        target = db.get(CommunityComment, target_id)
+    else:
+        target = profile_by_handle(db, target_id)
+    if target is None:
+        raise not_found(target_type.capitalize(), target_id[:32])
+    return target
+
+
+def target_key(target: CommunityPick | CommunityComment | CommunityProfile) -> str:
+    """How a report names its target: the pick or comment id, the profile's handle."""
+    return target.handle if isinstance(target, CommunityProfile) else target.id
+
+
+def restore_content(
+    db: Session,
+    target: CommunityPick | CommunityComment | CommunityProfile,
+    target_type: str,
+    admin_id: str,
+    note: str,
+    now: datetime,
+) -> tuple[str, int]:
+    """Make moderated content visible again and close every open report on it as
+    ``restore_content``. Returns ``(status before, reports closed)``.
+    ``409 content_not_moderated`` when it is visible already. Not committed."""
+    before = target.moderation_status
+    if before == "visible":
+        raise ApiError(
+            409, "content_not_moderated", "This content was not hidden or removed by moderators"
+        )
+    target.moderation_status = "visible"
+    reports = db.scalars(_open_reports_on(target_type, target.user_id, target_key(target)))
+    return before, _close(list(reports), admin_id, "restore_content", note, now)
 
 
 def admin_overview(db: Session) -> AdminCommunityOverviewOut:
@@ -1131,7 +1300,10 @@ def leaderboard(
     """Profiles with enough graded picks in the window, by Wilson lower bound.
 
     Ranking by the lower bound of the interval instead of the raw win rate keeps a lucky
-    short run from ranking first, and ROI is not used for ranking at all.
+    short run from ranking first. Neither the price of the picks nor ROI is part of the
+    order, so a high win rate at short prices can rank first and still lose money; every
+    row carries ``average_price`` and ``flat_stake_roi`` and :data:`LEADERBOARD_METHOD`
+    says so.
     """
     since = {"30d": now - timedelta(days=30), "90d": now - timedelta(days=90)}.get(window)
     filters: list[ColumnElement[bool]] = [CommunityPick.status == "graded"]
@@ -1201,6 +1373,8 @@ def export_out(db: Session, user_id: str, data_mode: str) -> CommunityExportOut:
         .where(CommunityLike.user_id == user_id)
         .order_by(CommunityLike.created_at, CommunityLike.pick_id)
     )
+    # Reports the account made, and the review entries opened for its own edited profile
+    # (reporter and author are the same account). ``account/export.py`` streams the same.
     reports = db.scalars(
         select(CommunityReport)
         .where(CommunityReport.reporter_id == user_id)

@@ -14,6 +14,19 @@ from .odds import Number, to_decimal_number, validate_decimal_odds, validate_pro
 
 LegResult = Literal["pending", "won", "lost", "push", "void", "half_won", "half_lost"]
 BetResult = Literal["won", "lost", "push", "void", "half_won", "half_lost", "cashout"]
+#: Why a parlay has, or does not have, a combined probability. When several reasons apply
+#: the first of these wins: no_active_legs, same_event_legs, unverified_legs,
+#: needs_leg_probabilities; computed means none applied.
+ProbabilityStatus = Literal[
+    "computed", "needs_leg_probabilities", "same_event_legs", "unverified_legs", "no_active_legs"
+]
+PROBABILITY_STATUSES: tuple[ProbabilityStatus, ...] = (
+    "computed",
+    "needs_leg_probabilities",
+    "same_event_legs",
+    "unverified_legs",
+    "no_active_legs",
+)
 
 LEG_RESULTS: frozenset[str] = frozenset(
     {"pending", "won", "lost", "push", "void", "half_won", "half_lost"}
@@ -49,6 +62,9 @@ class ParlayResult:
     #: Only set when every active leg has a win probability and all legs are from distinct events.
     combined_probability: float | None
     probability_note: str
+    #: The reason behind ``combined_probability``, as a fixed value (``probability_note``
+    #: is the same reason as a sentence).
+    probability_status: ProbabilityStatus
     correlation_warnings: list[str] = field(default_factory=list)
     payout: Decimal | None = None
     profit: Decimal | None = None
@@ -75,10 +91,12 @@ def combine_parlay(legs: Sequence[ParlayLeg], stake: Number | None = None) -> Pa
 
     The combined *price* is always the product of the leg prices. A combined
     *probability* is only returned when every active leg carries a win
-    probability and every leg is from a different, known event. Legs from the
+    probability and every active leg is from a different, known event (a single
+    active leg has nothing to be correlated with and needs no event id). Legs from the
     same event are correlated, so multiplying their probabilities would be
     wrong; in that case ``combined_probability`` is ``None`` and
-    ``correlation_warnings`` explains why.
+    ``correlation_warnings`` explains why. ``probability_status`` names the reason
+    as one of :data:`PROBABILITY_STATUSES`.
     """
     if not legs:
         raise QuantError("a parlay needs at least one leg", code="invalid_parlay")
@@ -97,9 +115,11 @@ def combine_parlay(legs: Sequence[ParlayLeg], stake: Number | None = None) -> Pa
 
     active = [leg for leg in legs if leg.result not in ("push", "void")]
     warnings: list[str] = []
+    same_event = False
     counts = Counter(leg.event_id for leg in active if leg.event_id)
     for event_id, count in sorted(counts.items()):
         if count > 1:
+            same_event = True
             warnings.append(
                 f"{count} legs are from the same event ({event_id}); their outcomes are "
                 "correlated, so leg probabilities cannot be multiplied"
@@ -111,17 +131,22 @@ def combine_parlay(legs: Sequence[ParlayLeg], stake: Number | None = None) -> Pa
         )
 
     probability: float | None = None
+    status: ProbabilityStatus
     if not active:
         note = "no active legs remain"
+        status = "no_active_legs"
     elif warnings:
         note = "not computed: legs may be correlated"
+        status = "same_event_legs" if same_event else "unverified_legs"
     elif any(leg.win_probability is None for leg in active):
         note = "not computed: a win probability is required for every leg"
+        status = "needs_leg_probabilities"
     else:
         probability = 1.0
         for leg in active:
             probability *= float(leg.win_probability)  # type: ignore[arg-type]
         note = INDEPENDENCE_NOTE
+        status = "computed"
 
     total_payout: Decimal | None = None
     total_profit: Decimal | None = None
@@ -135,6 +160,7 @@ def combine_parlay(legs: Sequence[ParlayLeg], stake: Number | None = None) -> Pa
         dropped_legs=dropped,
         combined_probability=probability,
         probability_note=note,
+        probability_status=status,
         correlation_warnings=warnings,
         payout=total_payout,
         profit=total_profit,

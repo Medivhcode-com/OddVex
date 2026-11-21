@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AutoSettleButton } from "@/components/app/auto-settle";
 import { BetActions } from "@/components/app/bet-actions";
 import { BetForm } from "@/components/app/bet-form";
@@ -8,12 +10,14 @@ import type { Schemas } from "@oddvex/types";
 import { Price } from "@/components/app/odds-format";
 import { PageHeader } from "@/components/app/page-header";
 import { ProfitChart } from "@/components/ui/charts";
+import { ResponsibleGamblingLine } from "@/components/ui/helpline";
 import { Badge, ButtonLink, EmptyState, Panel, PanelHeader, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { flagOn, getFlags } from "@/lib/flags";
 import { formatDay, formatMoney, formatPercent, formatSignedPercent, titleCase } from "@/lib/format";
 import { getLeagues, leagueLabel } from "@/lib/leagues";
 import { currentUser } from "@/lib/session";
+import { loadEvery, settledDescription, settledPaging, trackerHref } from "@/lib/tracker";
 import type { Bet, BetSummary, Book, Breakdown, League } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Bet tracker" };
@@ -118,7 +122,7 @@ function BetRow({ bet, leagues }: { bet: Bet; leagues: League[] }) {
   );
 }
 
-export default async function TrackerPage() {
+export default async function TrackerPage({ searchParams }: { searchParams: Promise<{ page?: string | string[] }> }) {
   const user = await currentUser();
   if (!user) {
     return (
@@ -143,17 +147,23 @@ export default async function TrackerPage() {
 
   const reminder = await api<Schemas["StakeReminderOut"]>("/v1/me/stake-reminder", { auth: true }).catch(() => null);
   const analytics = flagOn(await getFlags(), "tracker_analytics");
-  const [summary, bets, leagues, books, syncProviders, syncConnections] = await Promise.all([
+  // Open bets have their own request, read to the end, so none is pushed out of the list by
+  // newer settled bets. Settled bets are read one page at a time; the page is in the address.
+  const [summary, open, leagues, books, syncProviders, syncConnections] = await Promise.all([
     api<BetSummary>("/v1/bets/summary", { auth: true }),
-    api<Bet[]>("/v1/bets", { auth: true }),
+    loadEvery((offset, limit) => api<Bet[]>("/v1/bets", { auth: true, query: { status: "pending", limit, offset } })),
     getLeagues(),
     api<Book[]>("/v1/sportsbooks"),
     api<Schemas["SyncProviderOut"][]>("/v1/sync/providers", { auth: true }).catch(() => []),
     api<Schemas["SyncConnectionOut"][]>("/v1/sync/connections", { auth: true }).catch(() => []),
   ]);
   const { totals } = summary;
-  const open = bets.filter((bet) => bet.status === "pending");
-  const settled = bets.filter((bet) => bet.status === "settled");
+  const paging = settledPaging((await searchParams).page, totals.settled_count);
+  // A page that no longer exists (the last bet on it was deleted) goes to the last page that does.
+  if (!paging.canonical) redirect(trackerHref(paging.page));
+  const settled = await api<Bet[]>("/v1/bets", { auth: true, query: { status: "settled", limit: paging.limit, offset: paging.offset } });
+  // The count was read a moment before the page. If a bet left the last page in between, step back a page.
+  if (settled.length === 0 && paging.page > 1) redirect(trackerHref(paging.page - 1));
   const timeline = summary.timeline.map((point) => ({ t: new Date(point.date).getTime(), v: point.cumulative_profit }));
 
   return (
@@ -188,10 +198,12 @@ export default async function TrackerPage() {
         <Panel aria-labelledby="log-heading">
           <PanelHeader id="log-heading" title="Log a bet" description="OddVex records the bet. It does not place it." />
           <BetForm leagues={leagues} sportsbooks={books.map((book) => book.name)} />
+          {/* Help stays one step away on the screens where stakes are entered: here and under Sportsbook sync. */}
+          <ResponsibleGamblingLine more className="border-t border-line px-4 py-3 sm:px-5" data-testid="tracker-help" />
         </Panel>
 
         <Panel aria-labelledby="open-heading">
-          <PanelHeader id="open-heading" title="Open bets" description={`${open.length} open`} action={open.length ? <AutoSettleButton /> : undefined} />
+          <PanelHeader id="open-heading" title="Open bets" description={`${totals.pending_count} open`} action={open.length ? <AutoSettleButton /> : undefined} />
           {open.length === 0 ? <EmptyState title="No open bets">Bets you log appear here until you settle them.</EmptyState> : <ul>{open.map((bet) => <BetRow key={bet.id} bet={bet} leagues={leagues} />)}</ul>}
         </Panel>
 
@@ -205,11 +217,41 @@ export default async function TrackerPage() {
         <Panel aria-labelledby="sync-heading">
           <PanelHeader id="sync-heading" title="Sportsbook sync" description="Import bets from a connected account without typing them in." />
           <SyncPanel providers={syncProviders} connections={syncConnections} />
+          <ResponsibleGamblingLine more className="border-t border-line px-4 py-3 sm:px-5" data-testid="sync-help" />
         </Panel>
 
-        <Panel aria-labelledby="settled-heading">
-          <PanelHeader id="settled-heading" title="Settled bets" description={`${settled.length} settled, most recent first`} />
-          {settled.length === 0 ? <EmptyState title="Nothing settled yet">Settle an open bet to start building your record.</EmptyState> : <ul>{settled.slice(0, 50).map((bet) => <BetRow key={bet.id} bet={bet} leagues={leagues} />)}</ul>}
+        <Panel id="settled" aria-labelledby="settled-heading" className="scroll-mt-20">
+          <PanelHeader id="settled-heading" title="Settled bets" description={settledDescription(paging, settled.length, totals.settled_count)} />
+          {settled.length === 0 ? (
+            <EmptyState title="Nothing settled yet">Settle an open bet to start building your record.</EmptyState>
+          ) : (
+            <ul>
+              {settled.map((bet) => (
+                <BetRow key={bet.id} bet={bet} leagues={leagues} />
+              ))}
+            </ul>
+          )}
+          {paging.pages > 1 ? (
+            <nav aria-label="Pages of settled bets" className="flex items-center justify-between gap-3 border-t border-line px-4 py-2 sm:px-5">
+              {paging.page > 1 ? (
+                <Link href={trackerHref(paging.page - 1, "settled")} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+                  Newer bets
+                </Link>
+              ) : (
+                <span />
+              )}
+              <span className="text-sm text-muted">
+                Page {paging.page} of {paging.pages}
+              </span>
+              {paging.page < paging.pages ? (
+                <Link href={trackerHref(paging.page + 1, "settled")} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+                  Older bets
+                </Link>
+              ) : (
+                <span />
+              )}
+            </nav>
+          ) : null}
         </Panel>
       </div>
     </>

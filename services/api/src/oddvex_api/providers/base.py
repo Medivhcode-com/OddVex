@@ -17,6 +17,10 @@ OfferStatus = Literal["open", "suspended", "unavailable", "closed"]
 
 EVENT_MARKETS: tuple[str, ...] = ("moneyline", "spread", "total")
 
+#: How far ahead of our own clock a quote's timestamp may be before it is not believed:
+#: sportsbook and vendor clocks are never exactly in step with ours.
+MAX_CLOCK_SKEW_SECONDS = 60
+
 
 class ProviderRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -77,6 +81,10 @@ class Event(ProviderRecord):
     status: EventStatus
     score: Score | None = None
     period_text: str | None = None
+    #: When the score of a live event last changed (the start counts as a change). ``None``
+    #: when the provider does not know. A live quote older than this was made for another
+    #: score, so it is treated as stale.
+    score_updated_at: datetime | None = None
     markets: list[str]
 
 

@@ -17,9 +17,19 @@ def normalize_database_url(url: str) -> str:
 
 
 def make_engine(database_url: str) -> Engine:
+    """The engine for ``database_url``.
+
+    ``hide_parameters`` on both kinds: the error of a failed statement then names the
+    statement but not the values bound to it (an email address, a password hash), so
+    they are in no log line and no traceback, whoever catches or prints the error. The
+    driver's own message is handled where errors are logged (``logging_config.py``).
+    """
     url = normalize_database_url(database_url)
     if url.startswith("sqlite"):
-        kwargs: dict[str, object] = {"connect_args": {"check_same_thread": False}}
+        kwargs: dict[str, object] = {
+            "connect_args": {"check_same_thread": False},
+            "hide_parameters": True,
+        }
         if ":memory:" in url or url in ("sqlite://", "sqlite:///"):
             kwargs["poolclass"] = StaticPool
         engine = create_engine(url, **kwargs)
@@ -31,7 +41,7 @@ def make_engine(database_url: str) -> Engine:
             cursor.close()
 
         return engine
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(url, pool_pre_ping=True, hide_parameters=True)
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

@@ -458,8 +458,8 @@ def test_dev_outbox_route_is_404_in_production_and_no_link_is_stored(
             assert LINK_WITHHELD in row.body_text and "token=" not in row.body_text
         # The token hashes are there; nothing in the database can be turned back into a link.
         assert len(rows(client, EmailToken)) == 2
-        # Back to the production default, under which a listed address is an
-        # administrator from registration (there is no way to confirm it here).
+        # Back to the production default. No link can be followed there, so the helper
+        # marks the listed address verified, as the operator command does.
         with app.state.session_factory() as db:
             flags.set_flag(db, "email_flows", False, app.state.settings)
             db.commit()
@@ -555,7 +555,7 @@ def test_email_copy_is_plain_and_complete(email: templates.RenderedEmail) -> Non
     assert paragraphs[3].startswith("If you didn't ask for this, you can ignore this email.")
     assert paragraphs[4] == (
         "OddVex is for information only and does not accept or place wagers. 21+. "
-        "Gambling problem? Call 1-800-GAMBLER."
+        "Gambling problem? Call 1-800-MY-RESET (1-800-697-3738) or text 800GAM."
     )
     # Sentence case, no shouting, no hype.
     assert email.subject[0].isupper() and email.subject == email.subject.strip()
@@ -566,7 +566,8 @@ def test_email_copy_is_plain_and_complete(email: templates.RenderedEmail) -> Non
         for phrase in (*BANNED_PHRASES, "urgent", "immediately", "act now", "winner"):
             assert phrase not in lowered, phrase
         assert "!" not in text and "Oddvex" not in text and "ODDVEX" not in text
-        assert not re.search(r"\b[A-Z]{4,}\b", text.replace("GAMBLER", ""))
+        # The helpline's number is the one all-capitals word.
+        assert not re.search(r"\b[A-Z]{4,}\b", text.replace("1-800-MY-RESET", ""))
 
 
 def test_expiry_wording() -> None:

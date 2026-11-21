@@ -122,7 +122,10 @@ def get_community_guidelines() -> CommunityGuidelinesOut:
         "`bio` is plain text, at most 280 characters, without links "
         "(`422 links_not_allowed`) and within the content rules "
         "(`422 content_not_allowed`). Only a public profile can post picks and comments, "
-        "follow others and be found. Answers 201 when the profile was created."
+        "follow others and be found. Answers 201 when the profile was created. A profile "
+        "that moderators hid or removed stays hidden or removed when you edit it: a "
+        "changed handle or bio is saved and sent to the moderators for review, and only "
+        "they can make it visible again."
     ),
     responses={
         201: {"model": MyProfileOut, "description": "The profile was created"},
@@ -742,7 +745,9 @@ def list_blocks(user: CurrentUserDep, db: DbDep) -> BlockListOut:
         "target has to be something you can see (`404` otherwise) and not your own "
         "(`422 cannot_report_own_content`). One open report per person and target: "
         "reporting the same thing again returns the open report with `200`. 10 reports "
-        "per hour. The reported person is not told who reported them."
+        "per hour. The reported person is not told who reported them. A copy of the "
+        "reported text (analysis, comment or handle and bio) is kept with the report for "
+        "the moderators, and deleted with it; it is not returned to you."
     ),
     responses={
         200: {"model": ReportOut, "description": "You already have an open report on it"},
@@ -758,7 +763,8 @@ def create_report(
     settings: SettingsDep,
     now: NowDep,
 ) -> ReportOut:
-    target_id, author_id = service.resolve_report_target(db, user.id, body)
+    target = service.resolve_report_target(db, user.id, body)
+    target_id, author_id = target.target_id, target.author_id
     details = body.details.strip() if body.details and body.details.strip() else None
     if details is not None and service.CONTROL_CHARS.search(details):
         raise service.invalid(
@@ -780,6 +786,9 @@ def create_report(
         details=details,
         status="open",
         created_at=now,
+        # A copy for the moderator, in case the author deletes or edits it meanwhile.
+        target_text_snapshot=target.text,
+        target_summary_snapshot=target.summary,
     )
     db.add(report)
     db.flush()
@@ -808,8 +817,10 @@ def create_report(
         "leaderboards need a responsible-gambling review before they go live. Only "
         "profiles with at least 30 graded picks in the window are ranked, by the lower "
         "bound of the Wilson 95% interval of their win rate, not by the raw win rate "
-        "and not by ROI. Each row shows the sample size and the interval. `caveat` "
-        "says that past results do not predict future results."
+        "and not by ROI. The price of the picks is not part of the order either, so a "
+        "high win rate at short prices can rank first and still lose money. Each row "
+        "shows the sample size, the interval, the average price and the flat-stake "
+        "return. `caveat` says that past results do not predict future results."
     ),
     dependencies=[Depends(require_flag("community_leaderboard"))],
 )

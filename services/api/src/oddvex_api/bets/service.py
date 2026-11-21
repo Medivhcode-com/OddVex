@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..db import Bet, BetLeg, utcnow
@@ -20,7 +21,6 @@ from ..quant import (
     closing_line_value,
     grade_leg,
     is_gradeable,
-    money,
     payout,
     profit,
     roi,
@@ -28,7 +28,7 @@ from ..quant import (
     settle_parlay,
     valid_outcome_keys,
 )
-from ..schemas import odds_to_decimal, price_out
+from ..schemas import price_out
 from .schemas import (
     BetCreate,
     BetLegIn,
@@ -43,30 +43,41 @@ from .schemas import (
     TimelinePointOut,
     _check_leg_count,
 )
+from .storage import (
+    MAX_STORED_ODDS,
+    check_money_fits,
+    check_payout_fits,
+    shown_odds,
+    stored_odds,
+    stored_stake,
+    user_odds,
+)
 
-_ODDS_QUANTUM = Decimal("0.000001")
+#: Pending bets auto-settlement reads from the database at a time, and the most it settles
+#: in one call. Both bound what one request holds in memory.
+AUTO_SETTLE_BATCH = 100
+AUTO_SETTLE_MAX_PER_CALL = 200
 SUMMARY_NOTE = (
     "Totals and breakdowns cover settled bets only; void bets are excluded from staked. "
     "Past results do not predict future results."
 )
 
 
-def _q(value: Decimal) -> Decimal:
-    return value.quantize(_ODDS_QUANTUM, rounding=ROUND_HALF_UP)
-
-
-def to_money(value: float | Decimal) -> Decimal:
-    return money(value if isinstance(value, Decimal) else Decimal(str(value)))
-
-
 def build_leg(data: BetLegIn, position: int) -> BetLeg:
+    """A leg ready to store. Every price is rounded to its column and then checked
+    (:mod:`.storage`), so a price the column cannot hold is a 422 here, before any write."""
+    where = f"Leg {position + 1}"
     closing = (
-        _q(odds_to_decimal(data.closing_odds, data.odds_format))
+        user_odds(data.closing_odds, data.odds_format, f"{where}: the closing price")
         if data.closing_odds is not None
         else None
     )
     closing_opposite = (
-        _q(odds_to_decimal(data.closing_opposite_odds, data.odds_format))
+        user_odds(
+            data.closing_opposite_odds,
+            data.odds_format,
+            f"{where}: the closing price of the other side",
+        )
         if data.closing_opposite_odds is not None
         else None
     )
@@ -79,7 +90,7 @@ def build_leg(data: BetLegIn, position: int) -> BetLeg:
         event_label=data.event_label,
         line=Decimal(str(data.line)) if data.line is not None else None,
         outcome_key=data.outcome_key,
-        odds_decimal=_q(odds_to_decimal(data.odds, data.odds_format)),
+        odds_decimal=user_odds(data.odds, data.odds_format, f"{where}: the price"),
         closing_odds_decimal=closing,
         closing_opposite_odds_decimal=closing_opposite,
     )
@@ -161,15 +172,16 @@ def sport_of(legs: Sequence[BetLeg]) -> str:
 
 
 def product_of_legs(legs: Iterable[BetLeg]) -> Decimal:
+    """The combined price of ``legs``, rounded to the price column (422 if it cannot fit)."""
     combined = Decimal(1)
     for leg in legs:
         combined *= leg.odds_decimal
-    return _q(combined)
+    return stored_odds(combined, "The combined price of the legs")
 
 
 def _apply_price(bet: Bet, override_odds: float | str | None, odds_format: str) -> None:
     if override_odds is not None:
-        bet.odds_decimal = _q(odds_to_decimal(override_odds, odds_format))
+        bet.odds_decimal = user_odds(override_odds, odds_format, "The price of the bet")
         bet.odds_source = "override"
     else:
         bet.odds_decimal = product_of_legs(bet.legs)
@@ -177,20 +189,55 @@ def _apply_price(bet: Bet, override_odds: float | str | None, odds_format: str) 
     bet.sport = sport_of(bet.legs)
 
 
+def check_storable(bet: Bet) -> None:
+    """422 unless the stake, every leg price, the bet's price and the payout they imply
+    all fit their columns. Run on the whole bet, so a change to one field is checked
+    against the values the other fields already hold."""
+    for index, leg in enumerate(bet.legs):
+        stored_odds(leg.odds_decimal, f"Leg {index + 1}: the price")
+    stored_odds(bet.odds_decimal, "The price of the bet")
+    stored_stake(bet.stake)
+    check_payout_fits(bet.stake, bet.odds_decimal)
+
+
 def create_bet(user_id: str, data: BetCreate) -> Bet:
+    """Build a bet from a validated request. Nothing is written here; every value has
+    been rounded to its column and checked when this returns."""
     bet = Bet(
         user_id=user_id,
         bet_type=data.bet_type,
         status="pending",
         sportsbook=data.sportsbook.strip(),
-        stake=to_money(data.stake),
+        stake=stored_stake(data.stake),
         notes=data.notes,
         placed_at=data.placed_at.astimezone(UTC) if data.placed_at else utcnow(),
         source="manual",
+        client_request_id=data.client_request_id,
     )
     bet.legs = [build_leg(leg, i) for i, leg in enumerate(data.legs)]
     _apply_price(bet, data.odds, data.odds_format)
+    check_storable(bet)
     return bet
+
+
+def count_bets(db: Session, user_id: str) -> int:
+    """How many bets the user has stored, manual and imported together."""
+    return int(db.scalar(select(func.count()).select_from(Bet).where(Bet.user_id == user_id)) or 0)
+
+
+def bet_limit_reached(max_bets: int) -> ApiError:
+    return ApiError(
+        409,
+        "bet_limit_reached",
+        f"An account holds at most {max_bets} bets. Delete some to add another.",
+        details={"max_bets": max_bets},
+    )
+
+
+def find_by_client_request_id(db: Session, user_id: str, client_request_id: str) -> Bet | None:
+    return db.scalar(
+        select(Bet).where(Bet.user_id == user_id, Bet.client_request_id == client_request_id)
+    )
 
 
 def update_bet(bet: Bet, data: BetUpdate) -> None:
@@ -213,12 +260,14 @@ def update_bet(bet: Bet, data: BetUpdate) -> None:
         except ValueError as exc:
             raise ApiError(422, "validation_error", str(exc)) from exc
     if "stake" in fields and data.stake is not None:
-        bet.stake = to_money(data.stake)
+        bet.stake = stored_stake(data.stake)
     if "odds" in fields or "legs" in fields:
         keep_override = bet.odds_source == "override" and "odds" not in fields
         if not keep_override:
             _apply_price(bet, data.odds if "odds" in fields else None, data.odds_format)
         bet.sport = sport_of(bet.legs)
+    if structural:
+        check_storable(bet)
     if "sportsbook" in fields and data.sportsbook is not None:
         bet.sportsbook = data.sportsbook.strip()
     if "placed_at" in fields and data.placed_at is not None:
@@ -231,9 +280,15 @@ def update_bet(bet: Bet, data: BetUpdate) -> None:
             leg = by_id.get(item.leg_id)
             if leg is None:
                 raise ApiError(422, "unknown_leg", f"Leg '{item.leg_id}' is not part of this bet")
-            leg.closing_odds_decimal = _q(odds_to_decimal(item.closing_odds, item.odds_format))
+            leg.closing_odds_decimal = user_odds(
+                item.closing_odds, item.odds_format, "The closing price"
+            )
             leg.closing_opposite_odds_decimal = (
-                _q(odds_to_decimal(item.closing_opposite_odds, item.odds_format))
+                user_odds(
+                    item.closing_opposite_odds,
+                    item.odds_format,
+                    "The closing price of the other side",
+                )
                 if item.closing_opposite_odds is not None
                 else None
             )
@@ -308,6 +363,9 @@ def settle(bet: Bet, data: BetSettleRequest, settled_by: str = "user") -> None:
             elif result == "won":
                 staged = {leg.id: staged[leg.id] or "won" for leg in bet.legs}
 
+    # Checked before anything on the bet changes: the money columns must hold the result.
+    check_money_fits(settlement.payout)
+    check_money_fits(settlement.profit, "The profit")
     for leg in bet.legs:
         leg.result = staged[leg.id]
     bet.status = "settled"
@@ -363,53 +421,90 @@ def _auto_grade(
     return None, request
 
 
+def _pending_page(
+    db: Session, user_id: str, after: tuple[datetime, str] | None, size: int
+) -> list[Bet]:
+    """The next ``size`` pending bets of the user, oldest first, after the ``after`` key."""
+    query = select(Bet).where(Bet.user_id == user_id, Bet.status == "pending")
+    if after is not None:
+        placed_at, bet_id = after
+        query = query.where(
+            or_(Bet.placed_at > placed_at, and_(Bet.placed_at == placed_at, Bet.id > bet_id))
+        )
+    return list(db.scalars(query.order_by(Bet.placed_at, Bet.id).limit(size)))
+
+
 def auto_settle(
-    db: Session, user_id: str, provider: SportsDataProvider
-) -> tuple[int, list[Bet], list[tuple[str, str]]]:
+    db: Session,
+    user_id: str,
+    provider: SportsDataProvider,
+    max_settled: int | None = None,
+) -> tuple[int, list[Bet], list[tuple[str, str]], bool]:
     """Settle the user's pending bets whose legs can all be graded from final scores.
 
-    Returns ``(checked, settled, skipped)``. Grading is :func:`quant.grade_leg`; the
-    payout comes from :func:`settle`, the same path a manual settle takes. Nothing is
+    Returns ``(checked, settled, skipped, has_more)``. Grading is :func:`quant.grade_leg`;
+    the payout comes from :func:`settle`, the same path a manual settle takes. Nothing is
     committed here.
+
+    Pending bets are read :data:`AUTO_SETTLE_BATCH` at a time, oldest first, and a bet
+    that is skipped is dropped from the session, so one call never holds the whole
+    account in memory. At most ``max_settled`` bets (:data:`AUTO_SETTLE_MAX_PER_CALL`
+    unless given) are settled per call; ``has_more`` is true when the call stopped there
+    with pending bets left unexamined.
     """
-    pending = list(
-        db.scalars(
-            select(Bet)
-            .where(Bet.user_id == user_id, Bet.status == "pending")
-            .order_by(Bet.placed_at, Bet.id)
-        )
-    )
+    if max_settled is None:
+        max_settled = AUTO_SETTLE_MAX_PER_CALL
     three_way = {league.key: league.has_draw for league in provider.list_leagues()}
     events: dict[str, Event | None] = {}
     settled: list[Bet] = []
     skipped: list[tuple[str, str]] = []
-    for bet in pending:
-        for leg in bet.legs:
-            if leg.event_id and leg.event_id not in events:
-                events[leg.event_id] = provider.get_event(leg.event_id)
-        reason, request = _auto_grade(bet, events, three_way)
-        if request is not None:
-            try:
-                settle(bet, request, settled_by="auto")
-            except (ApiError, QuantError):
-                reason = "manual_result_required"
-            else:
-                settled.append(bet)
-                continue
-        skipped.append((bet.id, reason or "not_gradeable"))
-    return len(pending), settled, skipped
+    checked = 0
+    after: tuple[datetime, str] | None = None
+    while True:
+        page = _pending_page(db, user_id, after, AUTO_SETTLE_BATCH)
+        for bet in page:
+            if len(settled) >= max_settled:
+                return checked, settled, skipped, True
+            checked += 1
+            # Events are only looked up for bets every leg of which can be graded: those
+            # legs were checked against the provider when they were saved.
+            if bet.legs and all(leg_gradeable(leg) for leg in bet.legs):
+                for leg in bet.legs:
+                    if leg.event_id and leg.event_id not in events:
+                        events[leg.event_id] = provider.get_event(leg.event_id)
+            reason, request = _auto_grade(bet, events, three_way)
+            if request is not None:
+                try:
+                    settle(bet, request, settled_by="auto")
+                except (ApiError, QuantError):
+                    reason = "manual_result_required"
+                else:
+                    settled.append(bet)
+                    continue
+            skipped.append((bet.id, reason or "not_gradeable"))
+            db.expunge(bet)
+        if len(page) < AUTO_SETTLE_BATCH:
+            return checked, settled, skipped, False
+        after = (page[-1].placed_at, page[-1].id)
 
 
 # ------------------------------------------------------------- serialisation
+def _clv(taken: Decimal, closing: Decimal) -> float | None:
+    """CLV as a fraction, or ``None`` when one of the two is not a price that could be
+    recorded. A bet with its own price is not checked for the product of its legs, so
+    that product can be far beyond the price column; no CLV is computed from it."""
+    if taken > MAX_STORED_ODDS or closing > MAX_STORED_ODDS:
+        return None
+    try:
+        return round(closing_line_value(taken, closing).clv_percent / 100, 6)
+    except QuantError:
+        return None
+
+
 def _leg_clv(leg: BetLeg) -> float | None:
     if leg.closing_odds_decimal is None:
         return None
-    try:
-        return round(
-            closing_line_value(leg.odds_decimal, leg.closing_odds_decimal).clv_percent / 100, 6
-        )
-    except QuantError:
-        return None
+    return _clv(leg.odds_decimal, leg.closing_odds_decimal)
 
 
 def bet_clv(bet: Bet) -> float | None:
@@ -421,13 +516,20 @@ def bet_clv(bet: Bet) -> float | None:
     for leg in bet.legs:
         taken *= leg.odds_decimal
         closing *= leg.closing_odds_decimal or Decimal(1)
-    try:
-        return round(closing_line_value(taken, closing).clv_percent / 100, 6)
-    except QuantError:
-        return None
+    return _clv(taken, closing)
 
 
 def bet_out(bet: Bet) -> BetOut:
+    """The bet as a response.
+
+    Never raises for a stored row. A row from before the storage checks can hold a price
+    of 1.000000 or a stake of 0.00; its prices are read through
+    :func:`storage.shown_odds`, a stake of 0 has a potential payout and profit of 0, and
+    no CLV is computed from a price that is not above 1 or from leg prices whose product
+    is beyond the price column.
+    """
+    odds = shown_odds(bet.odds_decimal)
+    has_stake = bet.stake > 0
     return BetOut(
         id=bet.id,
         bet_type=bet.bet_type,  # type: ignore[arg-type]
@@ -436,11 +538,11 @@ def bet_out(bet: Bet) -> BetOut:
         sport=bet.sport,
         sportsbook=bet.sportsbook,
         stake=float(bet.stake),
-        combined_price=price_out(bet.odds_decimal),
-        combined_decimal_odds=round(float(bet.odds_decimal), 4),
+        combined_price=price_out(odds),
+        combined_decimal_odds=round(float(odds), 4),
         odds_source=bet.odds_source,  # type: ignore[arg-type]
-        potential_payout=float(payout(bet.stake, bet.odds_decimal)),
-        potential_profit=float(profit(bet.stake, bet.odds_decimal)),
+        potential_payout=float(payout(bet.stake, odds)) if has_stake else 0.0,
+        potential_profit=float(profit(bet.stake, odds)) if has_stake else 0.0,
         payout=float(bet.payout) if bet.payout is not None else None,
         profit=float(bet.profit) if bet.profit is not None else None,
         clv=bet_clv(bet),
@@ -461,9 +563,9 @@ def bet_out(bet: Bet) -> BetOut:
                 event_id=leg.event_id,
                 event_label=leg.event_label,
                 line=float(leg.line) if leg.line is not None else None,
-                price=price_out(leg.odds_decimal),
+                price=price_out(shown_odds(leg.odds_decimal)),
                 closing_price=(
-                    price_out(leg.closing_odds_decimal)
+                    price_out(shown_odds(leg.closing_odds_decimal))
                     if leg.closing_odds_decimal is not None
                     else None
                 ),
@@ -479,14 +581,144 @@ def bet_out(bet: Bet) -> BetOut:
     )
 
 
+def bet_json(bet: Bet) -> bytes:
+    """:func:`bet_out` as the JSON text the response model serialises to."""
+    out = bet_out(bet)
+    return out.__pydantic_serializer__.to_json(out)
+
+
+# ------------------------------------------------------- facts for the totals
+@dataclass(frozen=True, slots=True)
+class BetFacts:
+    """What the summary and the analytics read of one bet, without its legs.
+
+    Loading these instead of the mapped ``Bet`` rows keeps both routes small for an
+    account at the bet cap: a bet with twenty legs and long notes is one short record
+    here. ``odds_decimal`` is the price as :func:`storage.shown_odds` reads it.
+    """
+
+    id: str
+    status: str
+    result: str | None
+    sport: str
+    sportsbook: str
+    bet_type: str
+    stake: Decimal
+    profit: Decimal | None
+    odds_decimal: Decimal
+    placed_at: datetime
+    settled_at: datetime | None
+    #: The market of a single-leg bet, "multiple" for several legs, "unknown" for none.
+    market_key: str
+    #: Price-based CLV as a fraction; ``None`` unless every leg has a closing price.
+    clv: float | None
+
+
+def _market_key(leg_count: int, first_market: str) -> str:
+    if leg_count == 1:
+        return first_market
+    return "multiple" if leg_count else "unknown"
+
+
+def facts_of(bet: Bet) -> BetFacts:
+    """:class:`BetFacts` of a loaded bet (the same values :func:`load_bet_facts` reads)."""
+    return BetFacts(
+        id=bet.id,
+        status=bet.status,
+        result=bet.result,
+        sport=bet.sport,
+        sportsbook=bet.sportsbook,
+        bet_type=bet.bet_type,
+        stake=bet.stake,
+        profit=bet.profit,
+        odds_decimal=shown_odds(bet.odds_decimal),
+        placed_at=bet.placed_at,
+        settled_at=bet.settled_at,
+        market_key=_market_key(len(bet.legs), bet.legs[0].market if bet.legs else ""),
+        clv=bet_clv(bet),
+    )
+
+
+def load_bet_facts(db: Session, user_id: str, settled_only: bool = False) -> list[BetFacts]:
+    """:class:`BetFacts` for every bet of the user, read as plain columns.
+
+    Two queries. The legs are streamed and folded into three values per bet (how many,
+    the first leg's market, and the products of the taken and closing prices), so memory
+    grows with the number of bets, not with the number of legs or the size of the notes.
+    """
+    owned = [Bet.user_id == user_id]
+    if settled_only:
+        owned.append(Bet.status == "settled")
+    # bet id -> (leg count, first market, product of prices, product of closing prices)
+    legs: dict[str, tuple[int, str, Decimal, Decimal | None]] = {}
+    leg_rows = db.execute(
+        select(BetLeg.bet_id, BetLeg.market, BetLeg.odds_decimal, BetLeg.closing_odds_decimal)
+        .join(Bet, BetLeg.bet_id == Bet.id)
+        .where(*owned)
+        .order_by(BetLeg.bet_id, BetLeg.position)
+        .execution_options(yield_per=2000)
+    )
+    for bet_id, market, odds, closing in leg_rows:
+        entry = legs.get(bet_id)
+        if entry is None:
+            legs[bet_id] = (1, market, odds, closing)
+            continue
+        count, first_market, taken, closing_so_far = entry
+        legs[bet_id] = (
+            count + 1,
+            first_market,
+            taken * odds,
+            closing_so_far * closing
+            if closing_so_far is not None and closing is not None
+            else None,
+        )
+
+    facts: list[BetFacts] = []
+    bet_rows = db.execute(
+        select(
+            Bet.id,
+            Bet.status,
+            Bet.result,
+            Bet.sport,
+            Bet.sportsbook,
+            Bet.bet_type,
+            Bet.stake,
+            Bet.profit,
+            Bet.odds_decimal,
+            Bet.placed_at,
+            Bet.settled_at,
+        )
+        .where(*owned)
+        .execution_options(yield_per=2000)
+    )
+    for row in bet_rows:
+        count, market, taken, closing = legs.get(row.id, (0, "", Decimal(1), None))
+        facts.append(
+            BetFacts(
+                id=row.id,
+                status=row.status,
+                result=row.result,
+                sport=row.sport,
+                sportsbook=row.sportsbook,
+                bet_type=row.bet_type,
+                stake=row.stake,
+                profit=row.profit,
+                odds_decimal=shown_odds(row.odds_decimal),
+                placed_at=row.placed_at,
+                settled_at=row.settled_at,
+                market_key=_market_key(count, market),
+                clv=_clv(taken, closing) if closing is not None else None,
+            )
+        )
+    return facts
+
+
+def as_facts(bets: Sequence[Bet | BetFacts]) -> list[BetFacts]:
+    return [bet if isinstance(bet, BetFacts) else facts_of(bet) for bet in bets]
+
+
 # -------------------------------------------------------------------- summary
-def _market_key(bet: Bet) -> str:
-    if len(bet.legs) == 1:
-        return bet.legs[0].market
-    return "multiple" if bet.legs else "unknown"
-
-
-def _breakdown(groups: dict[str, list[Bet]]) -> list[BreakdownRowOut]:
+def _breakdown(groups: dict[str, list[BetFacts]]) -> list[BreakdownRowOut]:
     rows = []
     for key, bets in groups.items():
         staked = sum((b.stake for b in bets if b.result != "void"), Decimal(0))
@@ -508,31 +740,34 @@ def _round(value: float | None, places: int = 6) -> float | None:
     return round(value, places) if value is not None else None
 
 
-def summarize(bets: Sequence[Bet]) -> BetSummaryOut:
+def summarize(rows: Sequence[Bet | BetFacts]) -> BetSummaryOut:
+    """Totals and breakdowns. Takes loaded bets or :class:`BetFacts`; the route passes
+    :func:`load_bet_facts`."""
+    bets = as_facts(rows)
     settled = [b for b in bets if b.status == "settled"]
     pending = [b for b in bets if b.status == "pending"]
     staked = sum((b.stake for b in settled if b.result != "void"), Decimal(0))
     total_profit = sum((b.profit or Decimal(0) for b in settled), Decimal(0))
-    clvs = [value for value in (bet_clv(b) for b in bets) if value is not None]
+    clvs = [b.clv for b in bets if b.clv is not None]
 
-    by_sport: dict[str, list[Bet]] = defaultdict(list)
-    by_market: dict[str, list[Bet]] = defaultdict(list)
-    by_book: dict[str, list[Bet]] = defaultdict(list)
-    by_type: dict[str, list[Bet]] = defaultdict(list)
-    daily: dict[datetime, Decimal] = defaultdict(Decimal)
+    by_sport: dict[str, list[BetFacts]] = defaultdict(list)
+    by_market: dict[str, list[BetFacts]] = defaultdict(list)
+    by_book: dict[str, list[BetFacts]] = defaultdict(list)
+    by_type: dict[str, list[BetFacts]] = defaultdict(list)
+    daily: dict[date, Decimal] = defaultdict(Decimal)
     for bet in settled:
         by_sport[bet.sport].append(bet)
-        by_market[_market_key(bet)].append(bet)
+        by_market[bet.market_key].append(bet)
         by_book[bet.sportsbook].append(bet)
         by_type[bet.bet_type].append(bet)
         when = bet.settled_at or bet.placed_at
-        daily[when.date()] += bet.profit or Decimal(0)  # type: ignore[index]
+        daily[when.date()] += bet.profit or Decimal(0)
 
     running = Decimal(0)
     timeline = []
     for day in sorted(daily):
         running += daily[day]
-        timeline.append(TimelinePointOut(date=day, cumulative_profit=float(running)))  # type: ignore[arg-type]
+        timeline.append(TimelinePointOut(date=day, cumulative_profit=float(running)))
 
     return BetSummaryOut(
         totals=BetTotalsOut(

@@ -102,6 +102,11 @@ class Bet(Base):
         ),
         Index("ix_bets_user_status", "user_id", "status"),
         Index("ix_bets_user_placed_at", "user_id", "placed_at"),
+        # One bet per user and client request id: a repeated ``POST /v1/bets`` finds the
+        # first bet instead of storing a second. A unique index, not a table constraint,
+        # so the migration can add it to an existing SQLite table without rebuilding it.
+        # Rows without an id (NULL) never collide.
+        Index("uq_bets_user_client_request", "user_id", "client_request_id", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -136,6 +141,9 @@ class Bet(Base):
     )
     external_provider: Mapped[str | None] = mapped_column(String(40))
     external_bet_id: Mapped[str | None] = mapped_column(String(120))
+    #: Chosen by the client for one ``POST /v1/bets`` and sent again when it retries.
+    #: Null for imported bets and for bets created without one. Not the sync key above.
+    client_request_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
@@ -402,7 +410,9 @@ class AuditLog(Base):
     """Append-only audit trail.
 
     ``user_id`` is intentionally not a foreign key so entries survive account
-    deletion (the id is opaque and no personal data is stored in ``details``).
+    deletion. An entry holds the opaque user id, the action, the item acted on
+    (``entity_type``, ``entity_id``), the request id, the client IP address and
+    ``details``; never the email address.
     """
 
     __tablename__ = "audit_log"
@@ -575,9 +585,28 @@ class CommunityReport(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     #: The administrator who resolved it. A plain id, like ``audit_log.user_id``.
     resolved_by: Mapped[str | None] = mapped_column(String(32))
-    #: dismiss | hide_content | remove_content | suspend_author
+    #: dismiss | hide_content | remove_content | suspend_author | restore_content
     resolution_action: Mapped[str | None] = mapped_column(String(24))
     resolution_note: Mapped[str | None] = mapped_column(Text)
+    #: A copy of what was reported, taken when the report was made, so a moderator can
+    #: judge it after its author deleted or edited it: the pick's analysis, the comment's
+    #: body or the profile's bio, and for a pick "selection (event)", for a profile
+    #: "@handle". Null on reports made before this was stored. It goes with the report,
+    #: that is with the reporter's or the author's account.
+    target_text_snapshot: Mapped[str | None] = mapped_column(Text)
+    target_summary_snapshot: Mapped[str | None] = mapped_column(Text)
+
+
+class CommunityReservedHandle(Base):
+    """A community handle nobody can take: the handle of an account that was deleted while
+    it was suspended. Only the handle and the date; nothing that names the account, its
+    email address or the reason."""
+
+    __tablename__ = "community_reserved_handles"
+
+    #: Stored lower-case, like ``community_profiles.handle``.
+    handle: Mapped[str] = mapped_column(String(20), primary_key=True)
+    reserved_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 # ---------------------------------------------------------- folded text keys

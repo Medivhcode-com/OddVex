@@ -3,6 +3,7 @@ import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { BottomNav, SideNav } from "@/components/app/nav";
 import { OddsFormatProvider, OddsFormatToggle } from "@/components/app/odds-format";
+import { ResponsibleGamblingLine } from "@/components/ui/helpline";
 import { Logo, LogoMark } from "@/components/ui/logo";
 import { Badge, Button, ButtonLink } from "@/components/ui/primitives";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -41,9 +42,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Logo />
           </Link>
           <SideNav admin={user?.role === "admin"} flags={flags} />
-          <p className="mt-auto px-3 text-xs leading-relaxed text-muted">
-            Information only. OddVex never takes wagers. 21+. Call or text 1-800-GAMBLER for help.
-          </p>
+          {/* Shown from 1024px up. Below that the sidebar is hidden and the same line closes the content column. */}
+          <ResponsibleGamblingLine more className="mt-auto px-3" data-testid="shell-help-sidebar" />
         </aside>
 
         <div className="min-w-0">
@@ -119,9 +119,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </div>
           ) : null}
 
-          <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-12">
+          <main id="main" className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:pb-12">
             {children}
           </main>
+          {/*
+            The 21+ / no wagers / helpline line for widths where the sidebar is hidden. It is part of
+            the shell, so every screen has it, signed in or not, including the error and loading
+            screens. Its bottom padding keeps it clear of the fixed bottom bar.
+          */}
+          <footer className="mx-auto max-w-6xl px-4 pb-28 pt-8 sm:px-6 lg:hidden">
+            <ResponsibleGamblingLine more className="border-t border-line pt-4" data-testid="shell-help-footer" />
+          </footer>
         </div>
       </div>
       <BottomNav admin={user?.role === "admin"} flags={flags} />

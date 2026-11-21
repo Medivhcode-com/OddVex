@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Schemas } from "@oddvex/types";
+import { HelplineLink } from "@/components/ui/helpline";
 import { Button, Field, Notice } from "@/components/ui/primitives";
 import { clientApi, ClientApiError } from "@/lib/client-api";
 import { formatMoney } from "@/lib/format";
@@ -63,7 +64,7 @@ export function StakeReminderNotice({ reminder }: { reminder: Schemas["StakeRemi
   return (
     <Notice tone="warn" title="You've reached your weekly staking reminder">
       You have staked {formatMoney(reminder.staked_this_week)} this week, against the {formatMoney(reminder.weekly_stake_threshold)} reminder you set. If betting is
-      feeling like more than you planned, free and confidential help is available at <a href="tel:18004262537">1-800-GAMBLER</a>.
+      feeling like more than you planned, confidential help is available at <HelplineLink />.
     </Notice>
   );
 }

@@ -315,7 +315,12 @@ def seed_demo_admin(db: Session, password: str, now: datetime, settings: Setting
     operator listed that address in ``ODDVEX_ADMIN_EMAILS``. Returns whether it is there.
 
     Without that setting nothing is created: the seed never invents an administrator.
-    An existing account keeps its password and is promoted, as it would be at login.
+    The admin role only ever goes to a verified address, so the seed marks the address
+    verified itself: nobody can follow a confirmation link for a ``.test`` address. An
+    account that already exists keeps its password. That is fine for a demo database and
+    wrong for a production one, where the account may be somebody else's: in production
+    an existing account that is not verified is left exactly as it is (use
+    ``scripts/bootstrap_admin.py``, which sets a new password).
     """
     if settings is None or DEMO_ADMIN_EMAIL not in settings.admin_email_set:
         return False
@@ -330,10 +335,12 @@ def seed_demo_admin(db: Session, password: str, now: datetime, settings: Setting
             email_verified_at=now,
         )
         db.add(admin)
+    elif admin.email_verified_at is None and settings.is_production:
+        return False
     else:
-        admin.role = "admin"
         if admin.email_verified_at is None:
             admin.email_verified_at = now
+        admin.role = "admin"
     db.flush()
     return True
 

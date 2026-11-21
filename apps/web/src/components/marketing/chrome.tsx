@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Logo } from "@/components/ui/logo";
+import { HelplineLink } from "@/components/ui/helpline";
 import { ButtonLink } from "@/components/ui/primitives";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { MARKETING_NAV, SITE } from "@/lib/site";
+import { HELPLINE, MARKETING_NAV, SITE } from "@/lib/site";
 
 export function MarketingHeader() {
   return (
@@ -105,7 +106,7 @@ export function MarketingFooter() {
           <p>
             OddVex is a research and analytics product for adults 21 and over. It does not accept, place or facilitate
             wagers. Nothing here is a prediction or a guarantee of any outcome. If gambling is causing you or someone
-            you know harm, call or text <a className="text-ink underline" href="tel:18004262537">{SITE.helpline}</a>.
+            you know harm, call <HelplineLink className="text-ink underline" />, the {HELPLINE.name}.
           </p>
           <p>
             © {new Date().getFullYear()} {SITE.company}. OddVex is a {SITE.company} product.

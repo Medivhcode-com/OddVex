@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Literal
 
@@ -11,6 +13,8 @@ from pydantic import BaseModel, Field
 from ..errors import ERROR_RESPONSES
 from ..quant import (
     ParlayLeg,
+    ProbabilityStatus,
+    QuantError,
     closing_line_value,
     combine_parlay,
     decimal_to_american,
@@ -18,6 +22,7 @@ from ..quant import (
     no_vig,
     probability_to_decimal,
 )
+from ..quant.odds import MAX_DECIMAL_ODDS, bounded_price
 from ..schemas import OddsFormatIn, OddsValue, PriceOut, odds_to_decimal, price_out
 
 router = APIRouter(prefix="/quant", tags=["quant"], responses=ERROR_RESPONSES)
@@ -26,6 +31,34 @@ EV_CAVEAT = (
     "EV depends entirely on the win probability you enter. OddVex does not estimate that "
     "probability and does not claim any predictive edge."
 )
+
+
+def _price(value: OddsValue, odds_format: str, what: str = "The price") -> Decimal:
+    """A price as typed, in decimal odds: 422 (``QuantError``) for one that is not a price
+    in ``odds_format`` or is longer than :data:`MAX_DECIMAL_ODDS`."""
+    try:
+        decimal = odds_to_decimal(value, odds_format)
+    except ArithmeticError as exc:
+        # A number with an exponent too large for decimal arithmetic, such as "1e9999999".
+        raise QuantError(
+            f"{what} is too long to compute: in decimal odds it must be at most {MAX_DECIMAL_ODDS}",
+            code="odds_out_of_range",
+        ) from exc
+    return bounded_price(decimal, what)
+
+
+def _computable[**P, R](route: Callable[P, R]) -> Callable[P, R]:
+    """Any arithmetic error left in a calculation is a 422 in the error envelope, not a
+    500: the inputs are bounded, so this is a backstop."""
+
+    @functools.wraps(route)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return route(*args, **kwargs)
+        except ArithmeticError as exc:
+            raise QuantError("These inputs cannot be computed", code="not_computable") from exc
+
+    return wrapper
 
 
 def _fmt(value: Decimal | float, places: int = 4) -> str:
@@ -68,8 +101,9 @@ class ConvertResponse(BaseModel):
     operation_id="quant_convert",
     summary="Convert a price between American, decimal and fractional",
 )
+@_computable
 def quant_convert(body: ConvertRequest) -> ConvertResponse:
-    decimal = odds_to_decimal(body.odds, body.odds_format)
+    decimal = _price(body.odds, body.odds_format)
     price = price_out(decimal)
     return ConvertResponse(
         price=price,
@@ -117,8 +151,9 @@ class NoVigResponse(BaseModel):
     operation_id="quant_no_vig",
     summary="Remove the bookmaker margin from an n-way market (proportional method)",
 )
+@_computable
 def quant_no_vig(body: NoVigRequest) -> NoVigResponse:
-    decimals = [odds_to_decimal(value, body.odds_format) for value in body.odds]
+    decimals = [_price(value, body.odds_format) for value in body.odds]
     labels = list(body.labels or [])
     labels += [f"Outcome {i + 1}" for i in range(len(labels), len(decimals))]
     result = no_vig(decimals)
@@ -195,8 +230,9 @@ class EVResponse(BaseModel):
     operation_id="quant_ev",
     summary="Expected value of a price for a win probability you supply",
 )
+@_computable
 def quant_ev(body: EVRequest) -> EVResponse:
-    decimal = odds_to_decimal(body.odds, body.odds_format)
+    decimal = _price(body.odds, body.odds_format)
     result = expected_value(body.win_probability, decimal, body.stake)
     p = result.win_probability
     return EVResponse(
@@ -263,13 +299,47 @@ class ParlayResponse(BaseModel):
     profit: float | None = None
     combined_probability: float | None = Field(
         description=(
-            "Only computed when every active leg has a win probability and all legs are from "
-            "distinct events. Assumes independence."
+            "Only computed when every active leg has a win probability and the active legs "
+            "are from distinct known events (a single active leg needs no `event_id`). "
+            "Assumes independence. `probability_status` says why it is null."
         )
     )
-    probability_note: str
-    correlation_warnings: list[str]
-    steps: list[str]
+    probability_status: ProbabilityStatus = Field(
+        description=(
+            "Why `combined_probability` is or is not there, as a fixed value a client can "
+            "map to its own wording. `computed`: every active leg had a `win_probability` "
+            "and the active legs are from distinct known events, so the probabilities were "
+            "multiplied (assumes independence). A single active leg has nothing to be "
+            "correlated with, so it counts as distinct with or without an `event_id`. "
+            "`needs_leg_probabilities`: the same holds for the events, but at least one "
+            "active leg has no `win_probability`. `same_event_legs`: two or more active "
+            "legs share an `event_id`, so their results are correlated. `unverified_legs`: "
+            "there are several active legs and at least one has no `event_id`, so "
+            "independence cannot be checked. `no_active_legs`: every leg pushed or was voided. "
+            "`combined_probability` is a number only for `computed` and null for every other "
+            "value. Precedence when several apply: `no_active_legs`, then `same_event_legs`, "
+            "then `unverified_legs`, then `needs_leg_probabilities`, then `computed`."
+        )
+    )
+    probability_note: str = Field(
+        description=(
+            "The same reason as a sentence, kept for older clients. New clients should "
+            "choose their wording from `probability_status`."
+        )
+    )
+    correlation_warnings: list[str] = Field(
+        description=(
+            "One sentence per reason the legs may be correlated: an `event_id` shared by "
+            "several active legs, or active legs without an `event_id`. Empty otherwise."
+        )
+    )
+    steps: list[str] = Field(
+        description=(
+            "The worked calculation, one line per step: each leg, the combined decimal, the "
+            "payout when a stake was given, and the combined probability only when one was "
+            "computed (`probability_status` is `computed`)."
+        )
+    )
 
 
 @router.post(
@@ -278,9 +348,16 @@ class ParlayResponse(BaseModel):
     operation_id="quant_parlay",
     summary="Combined parlay price and payout",
 )
+@_computable
 def quant_parlay(body: ParlayRequest) -> ParlayResponse:
-    decimals = [odds_to_decimal(leg.odds, leg.odds_format) for leg in body.legs]
+    decimals = [_price(leg.odds, leg.odds_format) for leg in body.legs]
     labels = [leg.label or f"Leg {i + 1}" for i, leg in enumerate(body.legs)]
+    # Pushed and void legs count as 1, so the counted legs alone make the combined price.
+    combined = Decimal(1)
+    for leg, decimal in zip(body.legs, decimals, strict=True):
+        if leg.result not in ("push", "void"):
+            combined *= decimal
+    bounded_price(combined, "The combined price of the parlay")
     result = combine_parlay(
         [
             ParlayLeg(
@@ -322,8 +399,8 @@ def quant_parlay(body: ParlayRequest) -> ParlayResponse:
             )
             + f" = {_pct(result.combined_probability)} (assumes independence)"
         )
-    else:
-        steps.append(f"Combined probability: {result.probability_note}")
+    # Without a combined probability the working ends here: the reason is in
+    # ``probability_status`` and ``probability_note``, not in a step that computes nothing.
     return ParlayResponse(
         legs=[
             ParlayLegOut(
@@ -347,6 +424,7 @@ def quant_parlay(body: ParlayRequest) -> ParlayResponse:
             if result.combined_probability is not None
             else None
         ),
+        probability_status=result.probability_status,
         probability_note=result.probability_note,
         correlation_warnings=result.correlation_warnings,
         steps=steps,
@@ -388,11 +466,12 @@ class CLVResponse(BaseModel):
     operation_id="quant_clv",
     summary="Closing line value of a price against the close",
 )
+@_computable
 def quant_clv(body: CLVRequest) -> CLVResponse:
-    taken = odds_to_decimal(body.odds, body.odds_format)
-    closing = odds_to_decimal(body.closing_odds, body.odds_format)
+    taken = _price(body.odds, body.odds_format)
+    closing = _price(body.closing_odds, body.odds_format, "The closing price")
     opposite = (
-        odds_to_decimal(body.closing_opposite_odds, body.odds_format)
+        _price(body.closing_opposite_odds, body.odds_format, "The closing opposite price")
         if body.closing_opposite_odds is not None
         else None
     )

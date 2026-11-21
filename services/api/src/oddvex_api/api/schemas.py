@@ -125,7 +125,14 @@ class BookOddsOut(BaseModel):
     sportsbook: SportsbookRef
     status: BookStatus
     last_updated: datetime | None = None
-    is_stale: bool
+    is_stale: bool = Field(
+        description=(
+            "True when the quote is older than `stale_after_seconds`, has no timestamp, "
+            "carries a timestamp from the future, or, for a live event, was last updated "
+            "before the latest score change. A stale quote is never marked best and does "
+            "not count in the consensus."
+        )
+    )
     outcomes: list[OddsOutcomeOut]
 
 
@@ -167,7 +174,10 @@ class EventOddsOut(BaseModel):
     as_of: datetime
     data_mode: DataMode
     stale_after_seconds: int = Field(
-        description="Quotes older than this are flagged stale and excluded from best price."
+        description=(
+            "Quotes older than this are flagged stale and excluded from best price. A quote "
+            "can be stale before that; see `is_stale`."
+        )
     )
     books: list[BookOddsOut]
     consensus: ConsensusOut
@@ -210,7 +220,13 @@ class PropOfferOut(BaseModel):
     over: PriceOut | None = None
     under: PriceOut | None = None
     last_updated: datetime | None = None
-    is_stale: bool
+    is_stale: bool = Field(
+        description=(
+            "Same rule as the event markets: too old, no timestamp, a timestamp from the "
+            "future, or, during a live game, last updated before the latest score change. "
+            "A stale offer is never marked best."
+        )
+    )
     is_best_over: bool
     is_best_under: bool
 

@@ -113,7 +113,7 @@ def test_every_route_is_404_feature_disabled_while_the_flag_is_off(client: TestC
     assert client.get("/v1/flags").json()["flags"]["community"] is False
     headers = auth_headers(client)
     calls = community_calls(client)
-    assert len(calls) == 26
+    assert len(calls) == 27  # 26, and POST /v1/admin/community/restore
     for method, path in calls:
         for who in ({}, headers):
             response = client.request(method, path, json={}, headers=who)
@@ -180,7 +180,11 @@ def test_guidelines_are_one_structured_list_and_need_no_sign_in(
     assert "21" in by_key["adults_only"]
     assert "not betting advice" in by_key["opinions_not_advice"]
     assert "mocking" in by_key["be_civil"]  # RESPONSIBLE_GAMBLING.md: no mocking losses
-    assert "1-800-GAMBLER" in body["help"] and "21+" in body["help"]
+    assert body["help"] == (
+        "21+. OddVex does not accept wagers. Gambling problem? Call 1-800-MY-RESET "
+        "(1-800-697-3738) or text 800GAM. The helpline is confidential and answers 24 hours "
+        "a day, every day."
+    )
     # The rules describe what is banned without using hype themselves.
     text = " ".join([body["intro"], body["enforcement"], *by_key.values()]).lower()
     for phrase in ("best bet", "top pick", "can't lose", "free money", "!"):
@@ -343,8 +347,12 @@ def test_bio_rules(client: TestClient, admin: Headers) -> None:
     banned = put("Guaranteed winners daily, DM me")
     assert banned.status_code == 422 and code(banned) == "content_not_allowed"
     assert banned.json()["error"]["details"] == {"field": "bio", "rule": "guaranteed_outcome"}
-    control = put("nul\x00byte")
+    control = put("bell\x07byte")
     assert control.status_code == 422 and code(control) == "invalid_text"
+    # A NUL character is refused before the route runs, like in every other text field.
+    nul = put("nul\x00byte")
+    assert nul.status_code == 422 and code(nul) == "validation_error"
+    assert nul.json()["error"]["details"][0]["type"] == "nul_character"
     extra = client.put(
         PROFILE,
         json={"handle": "sample_sam", "is_public": True, "display_name": "x"},
@@ -372,8 +380,12 @@ def test_a_profile_is_only_discoverable_while_it_is_public(
     assert private.json()["error"]["message"].replace("private_pat", "X") == unknown.json()[
         "error"
     ]["message"].replace("nobody_here", "X")
-    for odd in ("../etc", "a", "x" * 64, "has space", "%00"):
+    for odd in ("../etc", "a", "x" * 64, "has space"):
         assert client.get(f"/v1/community/profiles/{odd}", headers=mara).status_code == 404
+    # A NUL character is refused before the route runs, like in every other path.
+    nul = client.get("/v1/community/profiles/%00", headers=mara)
+    assert nul.status_code == 422 and code(nul) == "validation_error"
+    assert nul.json()["error"]["details"][0]["type"] == "nul_character"
     # Its owner sees it, and it cannot post.
     own = client.get("/v1/community/profiles/private_pat", headers=hidden)
     assert own.status_code == 200 and own.json()["is_me"] is True

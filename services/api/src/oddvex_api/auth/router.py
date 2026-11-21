@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Request, Respo
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from ..account import service as account_service
 from ..config import Settings
 from ..db import AuditLog, User, utcnow
 from ..deps import (
@@ -106,9 +107,8 @@ def register(
     write_audit(
         db, request, "auth.register", user_id=user.id, entity_type="user", entity_id=user.id
     )
-    # With ``email_flows`` on, a listed address only becomes an administrator once it is
-    # confirmed, so nothing is granted here; with it off, it is granted at once.
-    sync_admin_role(db, request, user, settings)
+    # No role is given here, listed address or not: a new account's address is not
+    # verified, and the admin role only ever goes to a verified one (``sync_admin_role``).
     if flags.is_enabled(db, "email_flows", settings):
         mailer.queue_verification_email(db, request.app.state.email_sender, settings, user)
     db.commit()
@@ -121,10 +121,17 @@ def register(
     operation_id="login",
     summary="Exchange email + password for an access token",
     description=(
-        "Besides the per-IP limit, an email address with too many failed logins inside "
-        "the window (8 in 15 minutes by default) gets `429 rate_limited` until the window "
-        "moves on, from any IP and whether or not an account exists for it. A suspended "
-        "account gets `403 account_suspended` once the password is correct."
+        "Besides the per-IP limit, failed logins are counted per email address and client "
+        "network (an IPv4 address, or the /64 prefix of an IPv6 address): after too many "
+        "inside the window (8 in 15 minutes by default) further attempts for that email "
+        "from that network get `429 rate_limited` until the window moves on, even with "
+        "the right password. Attempts from other networks are not affected, so someone "
+        "else's failures do not stop the owner from signing in. A second, higher ceiling "
+        "counts the failures for one email from all networks together (50 in the same "
+        "window by default); over it every attempt for that email gets the same `429`. "
+        "Both apply whether or not an account exists for the email. A successful login "
+        "clears the count of the caller's own network only. A suspended account gets "
+        "`403 account_suspended` once the password is correct."
     ),
     dependencies=[Depends(rate_limit("auth"))],
     responses={
@@ -206,24 +213,18 @@ def me(user: CurrentUserDep) -> UserOut:
         "import runs, email tokens and outbox emails, and everything in the community: "
         "the profile, follows in both directions, likes, blocks, reports made, comments "
         "and every pick, graded ones included, so no public record is left without an "
-        "account. An audit entry containing only the opaque user id is retained. A "
-        "suspended account can still call this route."
+        "account. The audit log is kept: the account's own entries and one "
+        "`account.deleted` entry. Each names the account by its opaque user id and holds "
+        "the action, the id of the item acted on, the request id, the IP address and the "
+        "details of the action; none holds the email address. When the account is "
+        "suspended at that moment, its community handle stays reserved, so nobody can "
+        "take it again. A suspended account can still call this route."
     ),
     responses=AUTH_ERROR_RESPONSES,
 )
 def delete_me(user: DataRightsUserDep, request: Request, db: DbDep) -> Response:
-    user_id = user.id
-    suspended = user.status == "suspended"
-    db.delete(user)
-    write_audit(
-        db,
-        request,
-        "account.deleted",
-        user_id=user_id,
-        entity_type="user",
-        entity_id=user_id,
-        details={"account_status": "suspended"} if suspended else None,
-    )
+    # The same function an administrator's delete calls (``api/admin.py``).
+    account_service.delete_account(db, request, user)
     db.commit()
     return Response(status_code=204)
 
@@ -425,5 +426,7 @@ def confirm_password_reset(
         entity_id=user.id,
     )
     db.commit()
-    clear_login_failures(request, user.email)
+    # Following the link proves control of the mailbox: the count for the email across
+    # all networks is forgotten too, so whoever reset the password can sign in.
+    clear_login_failures(request, user.email, everywhere=True)
     return Response(status_code=204)

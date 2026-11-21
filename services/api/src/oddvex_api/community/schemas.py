@@ -36,6 +36,11 @@ ReportReason = Literal[
 ]
 ReportStatus = Literal["open", "resolved"]
 ResolveAction = Literal["dismiss", "hide_content", "remove_content", "suspend_author"]
+#: How a report was closed: one of the decisions above, or ``restore_content`` when an
+#: administrator restored the content it is about (``POST /v1/admin/community/restore``).
+ReportResolution = Literal[
+    "dismiss", "hide_content", "remove_content", "suspend_author", "restore_content"
+]
 FeedScope = Literal["following", "everyone"]
 LeaderboardWindow = Literal["30d", "90d", "all"]
 
@@ -307,7 +312,8 @@ class ReportCreate(BaseModel):
 
 
 class ReportOut(BaseModel):
-    """Your own report. What moderators decided is not shown here."""
+    """Your own report, or the review entry opened when you edited a profile that
+    moderators hid or removed. What moderators decided is not shown here."""
 
     id: str
     target_type: ReportTargetType
@@ -347,7 +353,13 @@ class CommunityExportOut(BaseModel):
     following: list[str] = Field(default_factory=list, description="Handles you follow.")
     likes: list[str] = Field(default_factory=list, description="Ids of picks you liked.")
     blocks: list[str] = Field(default_factory=list, description="Handles you blocked.")
-    reports: list[ReportOut] = Field(default_factory=list, description="Reports you made.")
+    reports: list[ReportOut] = Field(
+        default_factory=list,
+        description=(
+            "Reports you made, and the review entries opened when you edited a profile "
+            "that moderators hid or removed (`target_type` `profile`, your own handle)."
+        ),
+    )
 
 
 # ----------------------------------------------------------------- moderation
@@ -373,11 +385,53 @@ class AdminReportOut(BaseModel):
         default=None, description="For a pick: the selection and the event."
     )
     target_moderation_status: ModerationStatus | None = None
+    reported_text: str | None = Field(
+        default=None,
+        description=(
+            "The analysis, comment or bio as it was when the report was made, kept on the "
+            "report. Null for reports made before this copy was kept, and when there was "
+            "no text."
+        ),
+    )
+    reported_summary: str | None = Field(
+        default=None,
+        description=(
+            "Like `target_summary`, as it was when the report was made: for a pick the "
+            "selection and the event, for a profile `@handle`."
+        ),
+    )
+    target_changed_since_report: bool = Field(
+        default=False,
+        description=(
+            "True when the content was deleted since the report was made, or its text or "
+            "summary differs from `reported_text` and `reported_summary`. Always false for "
+            "a report made before the copy was kept, unless the content was deleted."
+        ),
+    )
+    author_edit: bool = Field(
+        default=False,
+        description=(
+            "True for an entry the API opened itself because the author edited a profile "
+            "that moderators hid or removed. The edited profile stays hidden or removed "
+            "until an administrator restores it. `reporter` is then the author."
+        ),
+    )
+    author_earlier_removals: int = Field(
+        default=0,
+        description=(
+            "How many times moderators hid or removed content of this author: one per "
+            "decision, however many reports it closed, including content that was deleted "
+            "or restored since. For an open report every such decision so far; for a "
+            "resolved report the decisions up to its own, not counting the one that closed "
+            "it. Counted from the reports that are kept, so a decision whose every report "
+            "was deleted with an account is no longer counted."
+        ),
+    )
     author: AdminReportPartyOut
     reporter: AdminReportPartyOut
     resolved_at: datetime | None = None
     resolved_by: str | None = None
-    resolution_action: ResolveAction | None = None
+    resolution_action: ReportResolution | None = None
     resolution_note: str | None = None
 
 
@@ -396,6 +450,31 @@ class ResolveReportRequest(BaseModel):
         min_length=3,
         max_length=500,
         description="Why. Stored on the report and in the audit log.",
+    )
+
+
+class RestoreContentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: ReportTargetType
+    target_id: str = Field(
+        min_length=1,
+        max_length=32,
+        description="The pick id, the comment id or, for a profile, its current handle.",
+    )
+    note: str = Field(
+        min_length=3,
+        max_length=500,
+        description="Why. Stored on any report it closes and in the audit log.",
+    )
+
+
+class RestoredContentOut(BaseModel):
+    target_type: ReportTargetType
+    target_id: str
+    moderation_status: ModerationStatus = Field(description="Always `visible` after a restore.")
+    reports_closed: int = Field(
+        description="Open reports on the content that were closed as `restore_content`."
     )
 
 

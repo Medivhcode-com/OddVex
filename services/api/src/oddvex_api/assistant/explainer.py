@@ -1,13 +1,26 @@
-"""Turning tool output into prose. Templates only: every number is copied from ``facts``."""
+"""Turning tool output into prose. Templates only: every number is copied from ``facts``.
+
+The responsible-gambling replies (``safeguards.py``) are fixed wording. The engine uses
+that wording directly and does not ask an explainer for it; :class:`TemplateExplainer`
+returns the same wording when it is asked.
+The engine, not the explainer, ends every other answer with ``safeguards.HELP_SENTENCE``
+(the gambling helpline and the crisis line), so the templates here leave it out.
+"""
 
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from . import safeguards
+
 
 @runtime_checkable
 class Explainer(Protocol):
-    """Phrases facts a tool produced. Implementations must not introduce new numbers."""
+    """Phrases facts a tool produced. Implementations must not introduce new numbers.
+
+    An explainer is never asked to phrase a responsible-gambling reply, and does not add
+    the closing help sentence: the engine adds it to whatever the explainer returns.
+    """
 
     def explain(self, intent: str, facts: dict[str, Any]) -> str: ...
 
@@ -194,7 +207,19 @@ class TemplateExplainer:
             f"calculators only, and {data_note}."
         )
 
+    def _support(self, f: dict[str, Any]) -> str:
+        return safeguards.reply(
+            safeguards.Signals(
+                crisis=f["case"] == "crisis",
+                underage=f["case"] == "underage",
+                distress=f["case"] == "distress" or bool(f.get("distress")),
+                chasing_losses=bool(f.get("chasing_losses")),
+            )
+        )
+
     def _fallback(self, f: dict[str, Any]) -> str:
+        if f.get("reason") == "certainty":
+            return safeguards.NO_CERTAINTY_REPLY
         return (
             "I can't answer that. I'm a rule-based helper, not a general chatbot, and I only "
             "answer from OddVex's data and calculators. I don't make picks or predictions. "

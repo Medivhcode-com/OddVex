@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,12 +14,14 @@ from ..deps import CurrentUserDep, DbDep, NowDep, SettingsDep, write_audit
 from ..errors import (
     AUTH_ERROR_RESPONSES,
     NOT_FOUND_RESPONSE,
+    RATE_LIMIT_RESPONSE,
     ApiError,
     ErrorResponse,
     not_found,
 )
 from ..notifications import service as notifications
 from ..notifications import templates
+from ..ratelimit import user_rate_limit
 from . import service
 from .base import SyncProvider
 from .registry import SyncRegistry
@@ -32,6 +34,9 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/sync", tags=["sync"], responses=AUTH_ERROR_RESPONSES)
+
+#: The per-user write limit, shared with the bet write routes.
+_WRITE_LIMIT = Depends(user_rate_limit("writes"))
 
 
 def _registry(request: Request) -> SyncRegistry:
@@ -99,7 +104,11 @@ def list_sync_connections(
     status_code=201,
     operation_id="create_sync_connection",
     summary="Connect an account (mock authorization, no credentials)",
-    responses={409: {"model": ErrorResponse, "description": "Already connected"}},
+    responses={
+        409: {"model": ErrorResponse, "description": "Already connected"},
+        **RATE_LIMIT_RESPONSE,
+    },
+    dependencies=[_WRITE_LIMIT],
 )
 def create_sync_connection(
     body: SyncConnectionCreate, user: CurrentUserDep, db: DbDep, request: Request
@@ -150,13 +159,24 @@ def create_sync_connection(
         "`ODDVEX_SYNC_MAX_ATTEMPTS` times. If the import still fails the run is recorded "
         "with status `failed` and this returns 502 with `details.run_id` and "
         "`details.retryable`. Either way a `sync_finished` notification is created, and "
-        "imported bets count towards the weekly staking reminder."
+        "imported bets count towards the weekly staking reminder.\n\n"
+        "Imported bets count against the same cap as `POST /v1/bets` "
+        "(`ODDVEX_MAX_BETS_PER_USER`, default 5,000). The import takes the provider's "
+        "bets in order and stops adding when the account is full; a bet whose price, "
+        "stake or amount cannot be recorded is left out too. The run still succeeds and "
+        "its `error_message` says how many bets were left out and why (the number is "
+        "also `fetched_count - imported_count - duplicate_count`). "
+        "Bets left out for room are offered again by a later import, once bets have been "
+        "deleted. Counts towards the per-user write limit (429 `rate_limited` with "
+        "`Retry-After`)."
     ),
     responses={
         **NOT_FOUND_RESPONSE,
         409: {"model": ErrorResponse, "description": "A concurrent import collided; try again"},
         502: {"model": ErrorResponse, "description": "The provider failed; the run is recorded"},
+        **RATE_LIMIT_RESPONSE,
     },
+    dependencies=[_WRITE_LIMIT],
 )
 def run_sync(
     connection_id: str,
@@ -169,7 +189,14 @@ def run_sync(
     connection = _owned_connection(db, user.id, connection_id)
     provider = _provider(request, connection.provider)
     staked_before = notifications.staked_this_week(db, user.id, now)
-    run = service.run_import(db, connection, provider, settings.sync_max_attempts)
+    result = service.run_import(
+        db,
+        connection,
+        provider,
+        settings.sync_max_attempts,
+        max_bets=settings.max_bets_per_user,
+    )
+    run = result.run
     try:
         db.flush()
     except IntegrityError as exc:
@@ -194,6 +221,9 @@ def run_sync(
             "attempts": run.attempts,
             "imported": run.imported_count,
             "duplicates": run.duplicate_count,
+            "not_imported": result.over_limit + result.rejected,
+            "over_limit": result.over_limit,
+            "rejected": result.rejected,
         },
     )
     notifications.notify(
@@ -207,10 +237,12 @@ def run_sync(
             imported=run.imported_count,
             duplicates=run.duplicate_count,
             attempts=run.attempts,
+            not_imported=result.over_limit + result.rejected,
         ),
     )
     notifications.check_stake_reminder(db, user.id, staked_before, now, request)
     notifications.trim(db, user.id)
+    out = service.run_out(run)
     db.commit()
     if run.status != "succeeded":
         raise ApiError(
@@ -219,7 +251,7 @@ def run_sync(
             run.error_message or "The import failed",
             details={"run_id": run.id, "retryable": run.retryable, "attempts": run.attempts},
         )
-    return service.run_out(run)
+    return out
 
 
 @router.get(
@@ -247,9 +279,11 @@ def list_sync_runs(connection_id: str, user: CurrentUserDep, db: DbDep) -> list[
     summary="Disconnect an account",
     description=(
         "Removes the connection and its import history. With `delete_data=true` the bets "
-        "imported through it are deleted too; otherwise they are kept as tracked bets."
+        "imported through it are deleted too; otherwise they are kept as tracked bets. "
+        "Counts towards the per-user write limit."
     ),
-    responses=NOT_FOUND_RESPONSE,
+    responses={**NOT_FOUND_RESPONSE, **RATE_LIMIT_RESPONSE},
+    dependencies=[_WRITE_LIMIT],
 )
 def delete_sync_connection(
     connection_id: str,
@@ -268,10 +302,11 @@ def delete_sync_connection(
         or 0
     )
     if delete_data:
-        for bet in db.scalars(
-            select(Bet).where(Bet.sync_connection_id == connection.id, Bet.user_id == user.id)
-        ):
-            db.delete(bet)
+        # One statement; the legs go with their bets (ON DELETE CASCADE). The bets are not
+        # loaded first: an account can hold thousands of them.
+        db.execute(
+            delete(Bet).where(Bet.sync_connection_id == connection.id, Bet.user_id == user.id)
+        )
     else:
         db.execute(
             update(Bet)
