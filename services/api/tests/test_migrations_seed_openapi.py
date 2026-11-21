@@ -79,6 +79,7 @@ TABLES = {
     "community_likes",
     "community_blocks",
     "community_reports",
+    "community_reserved_handles",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -1012,6 +1013,190 @@ def test_upgrade_from_0005_with_existing_data_then_downgrade(
         _reset_external_database(url)
 
 
+SNAPSHOT_COLUMNS = {"target_text_snapshot", "target_summary_snapshot"}
+
+
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0006_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0007.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0006")
+    engine = make_engine(url)
+    assert "community_reserved_handles" not in inspect(engine).get_table_names()
+    columns = {c["name"] for c in inspect(engine).get_columns("community_reports")}
+    assert not SNAPSHOT_COLUMNS & columns
+
+    # Rows written by the 0006 release: two members, a reported pick and an open report
+    # on it, and a profile of the first member.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    with engine.begin() as connection:
+        for user_id, email in (("u" * 32, "old@example.test"), ("v" * 32, "other@example.test")):
+            connection.execute(
+                text(
+                    "INSERT INTO users (id, email, password_hash, display_name, role, "
+                    "is_active, age_confirmed_at, created_at, token_version, plan, status, "
+                    "search_key) VALUES (:id, :email, :hash, 'Old', 'user', :active, :at, "
+                    ":at, 0, 'free', 'active', :key)"
+                ).bindparams(at),
+                {
+                    "id": user_id,
+                    "email": email,
+                    "hash": hash_password("correct-horse-battery"),
+                    "active": True,
+                    "at": stamp,
+                    "key": f"{email}\nold",
+                },
+            )
+        connection.execute(
+            text(
+                "INSERT INTO community_profiles (user_id, handle, bio, is_public, "
+                "moderation_status, created_at, updated_at) VALUES (:user, 'old_timer', "
+                "'Totals.', :public, 'visible', :at, :at)"
+            ).bindparams(at),
+            {"user": "u" * 32, "public": True, "at": stamp},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO community_reports (id, reporter_id, target_type, target_id, "
+                "target_user_id, reason, details, status, created_at) VALUES (:id, :reporter, "
+                "'profile', 'old_timer', :author, 'spam', 'old report', 'open', :at)"
+            ).bindparams(at),
+            {"id": "r" * 32, "reporter": "v" * 32, "author": "u" * 32, "at": stamp},
+        )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    columns = {c["name"]: c for c in inspect(engine).get_columns("community_reports")}
+    assert all(columns[name]["nullable"] is True for name in SNAPSHOT_COLUMNS)
+    assert "community_reserved_handles" in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        # The old report is kept as it was: nothing was copied then, nothing is invented.
+        row = connection.execute(
+            text(
+                "SELECT id, details, status, target_text_snapshot, target_summary_snapshot "
+                "FROM community_reports"
+            )
+        ).one()
+        assert tuple(row) == ("r" * 32, "old report", "open", None, None)
+        assert (
+            connection.execute(text("SELECT count(*) FROM community_reserved_handles")).scalar()
+            == 0
+        )
+    command.check(config)  # `alembic check`: models and migrations agree
+    engine.dispose()
+
+    # The current app on the upgraded data: the old report shows no copy, and the new
+    # features work for the old accounts.
+    app = make_app(
+        database_url=url,
+        env="production",
+        jwt_secret="k" * 48,
+        admin_emails="boss@example.test",
+        community_grade_min_seconds=0,
+    )
+    with TestClient(app) as client:
+        admin = client.post(
+            "/v1/auth/register",
+            json={
+                "email": "boss@example.test",
+                "password": "correct-horse-battery",
+                "display_name": "Boss",
+                "age_confirmed": True,
+            },
+        ).json()
+        admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+        mark_email_verified(client, "boss@example.test")  # the admin role needs it
+        turned_on = client.put(
+            "/v1/admin/flags/community", json={"enabled": True}, headers=admin_headers
+        )
+        assert turned_on.status_code == 200, turned_on.text
+        (old,) = client.get("/v1/admin/community/reports", headers=admin_headers).json()["items"]
+        assert (old["id"], old["target_text"], old["reported_text"]) == ("r" * 32, "Totals.", None)
+        assert old["target_changed_since_report"] is False and old["author_edit"] is False
+
+        def login(email: str) -> dict[str, str]:
+            response = client.post(
+                "/v1/auth/login", json={"email": email, "password": "correct-horse-battery"}
+            )
+            assert response.status_code == 200, response.text
+            return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+        old_headers, other_headers = login("old@example.test"), login("other@example.test")
+        profile = client.put(
+            "/v1/community/profile",
+            json={"handle": "other_one", "bio": "Spreads.", "is_public": True},
+            headers=other_headers,
+        )
+        assert profile.status_code == 201, profile.text
+        reported = client.post(
+            "/v1/community/reports",
+            json={"target_type": "profile", "target_id": "other_one", "reason": "other"},
+            headers=old_headers,
+        )
+        assert reported.status_code == 201, reported.text
+        items = client.get("/v1/admin/community/reports", headers=admin_headers).json()["items"]
+        assert [i["reported_text"] for i in items] == [None, "Spreads."]
+
+        # Suspended, then deleted: the handle is kept and nobody can take it.
+        suspended = client.post(
+            f"/v1/admin/users/{'u' * 32}/suspend", json={"reason": "abusive"}, headers=admin_headers
+        )
+        assert suspended.status_code == 200, suspended.text
+        assert client.delete("/v1/me", headers=old_headers).status_code == 204
+        taken = client.put(
+            "/v1/community/profile",
+            json={"handle": "old_timer", "is_public": True},
+            headers=other_headers,
+        )
+        assert taken.status_code == 409 and taken.json()["error"]["code"] == "handle_taken"
+        assert client.get("/health").json()["database"] == "ok"
+    app.state.engine.dispose()
+
+    # Downgrade removes only what 0007 added; the reports and profiles are kept.
+    command.downgrade(config, "0006")
+    engine = make_engine(url)
+    assert "community_reserved_handles" not in inspect(engine).get_table_names()
+    columns = {c["name"] for c in inspect(engine).get_columns("community_reports")}
+    assert not SNAPSHOT_COLUMNS & columns
+    with engine.connect() as connection:
+        # The old account's report went with it; the other member's profile is still there.
+        handles = connection.execute(text("SELECT handle FROM community_profiles")).scalars()
+        assert list(handles) == ["other_one"]
+        assert connection.execute(text("SELECT count(*) FROM community_reports")).scalar() == 0
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0006"
+        )
+    engine.dispose()
+
+    # Up again: an empty table and empty columns, and the models and migrations agree.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT count(*) FROM community_reserved_handles")).scalar()
+            == 0
+        )
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+    command.check(config)
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
 def test_app_works_on_a_migrated_database_without_auto_create(
     tmp_path: Path, make_app: AppFactory
 ) -> None:
@@ -1638,6 +1823,7 @@ EXPECTED_OPERATIONS = {
     ("GET", "/v1/admin/community/overview"): "admin_community_overview",
     ("GET", "/v1/admin/community/reports"): "admin_list_reports",
     ("POST", "/v1/admin/community/reports/{report_id}/resolve"): "admin_resolve_report",
+    ("POST", "/v1/admin/community/restore"): "admin_restore_content",
 }
 
 

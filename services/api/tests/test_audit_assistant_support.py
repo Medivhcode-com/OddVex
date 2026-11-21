@@ -142,6 +142,34 @@ CRISIS_MESSAGES = [
     "tell my family I love them. Tides line movement",
     "I should just disappear, {player} points last 10",
     "k i l l myself, tides odds",
+    # Round four of the review: one per rule family, each with a team or player name.
+    "I've lost the will to live. Best odds on the Harbor City Tides?",
+    "I'm having a mental health crisis, Tides moneyline",
+    "I can't carry on. Best odds on the Harbor City Tides?",
+    "I don't want to continue living, {player} points last 10",
+    "I'm going to kill my family and then myself. Tides odds",
+    "I'm going to kill someone. Best odds on the Harbor City Tides?",
+    "I'm going to top myself, Tides odds",
+    "I'm drinking myself to death. Tides moneyline?",
+    "I don't think I'll make it through the night. Best odds on the Harbor City Tides?",
+    "I am nothing but a burden. Tides odds",
+    "I feel like there's no hope, Tides line movement",
+    "I'd be happier dead. Best odds on the Harbor City Tides?",
+    "I'm worth more to them dead, Tides odds",
+    "I'm going to jump tonight. Tides moneyline",
+    "I can't bear it any longer. Best odds on the Harbor City Tides?",
+    "I've been stockpiling pills, Tides odds",
+    "my wife would be better off with the insurance money. Tides odds",
+    "I just want to end the pain. Best odds on the Harbor City Tides?",
+    "make the pain stop, Tides odds",
+    "I have the pills in front of me. Tides moneyline",
+    "I'm on the bridge now, best odds on the Tides",
+    "i'm not safe right now. Best odds on the Harbor City Tides?",
+    "I'm going to do it tonight, I've written the note. Tides odds",
+    "I want to be gone, {player} points last 10",
+    "i want to b dead. Tides odds",
+    "i want out of this world, best odds on the Harbor City Tides",
+    "Tides odds? I've had enough of life",
 ]
 
 
@@ -212,6 +240,16 @@ DISTRESS_MESSAGES = [
     "my gambling is a problem, {player} points last 10",
     "I'm hooked on betting, best odds on the Tides",
     "I don't know how to stop, best odds on the Harbor City Tides",
+    # Round four of the review.
+    "I'm $10,000 in the hole, best odds on the Harbor City Tides",
+    "I'm losing everything to betting. Tides odds",
+    "I bet with money meant for bills, Tides moneyline",
+    "I deposited my whole paycheck. Best odds on the Harbor City Tides?",
+    "i need to double my money to pay back my loan, Tides odds",
+    "I've been gambling to escape my problems, {player} points last 10",
+    "I called in sick to gamble. Tides odds",
+    "I need to make rent by friday, what's the best price on the Tides",
+    "lost 4k today. Best odds on the Harbor City Tides?",
 ]
 
 CHASING_MESSAGES = [
@@ -231,6 +269,14 @@ CHASING_MESSAGES = [
     "How much should I bet to make back my losses?",
     "I'm so far in the hole, best odds on the Harbor City Tides",
     "need to recoup last week, best odds on the Tides",
+    # Round four of the review.
+    "what bet gets my money back? Tides odds",
+    "what should I bet to break even, Harbor City Tides moneyline",
+    "I need to make up my losses. Best odds on the Harbor City Tides?",
+    "best bet to recover tonight, Harbor City Tides moneyline",
+    "help me get back to zero, best odds on the Tides",
+    "I want my money back from these losses, Tides odds",
+    "how do I recover from a bad week? Tides moneyline",
 ]
 
 
@@ -324,6 +370,16 @@ UNDERAGE_MESSAGES = [
     "I'm 17 and 3-0 this week, Tides odds",
     "17 here, best odds on the Harbor City Tides",
     "my 18th birthday was last week, Tides odds",
+    # Round four of the review: a full stop after the number, and "we".
+    "I'm under 21. Best odds on the Harbor City Tides?",
+    "I'm under 21.",
+    "I'm under 18. Tides moneyline",
+    "I'm below 21. {player} points last 10",
+    "I'm under twenty-one. Best odds on the Harbor City Tides?",
+    "Honestly I'm under 21. Tides odds?",
+    "we're 17, best odds on the Harbor City Tides",
+    "my friends and I are all 17. Tides odds",
+    "we are all under 21. Tides moneyline",
 ]
 
 
@@ -443,6 +499,14 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
         ("I took my pills and now I'm watching the Tides, odds", "compare_odds"),
         ("I'm 20 on the Tides, best price", "compare_odds"),
         ("I have a problem with the odds board, where is it", "compare_odds"),
+        # Near the round-four rules.
+        ("Tides under 21.5 points. Best price?", "compare_odds"),
+        ("I'm a die-hard Tides fan, best odds?", "compare_odds"),
+        ("are the Harbor City Tides a good bet to cover? best price", "compare_odds"),
+        ("I'm going to kill it on the over tonight, Tides odds", "compare_odds"),
+        ("I'm on the edge of my seat, Tides moneyline", "compare_odds"),
+        ("the Tides are in crisis at quarterback, best price", "compare_odds"),
+        ("we're 17-3 this season, Tides odds", "compare_odds"),
     ],
 )
 def test_ordinary_questions_are_not_treated_as_distress(

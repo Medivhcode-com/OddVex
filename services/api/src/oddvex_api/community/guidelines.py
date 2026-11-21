@@ -82,7 +82,10 @@ LEADERBOARD_METHOD = (
     "Profiles with at least {minimum} graded picks in the window, ordered by the lower "
     "bound of the Wilson 95% interval of their win rate (wins divided by wins plus "
     "losses). The lower bound is used instead of the raw win rate so that a small "
-    "sample cannot rank first, and return on stake is not used for ranking at all."
+    "sample cannot rank first. The price of a pick is not part of the order, and "
+    "neither is return on stake. A win at a short price returns little, so a high win "
+    "rate at short prices can still lose money. Each row of the response carries the "
+    "average price and the flat-stake return of the record next to the win rate."
 )
 
 #: What an author sees in place of their own text after a moderator hid or removed it.

@@ -37,6 +37,11 @@ ADMIN_COMMUNITY_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("GET", "/v1/admin/community/overview", None),
     ("GET", REPORTS, None),
     ("POST", f"{REPORTS}/{{id}}/resolve", {"action": "dismiss", "note": "testing"}),
+    (
+        "POST",
+        "/v1/admin/community/restore",
+        {"target_type": "profile", "target_id": "madeup_mara", "note": "testing"},
+    ),
 ]
 
 
@@ -119,6 +124,7 @@ def test_moderation_is_for_administrators_only(
         assert (stored.status, stored.resolved_by, stored.resolution_action) == ("open", None, None)
     assert client.get(f"{PICKS}/{pick['id']}", headers=mara).status_code == 200
     assert not audit_rows(client, "community.report_resolved")
+    assert not audit_rows(client, "community.content_restored")
     assert not audit_rows(client, "admin.read")
 
 
@@ -165,6 +171,11 @@ def test_the_queue_shows_what_was_reported_by_whom(
         "target_text": "Research only.",
         "target_summary": f"{pick['selection']} ({pick['event_label']})",
         "target_moderation_status": "visible",
+        "reported_text": "Research only.",
+        "reported_summary": f"{pick['selection']} ({pick['event_label']})",
+        "target_changed_since_report": False,
+        "author_edit": False,
+        "author_earlier_removals": 0,
         "author": {"user_id": sam_id, "handle": "sample_sam", "status": "active"},
         "reporter": {"user_id": mara_id, "handle": "madeup_mara", "status": "active"},
         "resolved_at": None,
@@ -403,13 +414,14 @@ def test_a_removed_comment_is_gone_for_others_and_a_placeholder_for_its_author(
     # The export still has the row, without the removed text.
     exported = client.get("/v1/me/export", headers=mara).json()["community"]["comments"]
     assert [c["body"] for c in exported] == [None, "something fine"]
-    # The author can still delete their own removed comment.
+    # The author can still delete their own removed comment; the report keeps its copy.
     assert client.delete(f"/v1/community/comments/{bad['id']}", headers=mara).status_code == 204
     resolved = queue(client, admin, status="resolved")["items"][0]
     assert (resolved["target_exists"], resolved["target_text"]) == (False, None)
+    assert resolved["reported_text"] == "something unkind"
 
 
-def test_a_hidden_profile_is_not_public_until_its_owner_replaces_the_content(
+def test_a_hidden_profile_stays_hidden_when_its_owner_replaces_the_content(
     client: TestClient, admin: Headers, sam: Headers, mara: Headers, world: ControlledProvider
 ) -> None:
     pick = post_pick(client, sam, upcoming(world))
@@ -441,7 +453,8 @@ def test_a_hidden_profile_is_not_public_until_its_owner_replaces_the_content(
     assert blocked.status_code == 403
     assert blocked.json()["error"]["details"] == {"reason": "profile_moderated"}
 
-    # Saving the same content again does not bring it back; replacing it does.
+    # Saving the same content again changes nothing. Replacing it does not bring it back
+    # either: the edit is saved and goes to the moderators, who alone can restore it.
     same = client.put(
         PROFILE,
         json={"handle": "sample_sam", "bio": "Totals, mostly.", "is_public": True},
@@ -449,16 +462,27 @@ def test_a_hidden_profile_is_not_public_until_its_owner_replaces_the_content(
     )
     assert same.status_code == 200 and same.json()["moderation_status"] == "hidden"
     assert client.get("/v1/community/profiles/sample_sam", headers=mara).status_code == 404
+    assert queue(client, admin)["total"] == 0
     replaced = client.put(
         PROFILE, json={"handle": "sample_sam", "bio": "A new bio.", "is_public": True}, headers=sam
     )
-    assert replaced.json()["moderation_status"] == "visible" and replaced.json()["can_post"] is True
+    assert replaced.json()["moderation_status"] == "hidden" and replaced.json()["can_post"] is False
+    assert client.get("/v1/community/profiles/sample_sam", headers=mara).status_code == 404
+    (entry,) = queue(client, admin)["items"]
+    assert entry["author_edit"] is True and entry["target_text"] == "A new bio."
+    restored = client.post(
+        "/v1/admin/community/restore",
+        json={"target_type": "profile", "target_id": "sample_sam", "note": "New bio is fine"},
+        headers=admin,
+    )
+    assert restored.status_code == 200, restored.text
     assert (
         client.get("/v1/community/profiles/sample_sam", headers=mara).json()["bio"] == "A new bio."
     )
     assert len(feed(client, mara)) == 1
     updates = audit_rows(client, "community.profile_updated")
-    assert updates[-1].details["before"]["moderation_status"] == "hidden"
+    assert updates[-1].details["moderation_status"] == "hidden"
+    assert updates[-1].details["review_report_id"] == entry["id"]
 
 
 def test_suspend_author_reuses_the_account_suspension(

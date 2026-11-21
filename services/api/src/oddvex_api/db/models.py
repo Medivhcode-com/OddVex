@@ -583,9 +583,28 @@ class CommunityReport(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     #: The administrator who resolved it. A plain id, like ``audit_log.user_id``.
     resolved_by: Mapped[str | None] = mapped_column(String(32))
-    #: dismiss | hide_content | remove_content | suspend_author
+    #: dismiss | hide_content | remove_content | suspend_author | restore_content
     resolution_action: Mapped[str | None] = mapped_column(String(24))
     resolution_note: Mapped[str | None] = mapped_column(Text)
+    #: A copy of what was reported, taken when the report was made, so a moderator can
+    #: judge it after its author deleted or edited it: the pick's analysis, the comment's
+    #: body or the profile's bio, and for a pick "selection (event)", for a profile
+    #: "@handle". Null on reports made before this was stored. It goes with the report,
+    #: that is with the reporter's or the author's account.
+    target_text_snapshot: Mapped[str | None] = mapped_column(Text)
+    target_summary_snapshot: Mapped[str | None] = mapped_column(Text)
+
+
+class CommunityReservedHandle(Base):
+    """A community handle nobody can take: the handle of an account that was deleted while
+    it was suspended. Only the handle and the date; nothing that names the account, its
+    email address or the reason."""
+
+    __tablename__ = "community_reserved_handles"
+
+    #: Stored lower-case, like ``community_profiles.handle``.
+    handle: Mapped[str] = mapped_column(String(20), primary_key=True)
+    reserved_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 # ---------------------------------------------------------- folded text keys

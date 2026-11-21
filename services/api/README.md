@@ -153,7 +153,7 @@ Errors always use one envelope, including validation errors and 404s:
 | Assistant | `POST /v1/assistant/query` |
 | Community (flag `community`) | `GET /v1/community/guidelines`, `PUT/GET /v1/community/profile`, `GET /v1/community/profiles/{handle}`, `POST/GET /v1/community/picks`, `GET/DELETE /v1/community/picks/{id}`, `GET /v1/community/feed`, `PUT/DELETE /v1/community/picks/{id}/like`, `POST/GET /v1/community/picks/{id}/comments`, `DELETE /v1/community/comments/{id}`, `POST/DELETE /v1/community/follows/{handle}`, `GET /v1/community/following`, `GET /v1/community/followers`, `PUT/DELETE /v1/community/blocks/{handle}`, `GET /v1/community/blocks`, `POST /v1/community/reports`, `GET /v1/community/leaderboard` (also flag `community_leaderboard`) |
 | Admin | `GET /v1/admin/overview`, `GET /v1/admin/users`, `POST /v1/admin/users/{id}/suspend`, `POST /v1/admin/users/{id}/unsuspend`, `PUT /v1/admin/users/{id}/plan`, `POST /v1/admin/users/{id}/export`, `POST /v1/admin/users/{id}/delete`, `GET /v1/admin/flags`, `PUT /v1/admin/flags/{key}`, `GET /v1/admin/audit`, `GET /v1/admin/email-outbox` |
-| Moderation (admin, flag `community`) | `GET /v1/admin/community/overview`, `GET /v1/admin/community/reports`, `POST /v1/admin/community/reports/{id}/resolve` |
+| Moderation (admin, flag `community`) | `GET /v1/admin/community/overview`, `GET /v1/admin/community/reports`, `POST /v1/admin/community/reports/{id}/resolve`, `POST /v1/admin/community/restore` |
 | Dev (404 in production) | `GET /v1/dev/email-outbox/latest?to=` |
 
 ### Feature flags
@@ -509,7 +509,12 @@ Behaviour worth knowing:
   cannot sign in, so this only helps while it still holds an unexpired token (60 minutes by
   default), and the web and mobile apps drop the session of a suspended account. After
   that the owner asks support, and an administrator meets the request with the two routes
-  below.
+  below. When an account that is suspended at that moment is deleted, by its owner or by an
+  administrator, its community handle is kept in `community_reserved_handles` and nobody
+  can take it again (see "Account lifecycle" under Community). That is all that is kept:
+  nothing about the email address. So it stops the person from coming back under the same
+  handle, not from coming back: a suspended person can register again with another email
+  address, or the same one, and choose a new handle.
 - **Data requests met by an administrator.** For an owner who cannot sign in (suspended,
   closed because under 21, lost password). `POST /v1/admin/users/{id}/export` `{reason}`
   returns the same document as `GET /v1/me/export` for that user, from the same code and
@@ -649,7 +654,8 @@ a user id or anything from the bet tracker.
 - **Profiles are opt-in.** `PUT /v1/community/profile` `{handle, bio?, is_public}` creates
   (201) or updates (200) the caller's profile. `handle`: 3 to 20 characters of `a-z`, `0-9`
   and `_` (`422 invalid_handle`), lowered on the way in so it is unique whatever the case
-  (`409 handle_taken`), not a reserved word such as `admin`, `oddvex`, `support`,
+  (`409 handle_taken`, also the answer for the handle of an account deleted while suspended,
+  so it does not say which), not a reserved word such as `admin`, `oddvex`, `support`,
   `moderator`, `staff`, `official`, `help`, `root` or `system`, alone or as an
   underscore-separated part (`422 handle_reserved`), and it goes through the content rules
   too. `bio`: plain text, at most 280 characters. `GET /v1/community/profile` is the caller's
@@ -713,6 +719,11 @@ a user id or anything from the bet tracker.
   `personal_information`, `other`. For a profile `target_id` is the handle. One open report
   per reporter and target (the open one is returned with 200), 10 per user per hour, not on
   your own content, and only on something you can see. The reported person is not told.
+  The report keeps a copy of what was reported (`target_text_snapshot`,
+  `target_summary_snapshot`: the analysis and "selection (event)" of a pick, the body of a
+  comment, the bio and "@handle" of a profile), so a moderator can still judge it after its
+  author deleted or edited it. The copy is never shown to the reporter, and it goes when
+  the report goes: with the reporter's account or with the author's.
 - **Content rules** (`community/content_rules.py`, one module, a pure function). Every bio,
   analysis and comment, and every handle, is checked before it is stored:
   - links: any text containing `http://`, `https://` or `www.` is `422 links_not_allowed`.
@@ -738,16 +749,33 @@ a user id or anything from the bet tracker.
   profile disappears from every public read; its author still sees their own item with the
   text replaced by "Removed by moderators."; every other open report on it is closed with
   the same decision) or `suspend_author` (the existing account suspension, same code path, so
-  an administrator cannot be suspended). `note` is required. There is no "restore" action
-  yet: `hidden` and `removed` behave the same today and differ only as a label. A hidden
-  profile becomes visible again when its owner changes the handle or the bio.
+  an administrator cannot be suspended). `note` is required. `hidden` and `removed` behave
+  the same and differ only as a label. Only an administrator makes moderated content
+  visible again: `POST /v1/admin/community/restore` `{target_type, target_id, note}`
+  (`target_id` is the pick id, the comment id or the profile's current handle; `404` when
+  it does not exist, `409 content_not_moderated` when it is visible) restores it and closes
+  every open report on it as `restore_content`, audited as `community.content_restored`.
+  An author cannot undo a decision: a hidden or removed profile stays that way when its
+  owner edits it. A changed handle or bio is saved and the API opens one queue entry for it
+  (`author_edit: true`, the author as `reporter`, a copy of the new handle and bio), so the
+  owner is not shut out for good. An author can still delete their own pick (before the
+  event) or comment, moderated or not, and post again; that cannot be stopped item by item.
+  Each queue row therefore carries `author_earlier_removals`, how many decisions hid or
+  removed that author's content before, so a repeat offender shows and can be suspended.
+  Each row also has the live text (`target_text`, null once deleted) and the copy taken
+  with the report (`reported_text`, `reported_summary`, `target_changed_since_report`).
   `GET /v1/admin/community/overview` counts profiles, picks, comments and open reports.
 - **Leaderboard.** `GET /v1/community/leaderboard?league=&window=30d|90d|all`, behind its own
   flag. Only profiles with at least 30 graded picks in the window are ranked, by the **lower
   bound of the Wilson 95% interval** of their win rate: not by the raw win rate, so a short
-  lucky run cannot rank first, and not by ROI. Each row shows the sample size and the
-  interval, and the response carries a `method` and a `caveat` that past results do not
-  predict future results and that a ranking is not a recommendation.
+  lucky run cannot rank first, and not by ROI. The price of the picks is not part of the
+  order either, so a high win rate at short prices can rank first and still lose money
+  (24 wins in 30 at -500 ranks above 114 in 200 at -110 and loses 1.2 units). Each row
+  shows the sample size, the interval, `average_price` and `flat_stake_roi`, and the
+  response carries a `method` that says all this and a `caveat` that past results do not
+  predict future results and that a ranking is not a recommendation. Whether to require a
+  minimum average price or to order by something that includes the price is open, for the
+  responsible-gambling review that comes before the flag is turned on.
 - **Notifications.** Three kinds were added to the in-app system, each with its own switch
   in the preferences: `new_follower` (once per follower, ever), `pick_comment` (someone else
   commented on your pick; the comment text is not repeated) and `pick_graded`. Same copy
@@ -755,7 +783,18 @@ a user id or anything from the bet tracker.
 - **Account lifecycle.** `DELETE /v1/me` deletes the profile, follows in both directions,
   likes, blocks, reports made, comments and **every pick, graded ones included**: no public
   record is left behind without an account. Comments and likes other people left on those
-  picks go with them, and so do reports about the deleted account's content.
+  picks go with them, and so do reports about the deleted account's content, with the copy
+  of the content each report holds. When the account is suspended at that moment (deleted by
+  its owner or by an administrator, through the same function), its handle is written to
+  `community_reserved_handles` (the handle and the date, nothing else) and creating or
+  renaming a profile to it answers `409 handle_taken`, the same as a handle in use.
+  Handles are compared as the uniqueness rule compares them (lower case), so a look-alike
+  that the handle rules allow (`k1nd_kai`, `kind__kai` for `kind_kai`) is still free. Only
+  the handle the profile holds at deletion is kept, not earlier ones. A removed profile
+  whose owner was not suspended is not covered: the owner can delete the account, register
+  again and take the same handle, so `suspend_author` is the decision that keeps a handle
+  off the platform. There is no route to release a reserved handle; that is a database
+  edit today.
 - **Guidelines.** `GET /v1/community/guidelines` returns the rules as a structured list (be
   civil; no guarantees or pressure to bet; no selling picks and no links; no personal
   information; 21 and over; picks are opinions, not advice) plus the helpline line, so every
@@ -853,7 +892,7 @@ docs/QUANT_METHODOLOGY.md
 | Plans | `users.plan` (`free` / `premium`), set by an administrator; an entitlement catalog and `require_entitlement`, enforced only with the `premium_gating` flag (off) and gating nothing as shipped | Prices, a purchase or subscription route, a payment provider, invoices, trials, webhooks. All of it needs Founder approval |
 | Email | The verification and reset flows end to end against an `EmailSender` protocol. `OutboxEmailSender` (the default) writes `to`, `template`, `subject`, `body_text`, `created_at` and a `dev_link` to `email_outbox` | Delivery. Nothing leaves the process. `ResendEmailSender` is a class that raises `NotImplementedError("Requires Founder approval and a Resend account")`; it is only selected by `ODDVEX_EMAIL_PROVIDER=resend`, and then the app refuses to start. No email SDK is installed and no HTTP call is made |
 | Email in production | `email_flows` is **off by default in production**, so the four routes answer `404 feature_disabled` and no email is queued. If an operator turns it on, the outbox row is written with the link replaced by a placeholder and `dev_link` empty, so the database never holds a usable token | A way for a real user to receive a link: **in production the verification and reset flows cannot be completed until a provider is approved and connected**, which is why the flag is off there |
-| Community | Everything described under "Community", behind the `community` flag (off) and, for the leaderboard, `community_leaderboard` (off). The demo seed adds fictional profiles only when the flag is on or `--with-community` is passed | Self-reported or free-text picks, stakes or units, paid picks, links, direct messages, images, mentions, editing a pick or a comment, a "restore" moderation action, appeals, per-moderator roles, and any review of the guidelines by counsel or of the leaderboard by a responsible-gambling adviser |
+| Community | Everything described under "Community", behind the `community` flag (off) and, for the leaderboard, `community_leaderboard` (off). The demo seed adds fictional profiles only when the flag is on or `--with-community` is passed | Self-reported or free-text picks, stakes or units, paid picks, links, direct messages, images, mentions, editing a pick or a comment, appeals, per-moderator roles, and any review of the guidelines by counsel or of the leaderboard by a responsible-gambling adviser |
 
 ## Limitations
 
@@ -871,8 +910,7 @@ docs/QUANT_METHODOLOGY.md
 - Community: grading has no background worker (it runs on reads and from
   `scripts/grade_picks.py`), the per-user limits are in process memory like the other
   limiters, the content rules match phrases and can be evaded or over-match (see above),
-  moderation has no restore action, and the feed and the leaderboard are computed per request
-  without caching. The leaderboard reads every eligible profile's graded picks: fine for a
+  and the feed and the leaderboard are computed per request without caching. The leaderboard reads every eligible profile's graded picks: fine for a
   demo, not designed for a large community. Prices are snapshots of synthetic data.
 - Rate limiting and caching are in process memory. With several workers each has its own
   counters; move them to a shared store before scaling out.

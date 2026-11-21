@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import Request
 from sqlalchemy.orm import Session
 
+from ..community.handles import reserve_handle_of
 from ..db import User
 from ..deps import write_audit
 
@@ -27,10 +28,14 @@ def delete_account(db: Session, request: Request | None, user: User) -> str:
     Kept: the audit log. Its rows are not tied to the user row, name the account by its
     opaque id only and carry no personal data. One ``account.deleted`` entry is added
     under the deleted account's id, with ``details.account_status`` when the account was
-    suspended. Who asked for the deletion is the caller's to record.
+    suspended. Who asked for the deletion is the caller's to record. When the account is
+    suspended at that moment, its community handle is also kept, alone, in
+    ``community_reserved_handles``, so nobody can take it again (``community/handles.py``).
     """
     user_id = user.id
     status = user.status
+    if status == "suspended":
+        reserve_handle_of(db, user_id)
     db.delete(user)
     write_audit(
         db,
