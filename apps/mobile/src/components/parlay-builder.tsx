@@ -48,14 +48,14 @@ type ProbabilityStatus = ParlayResult['probability_status'];
  * `needs_leg_probabilities` has none: this builder never sends a leg probability, so that is the normal answer
  * for legs from different games, and there is nothing for the person to do about it. The API's
  * `probability_note` is never shown: it is written for developers and can read as a request for input this
- * form does not take.
+ * form does not take. Each sentence is the web's sentence for the same status, word for word
+ * (`PROBABILITY_NOTICE` in `apps/web/src/components/app/parlay-builder.tsx`).
  */
 export const PARLAY_PROBABILITY_SENTENCES: Record<Exclude<ProbabilityStatus, 'computed' | 'needs_leg_probabilities'>, string> = {
-  same_event_legs:
-    'Two or more legs are from the same game, so their results are linked. Their chances cannot simply be multiplied, so no combined probability is given.',
+  same_event_legs: 'Two or more legs are from the same game, so their results are linked. OddVex gives no combined chance for these legs.',
   unverified_legs:
-    'At least one leg is a custom leg that is not tied to a game, so OddVex cannot check that the legs are independent. No combined probability is given.',
-  no_active_legs: 'Every leg pushed or was voided, so there is no combined probability.',
+    "Custom legs can't be checked for independence, because OddVex does not know which game they are from. No combined chance is given.",
+  no_active_legs: 'Every leg pushed or was voided, so no legs are left to combine.',
 };
 
 /**

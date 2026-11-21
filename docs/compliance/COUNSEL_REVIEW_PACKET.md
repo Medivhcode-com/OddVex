@@ -143,7 +143,7 @@ Taken from the database models at commit `2b0c7c1` (`services/api/src/oddvex_api
 | Table | Fields that are or may be personal | Notes |
 |---|---|---|
 | `users` | Email, display name, password hash (argon2id), role (`user` or `admin`), active flag, plan (free or premium, no billing), status (active or suspended), time of 21+ confirmation, created time, last sign-in time, time of last password change, time the email was confirmed, a token version, and a folded copy of the email and display name used by the staff search | The 21+ confirmation is a timestamp only. **No date of birth. No record of which version of the terms was accepted** |
-| `bets` | Sportsbook name, bet type, sport, stake, odds, payout, profit, result, free-text notes, placed and settled times, how it was settled, source (manual or sync), an optional id the app sends so a retried save is not stored twice | Free-text notes can contain anything the user types |
+| `bets` | Sportsbook name, bet type, sport, stake, odds, payout, profit, result, free-text notes, placed and settled times, how it was settled, source (manual or sync), an optional random id for the save (`client_request_id`) so a retried save is not stored twice | Free-text notes can contain anything the user types. The id identifies one save attempt, not the person. The web app and the mobile app send it from pull request 20 (section 3.4); bets saved before that, or through the API without it, have none |
 | `bet_legs` | Selection text, market, league, event, line, odds, closing odds, result | |
 | `sync_connections`, `sync_import_runs` | Provider name, status, label, opaque provider state, timestamps, counts, error text | Mock provider only. No credentials |
 | `watchlist_items` | Teams, players and games followed | |
@@ -191,7 +191,7 @@ All merged and running on the preview, except where marked.
 | Email outbox | Recipient address, subject and full message body of each email that would have been sent. Nothing is sent |
 | Staff user management, export and delete | See section 5.7 |
 | Community | Seven tables (section 3.1). Switched off, so the tables are expected to be empty on the preview (not checked) |
-| Idempotent bet saves | An optional id per save (`client_request_id`), stored with the bet. The API accepts it at `2b0c7c1`; neither app sends it yet (pull request 20 adds it) |
+| Idempotent bet saves | An optional random id per save (`client_request_id`), stored with the bet; it identifies one save attempt, not the person. The API accepts it since `2b0c7c1`. The web app and the mobile app send it with every new bet from pull request 20; the apps deployed on the preview at `2b0c7c1` do not send it until pull request 20 is deployed |
 
 ### 3.5 Where the drafts and the software disagree
 

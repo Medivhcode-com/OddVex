@@ -138,6 +138,15 @@ describe('ParlayResultView', () => {
     expect(screen.queryByText(API_NOTES)).toBeNull();
   });
 
+  it('uses the web app\'s sentence for each reason, word for word', () => {
+    expect(PARLAY_PROBABILITY_SENTENCES).toEqual({
+      same_event_legs: 'Two or more legs are from the same game, so their results are linked. OddVex gives no combined chance for these legs.',
+      unverified_legs:
+        "Custom legs can't be checked for independence, because OddVex does not know which game they are from. No combined chance is given.",
+      no_active_legs: 'Every leg pushed or was voided, so no legs are left to combine.',
+    });
+  });
+
   it('words each reason plainly, with no request for input the form cannot take', () => {
     for (const sentence of Object.values(PARLAY_PROBABILITY_SENTENCES)) {
       expect(sentence).not.toMatch(/required|enter|provide|add a/i);

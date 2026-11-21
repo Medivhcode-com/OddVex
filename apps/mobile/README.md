@@ -280,7 +280,9 @@ written out next to it. The community guidelines show the API's own `help` sente
   "Unsaved input when the session ends").
 - Push notifications, email, alert sounds, an app icon badge and background checks (see "Alerts and notifications
   are in-app only"). An unread-only filter on the notification list. Alerts on player props.
-- A text-message link for 800GAM (the code is written out, not tappable), tablet layouts, web
+- A text-message link for 800GAM in Settings, on the tracker and in the sync panel (Settings writes the code out,
+  not tappable; the tracker and the sync panel do not give it; only the assistant's support card has "Text 800GAM"),
+  tablet layouts, web
   (`react-native-web` is not installed).
 - Final app icon and splash art. Store configuration (listings, submit profiles): none exists, and nothing has
   been published to a store. The EAS project and its two build profiles exist; see "Builds".
