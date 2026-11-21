@@ -70,7 +70,7 @@ export interface paths {
         };
         /**
          * The report queue, oldest open report first
-         * @description `status=open` (the default) lists what is waiting, oldest first; `status=resolved` lists what was decided, most recent first. Each row carries the reported text as stored, its author and the reporter, by user id and handle. Each call is recorded in the audit log as `admin.read`.
+         * @description `status=open` (the default) lists what is waiting, oldest first; `status=resolved` lists what was decided, most recent first. Each row carries the reported text as stored now (`target_text`, null once it was deleted) and as it was when the report was made (`reported_text`, kept with the report), its author and the reporter, by user id and handle, and `author_earlier_removals`, how often moderators hid or removed that author's content before. An entry with `author_edit` true was opened by the API because the author edited a profile that moderators hid or removed; the profile stays that way until it is restored. Each call is recorded in the audit log as `admin.read`.
          */
         get: operations["admin_list_reports"];
         put?: never;
@@ -92,9 +92,29 @@ export interface paths {
         put?: never;
         /**
          * Decide a report
-         * @description `dismiss`: nothing happens to the content. `hide_content` and `remove_content`: the pick, comment or profile disappears from every public read (its author sees a 'removed by moderators' placeholder on their own item); a hidden pick still counts in its author's record. `suspend_author`: the author's account is suspended through the same code as `POST /v1/admin/users/{id}/suspend`, so an administrator cannot be suspended (`409`). Every other open report on the same content is resolved with the same decision, except after `dismiss`. A report that was already resolved is `409 report_already_resolved`. `note` is required and is stored on the report and in the audit log.
+         * @description `dismiss`: nothing happens to the content. `hide_content` and `remove_content`: the pick, comment or profile disappears from every public read (its author sees a 'removed by moderators' placeholder on their own item); a hidden pick still counts in its author's record. Editing does not bring it back: only `POST /v1/admin/community/restore` does. `suspend_author`: the author's account is suspended through the same code as `POST /v1/admin/users/{id}/suspend`, so an administrator cannot be suspended (`409`). Every other open report on the same content is resolved with the same decision, except after `dismiss`. A report that was already resolved is `409 report_already_resolved`. `note` is required and is stored on the report and in the audit log.
          */
         post: operations["admin_resolve_report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/community/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make hidden or removed content visible again
+         * @description Undoes `hide_content` or `remove_content` on a pick, a comment or a profile (`target_id`: the pick id, the comment id or the profile's current handle). The content becomes visible to everyone who could see it before, and every open report on it, such as the entry opened when its author edited a moderated profile, is resolved as `restore_content` with the note. `404` when the content does not exist, `409 content_not_moderated` when it is visible already. `note` is required and is stored on the reports it closes and in the audit log (`community.content_restored`).
+         */
+        post: operations["admin_restore_content"];
         delete?: never;
         options?: never;
         head?: never;
@@ -189,6 +209,50 @@ export interface paths {
         get: operations["admin_list_users"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a user's account on their behalf
+         * @description For a data request from an owner who cannot sign in, and for closing an account that must not exist. Permanently deletes the user and everything `DELETE /v1/me` deletes, through the same code: bets, watchlist, alert rules, notifications and their preferences, the staking reminder, sync connections, import runs, email tokens, outbox emails and all community data. It cannot be undone. Works for an active and for a suspended account; when the account is suspended at that moment, its community handle stays reserved, so nobody can take it again.
+         *
+         *     `confirm_email` must be the account's email address (compared as login compares addresses), otherwise `422 confirm_email_mismatch` and nothing is deleted. `reason` is required and must not contain that address (`422 reason_contains_email`). The audit log keeps what the owner's own deletion keeps (the account's entries and an `account.deleted` entry, each with the opaque user id, the action, the id of the item acted on, the request id, the IP address and the details of the action) and an `admin.user_deleted` entry with the acting administrator, the user's id, the account's status and the reason; none holds the email address. An administrator cannot delete another administrator's account or their own (`409`). Answers `204` with no body.
+         */
+        post: operations["admin_delete_user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export a user's data on their behalf
+         * @description For a data request from an owner who cannot sign in: a suspended account, an account closed because its owner is under 21, a lost password. Returns the same document as `GET /v1/me/export` for that user, produced by the same code and streamed the same way: one JSON document without a `Content-Length`, to be read to the end and parsed once. It is the owner's data: pass it on to the owner only, and only once you know the request is theirs. Works for an active and for a suspended account and changes nothing in it.
+         *
+         *     `reason` is required and is recorded in the audit log as `admin.user_exported` with the acting administrator, the user's id and the account's status; the entry holds none of the exported data. The reason must not contain the account's email address (`422 reason_contains_email`). An administrator cannot export another administrator's account or their own (`409`); their own is at `GET /v1/me/export`. The response counts as one of the streamed responses the administrator can have in progress at the same moment (`ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE`): over it this answers `429 rate_limited`.
+         */
+        post: operations["admin_export_user"];
         delete?: never;
         options?: never;
         head?: never;
@@ -336,7 +400,9 @@ export interface paths {
         put?: never;
         /**
          * Ask the rule-based assistant
-         * @description Deterministic keyword routing to internal data tools with templated answers. No language model is connected and the assistant never produces a number that a tool did not compute. Authentication is optional; the bet summary intent needs it.
+         * @description Deterministic keyword routing to internal data tools with templated answers. No language model is connected and the assistant never produces a price, probability or amount that a tool did not compute. Authentication is optional; the bet summary intent needs it.
+         *
+         *     Before any routing, each message is checked against fixed patterns for crisis or self-harm language, for distress about gambling and for a user who says they are under 21. When one matches, the answer has intent `support`, carries help resources and no betting data, and `support.case` says which reply it is. A request for a certain winner gets a fixed answer with intent `fallback`. The patterns are a fixed list of rules and miss some messages, so every answer that is not a support reply ends with one sentence giving the gambling helpline and the crisis line.
          */
         post: operations["assistant_query"];
         delete?: never;
@@ -356,7 +422,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange email + password for an access token
-         * @description Besides the per-IP limit, an email address with too many failed logins inside the window (8 in 15 minutes by default) gets `429 rate_limited` until the window moves on, from any IP and whether or not an account exists for it. A suspended account gets `403 account_suspended` once the password is correct.
+         * @description Besides the per-IP limit, failed logins are counted per email address and client network (an IPv4 address, or the /64 prefix of an IPv6 address): after too many inside the window (8 in 15 minutes by default) further attempts for that email from that network get `429 rate_limited` until the window moves on, even with the right password. Attempts from other networks are not affected, so someone else's failures do not stop the owner from signing in. A second, higher ceiling counts the failures for one email from all networks together (50 in the same window by default); over it every attempt for that email gets the same `429`. Both apply whether or not an account exists for the email. A successful login clears the count of the caller's own network only. A suspended account gets `403 account_suspended` once the password is correct.
          */
         post: operations["login"];
         delete?: never;
@@ -503,7 +569,7 @@ export interface paths {
          *
          *     The bet is checked completely before anything is saved. Prices are stored as decimal odds with six decimal places and stakes in cents: a price that would be stored as 1.000000 or less (`invalid_decimal_odds`), a price or combined parlay price above 9999999999.999999 (`odds_out_of_range`), a stake that would be stored as 0.00 (`invalid_stake`) and a stake and price whose payout is above 999999999999.99 (`payout_out_of_range`) are each a 422, and a 422 never saves anything.
          *
-         *     **Retrying safely.** Send `client_request_id` (8 to 64 characters from `A-Z a-z 0-9 _ -`, for example a UUID made once per filled-in form) and send the same value again when you retry a create whose answer you did not receive. The first request stores the bet and answers 201. Every later request from the same account with the same id answers **200** with the bet that was stored the first time: no second bet, no second audit entry and no second staking reminder. The stored bet is returned even if the repeated body differs, so use a new id for a new or edited bet. This also holds when the retry arrives while the first request is still running. An id is only compared within one account, and is free again once that bet is deleted.
+         *     **Retrying safely.** Send `client_request_id` (8 to 64 characters from `A-Z a-z 0-9 _ -`, for example a UUID made once per filled-in form) and send the same value again when you retry a create whose answer you did not receive. The first request stores the bet and answers 201. Every later request from the same account with the same id answers **200** with the bet that was stored the first time: no second bet, no second audit entry and no second staking reminder. The stored bet is returned even if the repeated body differs, so use a new id for a new or edited bet. This also holds when the retry arrives while the first request is still running. A repeat is still a request: a body that does not pass this schema is a 422 and a request over the write limit is a 429, with or without a known id. An id is only compared within one account, and is free again once that bet is deleted.
          *
          *     An account holds at most `ODDVEX_MAX_BETS_PER_USER` bets (default 5,000), imported bets included: at the cap this answers 409 `bet_limit_reached` with `details.max_bets`. Bet writes are limited per user (120 a minute and 2,000 a day by default): over the limit this answers 429 `rate_limited` with `Retry-After`.
          */
@@ -545,7 +611,7 @@ export interface paths {
         put?: never;
         /**
          * Settle your pending bets from final scores
-         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new. Each settled bet also creates a `bet_settled` notification. One call settles at most 200 bets, oldest first; when it stops there with pending bets left unexamined, the response carries `has_more: true` and calling again continues (the field is left out otherwise). Counts towards the per-user write limit, and one account runs one auto-settle at a time: a call that arrives while another of the same account is still running is not started (both are 429 `rate_limited` with `Retry-After`).
+         * @description Looks at each of your pending bets. A bet is settled when every leg has a structured selection (`gradeable`) and every leg's event is final: the legs are graded from the final score and the bet goes through the same settlement as a manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with a reason. Calling this again settles nothing new. Each settled bet also creates a `bet_settled` notification. One call settles at most 200 bets, oldest first; when it stops there with pending bets left unexamined, `has_more` is true and calling again continues; it is false otherwise, and always sent. Counts towards the per-user write limit, and one account runs one auto-settle at a time: a call that arrives while another of the same account is still running is not started (both are 429 `rate_limited` with `Retry-After`).
          */
         post: operations["auto_settle_bets"];
         delete?: never;
@@ -781,7 +847,7 @@ export interface paths {
         };
         /**
          * Profiles ranked by the Wilson lower bound of their win rate
-         * @description Behind a second flag, `community_leaderboard`, which is off by default: leaderboards need a responsible-gambling review before they go live. Only profiles with at least 30 graded picks in the window are ranked, by the lower bound of the Wilson 95% interval of their win rate, not by the raw win rate and not by ROI. Each row shows the sample size and the interval. `caveat` says that past results do not predict future results.
+         * @description Behind a second flag, `community_leaderboard`, which is off by default: leaderboards need a responsible-gambling review before they go live. Only profiles with at least 30 graded picks in the window are ranked, by the lower bound of the Wilson 95% interval of their win rate, not by the raw win rate and not by ROI. The price of the picks is not part of the order either, so a high win rate at short prices can rank first and still lose money. Each row shows the sample size, the interval, the average price and the flat-stake return. `caveat` says that past results do not predict future results.
          */
         get: operations["get_leaderboard"];
         put?: never;
@@ -902,7 +968,7 @@ export interface paths {
         get: operations["get_my_profile"];
         /**
          * Create or update your community profile
-         * @description Opt-in: nobody has a profile until they create one. `handle` is 3 to 20 characters of `a-z`, `0-9` and `_` (`422 invalid_handle`), unique whatever the case (`409 handle_taken`) and not a reserved word (`422 handle_reserved`). `bio` is plain text, at most 280 characters, without links (`422 links_not_allowed`) and within the content rules (`422 content_not_allowed`). Only a public profile can post picks and comments, follow others and be found. Answers 201 when the profile was created.
+         * @description Opt-in: nobody has a profile until they create one. `handle` is 3 to 20 characters of `a-z`, `0-9` and `_` (`422 invalid_handle`), unique whatever the case (`409 handle_taken`) and not a reserved word (`422 handle_reserved`). `bio` is plain text, at most 280 characters, without links (`422 links_not_allowed`) and within the content rules (`422 content_not_allowed`). Only a public profile can post picks and comments, follow others and be found. Answers 201 when the profile was created. A profile that moderators hid or removed stays hidden or removed when you edit it: a changed handle or bio is saved and sent to the moderators for review, and only they can make it visible again.
          */
         put: operations["upsert_my_profile"];
         post?: never;
@@ -943,7 +1009,7 @@ export interface paths {
         put?: never;
         /**
          * Report a pick, a comment or a profile to the moderators
-         * @description `target_id` is the pick id, the comment id or, for a profile, its handle. The target has to be something you can see (`404` otherwise) and not your own (`422 cannot_report_own_content`). One open report per person and target: reporting the same thing again returns the open report with `200`. 10 reports per hour. The reported person is not told who reported them.
+         * @description `target_id` is the pick id, the comment id or, for a profile, its handle. The target has to be something you can see (`404` otherwise) and not your own (`422 cannot_report_own_content`). One open report per person and target: reporting the same thing again returns the open report with `200`. 10 reports per hour. The reported person is not told who reported them. A copy of the reported text (analysis, comment or handle and bio) is kept with the report for the moderators, and deleted with it; it is not returned to you.
          */
         post: operations["create_report"];
         delete?: never;
@@ -1096,7 +1162,7 @@ export interface paths {
         post?: never;
         /**
          * Delete the account and all of its data
-         * @description Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs, email tokens and outbox emails, and everything in the community: the profile, follows in both directions, likes, blocks, reports made, comments and every pick, graded ones included, so no public record is left without an account. An audit entry containing only the opaque user id is retained. A suspended account can still call this route.
+         * @description Permanently deletes the user, their bets, bet legs, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs, email tokens and outbox emails, and everything in the community: the profile, follows in both directions, likes, blocks, reports made, comments and every pick, graded ones included, so no public record is left without an account. The audit log is kept: the account's own entries and one `account.deleted` entry. Each names the account by its opaque user id and holds the action, the id of the item acted on, the request id, the IP address and the details of the action; none holds the email address. When the account is suspended at that moment, its community handle stays reserved, so nobody can take it again. A suspended account can still call this route.
          */
         delete: operations["delete_me"];
         options?: never;
@@ -1135,7 +1201,7 @@ export interface paths {
          * Download everything stored about your account
          * @description One JSON document with your profile, bets, watchlist, alert rules, notifications, notification preferences, staking reminder, sync connections, import runs and your own audit entries, plus your community data (profile, picks, comments, who you follow, likes, blocks and reports you made). It never contains the password hash. The export itself is recorded in the audit log. A suspended account can still call this route.
          *
-         *     The document is streamed: bets, import runs and audit entries are read in batches and sent as they are read, so the response has no `Content-Length`. It is still one JSON document of this schema; read it to the end and parse it once. Limited per user (`ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`, default 10 an hour), and it counts as one of the streamed responses an account can have in progress at the same moment (`ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE`, default 8, shared with the bet list): over either limit this answers 429 `rate_limited` with `Retry-After`.
+         *     The document is streamed: bets, import runs, audit entries and your community picks, comments and reports are read in batches and sent as they are read, so the response has no `Content-Length`. It is still one JSON document of this schema; read it to the end and parse it once. Limited per user (`ODDVEX_RATE_LIMIT_EXPORT_PER_HOUR`, default 10 an hour), and it counts as one of the streamed responses an account can have in progress at the same moment (`ODDVEX_RATE_LIMIT_USER_STREAMS_AT_ONCE`, default 8, shared with the bet list): over either limit this answers 429 `rate_limited` with `Retry-After`.
          */
         get: operations["export_my_data"];
         put?: never;
@@ -1844,6 +1910,18 @@ export interface components {
         AdminReportOut: {
             author: components["schemas"]["AdminReportPartyOut"];
             /**
+             * Author Earlier Removals
+             * @description How many times moderators hid or removed content of this author: one per decision, however many reports it closed, including content that was deleted or restored since. For an open report every such decision so far; for a resolved report the decisions up to its own, not counting the one that closed it. Counted from the reports that are kept, so a decision whose every report was deleted with an account is no longer counted.
+             * @default 0
+             */
+            author_earlier_removals: number;
+            /**
+             * Author Edit
+             * @description True for an entry the API opened itself because the author edited a profile that moderators hid or removed. The edited profile stays hidden or removed until an administrator restores it. `reporter` is then the author.
+             * @default false
+             */
+            author_edit: boolean;
+            /**
              * Created At
              * Format: date-time
              */
@@ -1857,9 +1935,19 @@ export interface components {
              * @enum {string}
              */
             reason: "spam" | "harassment" | "inducement_to_bet" | "misleading_claims" | "personal_information" | "other";
+            /**
+             * Reported Summary
+             * @description Like `target_summary`, as it was when the report was made: for a pick the selection and the event, for a profile `@handle`.
+             */
+            reported_summary?: string | null;
+            /**
+             * Reported Text
+             * @description The analysis, comment or bio as it was when the report was made, kept on the report. Null for reports made before this copy was kept, and when there was no text.
+             */
+            reported_text?: string | null;
             reporter: components["schemas"]["AdminReportPartyOut"];
             /** Resolution Action */
-            resolution_action?: ("dismiss" | "hide_content" | "remove_content" | "suspend_author") | null;
+            resolution_action?: ("dismiss" | "hide_content" | "remove_content" | "suspend_author" | "restore_content") | null;
             /** Resolution Note */
             resolution_note?: string | null;
             /** Resolved At */
@@ -1871,6 +1959,12 @@ export interface components {
              * @enum {string}
              */
             status: "open" | "resolved";
+            /**
+             * Target Changed Since Report
+             * @description True when the content was deleted since the report was made, or its text or summary differs from `reported_text` and `reported_summary`. Always false for a report made before the copy was kept, unless the content was deleted.
+             * @default false
+             */
+            target_changed_since_report: boolean;
             /**
              * Target Exists
              * @description False when the content was deleted since.
@@ -2100,7 +2194,10 @@ export interface components {
         };
         /** AssistantResponse */
         AssistantResponse: {
-            /** Answer */
+            /**
+             * Answer
+             * @description The reply. Every answer that is not a support reply ends with one sentence giving the gambling helpline and the crisis line.
+             */
             answer: string;
             /**
              * Data
@@ -2115,11 +2212,13 @@ export interface components {
              * Intent
              * @enum {string}
              */
-            intent: "compare_odds" | "explain_ev" | "explain_no_vig" | "player_trend" | "line_movement" | "bet_summary" | "help" | "fallback";
+            intent: "compare_odds" | "explain_ev" | "explain_no_vig" | "player_trend" | "line_movement" | "bet_summary" | "help" | "fallback" | "support";
             /** Sources */
             sources: components["schemas"]["AssistantSourceOut"][];
             /** Suggestions */
             suggestions: components["schemas"]["AssistantSuggestionOut"][];
+            /** @description Set when the answer is a responsible-gambling support reply (intent support), so a client can present it differently. Such an answer has no data and no sources. Null for every other answer. */
+            support?: components["schemas"]["AssistantSupportOut"] | null;
         };
         /** AssistantSourceOut */
         AssistantSourceOut: {
@@ -2140,11 +2239,20 @@ export interface components {
         AssistantSuggestionOut: {
             /**
              * Href
-             * @description A web app route, e.g. /app/games/{event_id}.
+             * @description A web route: an app screen such as /app/games/{event_id}, /login, or the /responsible-gambling page.
              */
             href: string;
             /** Label */
             label: string;
+        };
+        /** AssistantSupportOut */
+        AssistantSupportOut: {
+            /**
+             * Case
+             * @description Which responsible-gambling reply this is. crisis: self-harm or crisis language; the answer gives only the 988 line, 911 and the gambling helpline. distress: distress about gambling; the answer gives the helpline and the app's own reminder and tracking tools. underage: the user said they are under 21; the answer says OddVex is for adults 21 and over.
+             * @enum {string}
+             */
+            case: "crisis" | "distress" | "underage";
         };
         /** AuditEntryOut */
         AuditEntryOut: {
@@ -2855,7 +2963,7 @@ export interface components {
             profile?: components["schemas"]["MyProfileOut"] | null;
             /**
              * Reports
-             * @description Reports you made.
+             * @description Reports you made, and the review entries opened when you edited a profile that moderators hid or removed (`target_type` `profile`, your own handle).
              */
             reports?: components["schemas"]["ReportOut"][];
         };
@@ -2993,6 +3101,19 @@ export interface components {
             kind: "win" | "loss" | "none";
             /** Length */
             length: number;
+        };
+        /** DeleteUserRequest */
+        DeleteUserRequest: {
+            /**
+             * Confirm Email
+             * @description The email address of the account to delete, typed again. Compared the way login compares addresses: surrounding spaces and letter case do not matter.
+             */
+            confirm_email: string;
+            /**
+             * Reason
+             * @description Why the account is deleted, for example the reference of the owner's request. Stored in the audit log only, and kept there after the account is gone: it must not contain the account's email address.
+             */
+            reason: string;
         };
         /** DevEmailOut */
         DevEmailOut: {
@@ -3261,6 +3382,14 @@ export interface components {
             ip?: string | null;
             /** Request Id */
             request_id?: string | null;
+        };
+        /** ExportUserRequest */
+        ExportUserRequest: {
+            /**
+             * Reason
+             * @description Why the account's data is exported, for example the reference of the owner's request. Stored in the audit log only, and kept there after the account is deleted: it must not contain the account's email address.
+             */
+            reason: string;
         };
         /** FinalScoreOut */
         FinalScoreOut: {
@@ -4500,7 +4629,8 @@ export interface components {
         };
         /**
          * ReportOut
-         * @description Your own report. What moderators decided is not shown here.
+         * @description Your own report, or the review entry opened when you edited a profile that
+         *     moderators hid or removed. What moderators decided is not shown here.
          */
         ReportOut: {
             /**
@@ -4542,6 +4672,45 @@ export interface components {
              * @description Why. Stored on the report and in the audit log.
              */
             note: string;
+        };
+        /** RestoreContentRequest */
+        RestoreContentRequest: {
+            /**
+             * Note
+             * @description Why. Stored on any report it closes and in the audit log.
+             */
+            note: string;
+            /**
+             * Target Id
+             * @description The pick id, the comment id or, for a profile, its current handle.
+             */
+            target_id: string;
+            /**
+             * Target Type
+             * @enum {string}
+             */
+            target_type: "pick" | "comment" | "profile";
+        };
+        /** RestoredContentOut */
+        RestoredContentOut: {
+            /**
+             * Moderation Status
+             * @description Always `visible` after a restore.
+             * @enum {string}
+             */
+            moderation_status: "visible" | "hidden" | "removed";
+            /**
+             * Reports Closed
+             * @description Open reports on the content that were closed as `restore_content`.
+             */
+            reports_closed: number;
+            /** Target Id */
+            target_id: string;
+            /**
+             * Target Type
+             * @enum {string}
+             */
+            target_type: "pick" | "comment" | "profile";
         };
         /** ScoreOut */
         ScoreOut: {
@@ -5233,6 +5402,75 @@ export interface operations {
             };
         };
     };
+    admin_restore_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreContentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoredContentOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found, or the `community` flag is off */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The content is visible already */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     admin_list_email_outbox: {
         parameters: {
             query?: {
@@ -5482,6 +5720,155 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_delete_user: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The target is an administrator or the caller's own account */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_export_user: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountExportOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The target is an administrator or the caller's own account */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

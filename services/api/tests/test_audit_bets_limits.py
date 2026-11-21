@@ -250,6 +250,48 @@ def test_an_import_stops_at_the_cap_and_says_how_many_bets_it_left_out(
         assert all("not imported" in r["error_message"] for r in history.json())
 
 
+def sync_notices(client: TestClient, headers: Headers) -> list[dict[str, Any]]:
+    """The account's import notifications, newest first."""
+    response = client.get("/v1/notifications", headers=headers)
+    assert response.status_code == 200, response.text
+    return [n for n in response.json()["items"] if n["kind"] == "sync_finished"]
+
+
+@pytest.mark.parametrize(
+    ("cap", "fetched", "sentence"),
+    [
+        (5, 8, "3 bets were not imported; the import history says why."),
+        (3, 4, "1 bet was not imported; the import history says why."),
+    ],
+)
+def test_the_import_notification_says_how_many_bets_the_run_left_out(
+    make_app: AppFactory, cap: int, fetched: int, sentence: str
+) -> None:
+    app = make_app(max_bets_per_user=cap)
+    app.state.sync_registry = SyncRegistry([ManyBetsProvider(fetched)])
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        connection = client.post(
+            "/v1/sync/connections", json={"provider": "many"}, headers=headers
+        ).json()
+        run = client.post(f"/v1/sync/connections/{connection['id']}/sync", headers=headers).json()
+        assert run["status"] == "succeeded" and left_out(run) == fetched - cap
+        [notice] = sync_notices(client, headers)
+        assert notice["title"] == "Import finished"
+        assert notice["body"].startswith(f"Many import finished: {cap} new, 0 already imported.")
+        assert notice["body"].endswith(sentence)
+
+
+def test_the_import_notification_says_nothing_was_left_out_when_nothing_was(
+    client: TestClient, headers: Headers
+) -> None:
+    connection = client.post("/v1/sync/connections", json={}, headers=headers).json()
+    run = client.post(f"/v1/sync/connections/{connection['id']}/sync", headers=headers).json()
+    assert left_out(run) == 0
+    [notice] = sync_notices(client, headers)
+    assert "not imported" not in notice["body"]
+
+
 @pytest.mark.skipif(
     EXTERNAL_DATABASE_URL is None,
     reason="needs row locks: SQLite has none, PostgreSQL (the server's database) does",

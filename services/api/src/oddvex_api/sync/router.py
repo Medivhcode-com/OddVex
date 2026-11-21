@@ -237,6 +237,7 @@ def run_sync(
             imported=run.imported_count,
             duplicates=run.duplicate_count,
             attempts=run.attempts,
+            not_imported=result.over_limit + result.rejected,
         ),
     )
     notifications.check_stake_reminder(db, user.id, staked_before, now, request)
