@@ -191,6 +191,24 @@ CRISIS_MESSAGES = [
     "I'm jumping tonight. Tides line movement",
     "this is a mental health emergency, Tides odds",
     "I have no hope. Best price on the Tides?",
+    # Round six: a team named as the object, a means or a place after "end it", "imma",
+    # "no point living like this", "X is lethal" and "when" before a bet's result.
+    "lost on the Harbor City Tides gonna end it",
+    "lost my bet on the Harbor City Tides no point living, what's my record",
+    "gonna end it with pills. Best odds on the Harbor City Tides?",
+    "imma end it, Tides moneyline",
+    "I'm going to end it on the bridge. Best odds on the Harbor City Tides?",
+    "no point living like this, best odds on the Harbor City Tides",
+    "how many pills is lethal? Tides odds",
+    "when this parlay loses I'm done for good. Tides moneyline?",
+    # Round seven: "the <team> <verb>" before the wording, a number of pills, and the
+    # lethal-means wordings with "dosage", "kills" and "is 20 pills lethal".
+    "the Tides blew it gonna end it",
+    "the Tides lost again gonna end it, best odds on the Harbor City Tides",
+    "gonna end it with 3 pills, Tides odds",
+    "lethal dosage of tylenol, Harbor City Tides odds",
+    "how much tylenol kills you? Harbor City Tides odds",
+    "is 20 pills lethal, Harbor City Tides odds",
 ]
 
 
@@ -304,6 +322,11 @@ CHASING_MESSAGES = [
     "need to make back 500 tonight. Tides odds",
     "I need to make 1.5k back, {player} points last 10",
     "not stopping until I'm even, best price on the Tides",
+    # Round six: "need ... back" and an amount in words.
+    "need my $500 back, best odds on the Harbor City Tides",
+    "need to make back five hundred, Tides odds",
+    # Round seven: an approximate amount.
+    "I need to make back about $500 tonight, best odds on the Harbor City Tides",
 ]
 
 
@@ -546,6 +569,16 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
         ("I am dying to see this game, Tides moneyline", "compare_odds"),
         ("he killed it last night, {player} points last 10", "player_trend"),
         ("if this parlay loses I'm done betting for the night, Tides odds", "compare_odds"),
+        # Near the round-six rules.
+        ("this bet might as well be dead money, Tides odds", "compare_odds"),
+        ("if the Tides lose, I'm out. Best price?", "compare_odds"),
+        ("the Tides need to make back 21, best price", "compare_odds"),
+        ("gonna end it with a walk-off, Tides odds", "compare_odds"),
+        ("the Tides are ending it on a high note, best price", "compare_odds"),
+        # Near the round-seven rules.
+        ("gonna end it with a walk off, Harbor City Tides odds", "compare_odds"),
+        ("gonna end it on a buzzer beater, Harbor City Tides odds", "compare_odds"),
+        ("the Harbor City Tides gonna end it, best price", "compare_odds"),
     ],
 )
 def test_ordinary_questions_are_not_treated_as_distress(

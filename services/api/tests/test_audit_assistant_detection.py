@@ -2070,6 +2070,86 @@ CRISIS_WITHOUT_I = [
     "no reason to live",
     "no reason to go on",
     "no point going on anymore",
+    # Round six: a team or a bet named before the wording is an object, not the subject.
+    "lost on the Tides again gonna end it",
+    "lost on the Harbor City Tides gonna end it",
+    "lost 3 in a row on the Harbor City Tides might as well die",
+    "lost my bet on the Harbor City Tides no point living",
+    "bet the over and lost gonna end it",
+    "this loss is gonna end it",
+    "lost it all gonna end it",
+    # A time, a means or a place after "end it" makes the intent plainer, not less plain.
+    "gonna end it soon",
+    "gonna end it with pills",
+    "gonna end it now with pills",
+    "gonna end it in the morning",
+    "gonna end it after the game",
+    "honestly gonna end it after tonight",
+    "gonna end it at midnight",
+    "gonna end it on the bridge",
+    "gonna end it early",
+    "imma end it",
+    "ima end it tonight",
+    "i'ma end it",
+    "bout to end it",
+    "abt to end it",
+    # "no point living like this" is the most common form of the wording.
+    "no point living like this",
+    "no point living in this pain",
+    "no point going on like this",
+    "theres no point living like this anymore",
+    "no point living like that",
+    "no point living this way",
+    "no point living with this",
+    "no point living at this point",
+    "no point even living",
+    "pointless living",
+    "what's the point living",
+    # Round seven: a clause that opens with "the <team> <verb>" names what happened, not who
+    # the wording is about.
+    "the Tides lost gonna end it",
+    "the Tides lost again gonna end it",
+    "the Tides blew it gonna end it",
+    "the Tides choked might as well die",
+    "the Tides lost no point living",
+    "the over missed no point living",
+    "the spread killed me gonna end it",
+    "the refs robbed me gonna end it",
+    "the last leg missed gonna end it",
+    "the Tides lost so gonna end it",
+    "the Tides folded gonna end it",
+    "the Tides tanked again gonna end it",
+    # "No point living" has no subject check at all.
+    "they lost again no point living",
+    "the Tides are done no point living",
+    # "which is" refers back to the loss.
+    "lost again which is gonna end it",
+    # A bare number counts as a game ending only after "in": "at 3" is a time.
+    "gonna end it at 3 tonight",
+]
+
+#: "I'm going to end it" with a means, a time or a place after it.
+FIRST_PERSON_END_IT = [
+    "I'm going to end it with pills",
+    "I'm gonna end it with pills tonight",
+    "I'm going to end it in the morning",
+    "I'm going to end it at midnight",
+    "I'm going to end it on the bridge",
+    "I'm going to end everything on the bridge",
+    "I'm going to end it in the garage",
+    "i will end it in an hour",
+    "I'm going to end it early",
+    "I want to end it in 5 minutes",
+    "time to end it with a gun",
+    "time to end it in the morning",
+    # No opener at all: only the means or the place says what it is.
+    "end it with pills",
+    "end everything on the bridge tonight",
+    # Round seven: a number of pills is a means, not a game that ends "in four".
+    "gonna end it with 3 pills",
+    "I'm going to end it with 20 pills",
+    "end it with three pills",
+    "end it with 30 pills tonight",
 ]
 
 #: Chasing with a stated amount, with and without a currency sign or a "k".
@@ -2090,6 +2170,20 @@ CHASING_AN_AMOUNT = [
     "win back 500 by tonight",
     "need to recoup 2k",
     "I need to make back 50",
+    # Round six: an amount in words, and "need ... back" with no verb.
+    "need my $500 back",
+    "make back a grand",
+    "need to make back five hundred",
+    "need 500 back tonight",
+    "need to make up $500",
+    "have to win back a couple grand",
+    # Round seven: an approximate amount, and "recover" with no "back".
+    "I need to make back about $500 tonight",
+    "gotta make back like 500 tonight",
+    "I need to make back almost 2k",
+    "I need to make back around 2k",
+    "I need to make back about 50",
+    "i need to recover $500",
 ]
 
 #: Questions about lethal means.
@@ -2111,6 +2205,28 @@ LETHAL_MEANS = [
     "tying a noose",
     "how do you tie a noose",
     "how to hang yourself",
+    # Round six: "X is lethal" and "how many X to end it".
+    "how many pills is lethal",
+    "how much tylenol is lethal",
+    "how many mg of tylenol is lethal",
+    "what dose of insulin is fatal",
+    "how many sleeping pills would be fatal",
+    "how many pills to end it",
+    # Round seven: "doses" and "dosage", "kills", and the yes/no order "is 20 pills lethal".
+    "lethal dosage",
+    "lethal doses",
+    "fatal doses of tylenol",
+    "lethal dosage of tylenol",
+    "how much acetaminophen kills you",
+    "how many pills kills you",
+    "how much xanax kills",
+    "what dose of tylenol kills",
+    "is 10 grams of tylenol lethal",
+    "are 20 pills lethal",
+    "is 20 pills lethal",
+    "is a bottle of tylenol fatal",
+    "would 50 tylenol be enough",
+    "ld50 of tylenol",
 ]
 
 #: A threat that depends on the result of a bet, and "I'm jumping tonight".
@@ -2126,6 +2242,14 @@ IF_THE_BET_LOSES = [
     "if I lose this one, I'm done for good",
     "im jumping off tonight",
     "if this loses I'm jumping",
+    # Round six.
+    "if this loses imma end it",
+    "when this parlay loses I'm done for good",
+    "once this bet misses I'm gone for good",
+    "if this loses I'm out for good",
+    "if this misses imma be done for good",
+    # Round seven: a spread that is not covered is a bet that loses.
+    "if the Tides dont cover im done for good",
 ]
 
 #: The four rules the last tests review found no test for: each message here is caught by
@@ -2175,11 +2299,76 @@ ORDINARY_NEAR_ROUND_FIVE = [
     "I am dying to see this game",
     "the Bulls are dead in the water",
     "he killed it last night",
+    # Round six.
+    "this bet might as well be dead money",
+    "that ticket might as well be dead money",
+    "might as well be dead money at this point",
+    "if the Tides lose, I'm out",
+    "if they lose im out",
+    "if the Tides lose im out",
+    "the Tides need to make back 21",
+    "can they make back 17 in the fourth",
+    "I need the Tides to make back 14",
+    "so the Tides gonna end it tonight",
+    "and the closer is gonna end it",
+    "gonna end it with a walk-off",
+    "gonna end it in four",
+    "about to end it in overtime",
+    "need to end it in the third",
+    "gonna end it with a hedge",
+    "going to end it by halftime",
+    "I'm going to end it with a field goal",
+    "they're gonna end it with a knockout",
+    "no point going on about the refs",
+    "no point carrying on with this parlay",
+    "no point living on the edge with this lineup",
+    "need my $50 back, the bet was voided",
+    "gonna end it on a high note",
+    "I'm ending it on a high note",
+    "about to end it on a winning note",
+    "gonna end it with a win",
+    "I'll end it here with one last question about the Tides",
+    # Round seven: game finishes as people spell them, and a team named at the start of the
+    # clause.
+    "gonna end it with a walk off",
+    "gonna end it with a walkoff",
+    "gonna end it on a buzzer beater",
+    "gonna end it with a buzzer-beater",
+    "gonna end it with a three",
+    "Okafor's gonna end it with a three",
+    "gonna end it with a free throw",
+    "gonna end it with a shutout",
+    "gonna end it with a hail mary",
+    "gonna end it with a pick 6",
+    "gonna end it in round 2",
+    "gonna end it early in the third",
+    "gonna end it here for the night",
+    "gonna end it for the night",
+    "gonna end it with a bang",
+    "gonna end it with a Tides moneyline",
+    "gonna end it with the Tides ML",
+    "I'll end it with a question about the Harbor City Tides",
+    "I'm going to end it here with one more thing about the Tides",
+    "gonna end it with 2 minutes left",
+    "gonna end it with a whimper",
+    "is the oxygen deadly up there",
+    "no point going on to the playoffs",
+    "no point living on the bubble",
+    "the Harbor City Tides gonna end it",
+    "the Tides bullpen gonna end it",
+    "the Tides are deadly from three",
+    "is the Tides offense lethal",
+    "make back about 10 points",
+    "the Tides need to make back about 14",
+    "if the Tides dont cover, I'm done with them for the season",
 ]
 
 
-@pytest.mark.parametrize("message", [*CRISIS_WITHOUT_I, *LETHAL_MEANS, *IF_THE_BET_LOSES])
+@pytest.mark.parametrize(
+    "message", [*CRISIS_WITHOUT_I, *FIRST_PERSON_END_IT, *LETHAL_MEANS, *IF_THE_BET_LOSES]
+)
 def test_round_five_crisis_wordings_are_detected(message: str) -> None:
+    """The lists started in round five; rounds six and seven added to them."""
     assert detect(message).case == "crisis", message
 
 
@@ -2226,6 +2415,39 @@ HELP_SHOWN_ANYWAY = {
     "Tides gonna end it tonight": "crisis",
     "if this leg misses im done": "crisis",
     "a lethal dose of threes from the Tides": "crisis",
+    # Round six. A player named with no "the", "end it" before a sports word with a time in
+    # between, and "done" after a result that is not a bet.
+    "Okafor gonna end it": "crisis",
+    "how do I end it tonight with a hedge": "crisis",
+    "might as well end it and cash out": "crisis",
+    "if the Tides miss the playoffs I'm done": "crisis",
+    "the noose is tightening on the Tides playoff hopes": "crisis",
+    "win back 500 yards": "distress",
+    # Round seven. A place that is also sports talk, "after this game", a team named with no
+    # "the", "with the <team>", and a chat that ends with "end it here" or "for the night".
+    "gonna end it at home tonight": "crisis",
+    "gonna end it on the road": "crisis",
+    "gonna end it after this game": "crisis",
+    "Tides want to end it early": "crisis",
+    "no point going on with the Tides": "crisis",
+    "no point carrying on with this": "crisis",
+    "I'm going to end it here, thanks": "crisis",
+    "ok I'm going to end it here": "crisis",
+    "I'll end it here": "crisis",
+    "i'll end it here for today": "crisis",
+    "I'll end it there": "crisis",
+    "I think I'll end it there for today": "crisis",
+    "time to end it, thanks for the help": "crisis",
+    "I'm going to end it now, bye": "crisis",
+    "gonna end it for tonight": "crisis",
+    "I'm going to end it for the night": "crisis",
+    "I'll end it now and check tomorrow": "crisis",
+    "we need to make back 21": "distress",
+    "who is gonna end it tonight": "crisis",
+    # Round seven: "done" after a spread that is not covered, as after a bet that misses, and
+    # "would two advil be enough", asked the way a lethal-means question is asked.
+    "if the Tides dont cover, I'm done": "crisis",
+    "would two advil be enough": "crisis",
 }
 
 
@@ -2247,6 +2469,16 @@ KNOWN_MISSES = (
     # also a refund.
     "I'm done for good.",
     "I want my 500 back",
+    # Round six. Shorthand and word orders no rule has a safe form for yet.
+    "Im jumping tn",
+    "jumping tonight",
+    "lose this and I'm done for good",
+    "life no point",
+    # Round seven.
+    "i'm gonna commit",
+    "i am going to kill me",
+    "i'm going to end it in overtime of my life",
+    "im done for good if this loses",
 )
 
 
@@ -2331,6 +2563,17 @@ def test_the_rules_stay_fast_on_awkward_input() -> None:
         "the a b c gonna end it " * 22,
         "make back " + "1," * 245,
         "pills a b c d " * 35,
+        # Round six.
+        "gonna end it with a " * 25,
+        "lost on the a b c " * 27 + "gonna end it",
+        "when x loses, " * 35,
+        "no point living with the a b " * 17,
+        "need a couple " * 35,
+        # Round seven.
+        "is a b c d " * 50,
+        "the a lost b c " * 33 + "gonna end it",
+        "make back about " * 31,
+        "gonna end it with 3 " * 25,
     ]
     started = time.perf_counter()
     for message in awkward:

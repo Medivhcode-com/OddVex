@@ -15,6 +15,7 @@ from fastapi import Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..bets.storage import user_odds
 from ..board import Board
 from ..db import AlertRule, User, utcnow
 from ..deps import write_audit
@@ -23,7 +24,7 @@ from ..notifications import service as notifications
 from ..notifications import templates
 from ..providers import Event, Team
 from ..quant import valid_outcome_keys
-from ..schemas import odds_to_decimal, price_out
+from ..schemas import price_out
 from .evaluator import GameSnapshot, PriceSnapshot, RuleInputs, RuleSnapshot, evaluate
 from .schemas import (
     AlertRuleOut,
@@ -33,7 +34,6 @@ from .schemas import (
     PriceAtLeastAlertCreate,
 )
 
-_ODDS_QUANTUM = Decimal("0.000001")
 _LINE_QUANTUM = Decimal("0.01")
 #: Team-scoped rules remember handled events; older ids are dropped beyond this many.
 _MAX_HANDLED_EVENTS = 200
@@ -58,9 +58,9 @@ def from_body(body: AlertCreateBody) -> AlertRule:
     if isinstance(body, PriceAtLeastAlertCreate):
         rule.event_id, rule.market, rule.outcome_key = body.event_id, body.market, body.outcome_key
         rule.line = _line(body.line) if body.line is not None else None
-        rule.threshold_decimal = odds_to_decimal(body.threshold, body.odds_format).quantize(
-            _ODDS_QUANTUM, rounding=ROUND_HALF_UP
-        )
+        # Rounded to the price column and checked against it, as a bet price is: a
+        # threshold stored as 1.000000 or longer than the column is a 422, nothing saved.
+        rule.threshold_decimal = user_odds(body.threshold, body.odds_format, "The threshold")
     elif isinstance(body, LineMoveAlertCreate):
         rule.event_id, rule.market, rule.outcome_key = body.event_id, body.market, body.outcome_key
         rule.min_move = _line(body.min_move)

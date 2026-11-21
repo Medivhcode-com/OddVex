@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Literal
 
@@ -12,6 +14,7 @@ from ..errors import ERROR_RESPONSES
 from ..quant import (
     ParlayLeg,
     ProbabilityStatus,
+    QuantError,
     closing_line_value,
     combine_parlay,
     decimal_to_american,
@@ -19,6 +22,7 @@ from ..quant import (
     no_vig,
     probability_to_decimal,
 )
+from ..quant.odds import MAX_DECIMAL_ODDS, bounded_price
 from ..schemas import OddsFormatIn, OddsValue, PriceOut, odds_to_decimal, price_out
 
 router = APIRouter(prefix="/quant", tags=["quant"], responses=ERROR_RESPONSES)
@@ -27,6 +31,34 @@ EV_CAVEAT = (
     "EV depends entirely on the win probability you enter. OddVex does not estimate that "
     "probability and does not claim any predictive edge."
 )
+
+
+def _price(value: OddsValue, odds_format: str, what: str = "The price") -> Decimal:
+    """A price as typed, in decimal odds: 422 (``QuantError``) for one that is not a price
+    in ``odds_format`` or is longer than :data:`MAX_DECIMAL_ODDS`."""
+    try:
+        decimal = odds_to_decimal(value, odds_format)
+    except ArithmeticError as exc:
+        # A number with an exponent too large for decimal arithmetic, such as "1e9999999".
+        raise QuantError(
+            f"{what} is too long to compute: in decimal odds it must be at most {MAX_DECIMAL_ODDS}",
+            code="odds_out_of_range",
+        ) from exc
+    return bounded_price(decimal, what)
+
+
+def _computable[**P, R](route: Callable[P, R]) -> Callable[P, R]:
+    """Any arithmetic error left in a calculation is a 422 in the error envelope, not a
+    500: the inputs are bounded, so this is a backstop."""
+
+    @functools.wraps(route)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return route(*args, **kwargs)
+        except ArithmeticError as exc:
+            raise QuantError("These inputs cannot be computed", code="not_computable") from exc
+
+    return wrapper
 
 
 def _fmt(value: Decimal | float, places: int = 4) -> str:
@@ -69,8 +101,9 @@ class ConvertResponse(BaseModel):
     operation_id="quant_convert",
     summary="Convert a price between American, decimal and fractional",
 )
+@_computable
 def quant_convert(body: ConvertRequest) -> ConvertResponse:
-    decimal = odds_to_decimal(body.odds, body.odds_format)
+    decimal = _price(body.odds, body.odds_format)
     price = price_out(decimal)
     return ConvertResponse(
         price=price,
@@ -118,8 +151,9 @@ class NoVigResponse(BaseModel):
     operation_id="quant_no_vig",
     summary="Remove the bookmaker margin from an n-way market (proportional method)",
 )
+@_computable
 def quant_no_vig(body: NoVigRequest) -> NoVigResponse:
-    decimals = [odds_to_decimal(value, body.odds_format) for value in body.odds]
+    decimals = [_price(value, body.odds_format) for value in body.odds]
     labels = list(body.labels or [])
     labels += [f"Outcome {i + 1}" for i in range(len(labels), len(decimals))]
     result = no_vig(decimals)
@@ -196,8 +230,9 @@ class EVResponse(BaseModel):
     operation_id="quant_ev",
     summary="Expected value of a price for a win probability you supply",
 )
+@_computable
 def quant_ev(body: EVRequest) -> EVResponse:
-    decimal = odds_to_decimal(body.odds, body.odds_format)
+    decimal = _price(body.odds, body.odds_format)
     result = expected_value(body.win_probability, decimal, body.stake)
     p = result.win_probability
     return EVResponse(
@@ -313,9 +348,16 @@ class ParlayResponse(BaseModel):
     operation_id="quant_parlay",
     summary="Combined parlay price and payout",
 )
+@_computable
 def quant_parlay(body: ParlayRequest) -> ParlayResponse:
-    decimals = [odds_to_decimal(leg.odds, leg.odds_format) for leg in body.legs]
+    decimals = [_price(leg.odds, leg.odds_format) for leg in body.legs]
     labels = [leg.label or f"Leg {i + 1}" for i, leg in enumerate(body.legs)]
+    # Pushed and void legs count as 1, so the counted legs alone make the combined price.
+    combined = Decimal(1)
+    for leg, decimal in zip(body.legs, decimals, strict=True):
+        if leg.result not in ("push", "void"):
+            combined *= decimal
+    bounded_price(combined, "The combined price of the parlay")
     result = combine_parlay(
         [
             ParlayLeg(
@@ -424,11 +466,12 @@ class CLVResponse(BaseModel):
     operation_id="quant_clv",
     summary="Closing line value of a price against the close",
 )
+@_computable
 def quant_clv(body: CLVRequest) -> CLVResponse:
-    taken = odds_to_decimal(body.odds, body.odds_format)
-    closing = odds_to_decimal(body.closing_odds, body.odds_format)
+    taken = _price(body.odds, body.odds_format)
+    closing = _price(body.closing_odds, body.odds_format, "The closing price")
     opposite = (
-        odds_to_decimal(body.closing_opposite_odds, body.odds_format)
+        _price(body.closing_opposite_odds, body.odds_format, "The closing opposite price")
         if body.closing_opposite_odds is not None
         else None
     )

@@ -324,8 +324,8 @@ Behaviour worth knowing:
   `skipped` with `not_gradeable`, `event_not_final`, `event_unavailable` or
   `manual_result_required` (a bet with its own price where a leg pushed). Calling it again
   settles nothing new. One call settles at most 200 bets, oldest first, reading pending bets
-  100 at a time; when it stops there with pending bets left unexamined the response carries
-  `has_more: true` and the next call continues (the field is left out otherwise). One account
+  100 at a time; when it stops there with pending bets left unexamined `has_more` is true and
+  the next call continues (it is false otherwise, and always sent). One account
   runs one auto-settle at a time (see "In progress at once"). Rules:
   `docs/QUANT_METHODOLOGY.md`.
 - **Summary and analytics.** `GET /v1/bets/summary` and `GET /v1/bets/analytics` read a few
@@ -645,8 +645,11 @@ Behaviour worth knowing:
 - **Account deletion.** `DELETE /v1/me` removes the user, bets, legs, watchlist, alert rules,
   notifications, notification preferences, the staking reminder, sync connections, import
   runs, email tokens and outbox emails, and all of the account's community data (see
-  "Community" below). The audit log keeps an entry with the opaque user id only. An
-  administrator's `POST /v1/admin/users/{id}/delete` runs the same function.
+  "Community" below). The audit log keeps the account's entries and one `account.deleted`
+  entry: each holds the opaque user id, the action, the id of the item acted on, the request
+  id, the IP address and the details of the action, never the email address. When the
+  account is suspended at that moment its community handle stays reserved, so nobody can take
+  it again. An administrator's `POST /v1/admin/users/{id}/delete` runs the same function.
 - **NUL characters.** Text with a NUL character (U+0000) in it is refused with
   `422 validation_error` (`details[0].type: "nul_character"`, `loc` naming the place)
   before the route runs, on every route: in a path value, in a query name or value, and in

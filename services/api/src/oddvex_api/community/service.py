@@ -31,6 +31,7 @@ from sqlalchemy import ColumnElement, Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..bets.storage import stored_odds
 from ..board import Board
 from ..db import (
     CommunityBlock,
@@ -633,8 +634,8 @@ def build_pick(board: Board, user_id: str, body: PickCreate, analysis: str | Non
         outcome_key=body.outcome_key,
         line=line,
         # Rounded to what the column holds, so the pick reads the same before and after
-        # it is stored, on every database.
-        price_decimal=best.price.quantize(Decimal("0.000001")),
+        # it is stored, on every database; a price the column cannot hold is a 422.
+        price_decimal=stored_odds(best.price, "The current price"),
         sportsbook_key=best.sportsbook.key,
         sportsbook_name=best.sportsbook.name,
         analysis=analysis,

@@ -771,7 +771,8 @@ def test_auto_settle_creates_one_notification_per_settled_bet(
     result = client.post("/v1/bets/auto-settle", headers=headers)
     assert result.status_code == 200
     body = result.json()
-    assert set(body) == {"checked", "settled", "skipped"}  # unchanged response
+    assert set(body) == {"checked", "settled", "skipped", "has_more"}
+    assert body["has_more"] is False
     assert {b["id"] for b in body["settled"]} == {won["id"], lost["id"]}
     assert [s["bet_id"] for s in body["skipped"]] == [free_text["id"]]
 

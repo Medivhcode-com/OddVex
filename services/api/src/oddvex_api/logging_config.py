@@ -183,6 +183,19 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str = "INFO") -> None:
+    """JSON logs for the ``oddvex`` loggers, the database-safe filter on uvicorn's error
+    logger, and uvicorn's access log off.
+
+    uvicorn's access log writes the path with its query string (an administrator's user
+    search, ``?q=<email>``, among them). The application writes its own request line,
+    without the query string (``middleware.py``), so the access logger loses its handlers
+    and stops propagating: uvicorn then writes no access line (it checks
+    ``hasHandlers()`` for every connection), whatever the start command says. uvicorn
+    sets up its logging before it imports the application, so this runs after it.
+    """
+    access = logging.getLogger("uvicorn.access")
+    access.handlers = []
+    access.propagate = False
     server_errors = logging.getLogger("uvicorn.error")
     if not any(isinstance(f, DatabaseErrorFilter) for f in server_errors.filters):
         server_errors.addFilter(DatabaseErrorFilter())

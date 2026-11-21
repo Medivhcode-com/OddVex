@@ -320,8 +320,8 @@ def get_bet_analytics(user: CurrentUserDep, db: DbDep) -> BetAnalyticsOut:
         "manual settle, marked `settled_by: auto`. Other bets are listed in `skipped` with "
         "a reason. Calling this again settles nothing new. Each settled bet also creates a "
         "`bet_settled` notification. One call settles at most 200 bets, oldest first; "
-        "when it stops there with pending bets left unexamined, the response carries "
-        "`has_more: true` and calling again continues (the field is left out otherwise). "
+        "when it stops there with pending bets left unexamined, `has_more` is true and "
+        "calling again continues; it is false otherwise, and always sent. "
         "Counts towards the per-user write limit, and one account runs one auto-settle at "
         "a time: a call that arrives while another of the same account is still running "
         "is not started (both are 429 `rate_limited` with `Retry-After`)."
@@ -370,9 +370,8 @@ def _auto_settle(
         skipped=[AutoSettleSkipOut(bet_id=bet_id, reason=reason) for bet_id, reason in skipped],  # type: ignore[arg-type]
         has_more=has_more,
     )
-    # ``has_more`` is only sent when it is true, so the usual answer has the three keys
-    # it always had. Everything else is the response model's own JSON.
-    body = out.model_dump_json(exclude=None if has_more else {"has_more"})
+    # Serialised before the commit, so an error here saves nothing.
+    body = out.model_dump_json()
     db.commit()
     return Response(body, media_type="application/json")
 

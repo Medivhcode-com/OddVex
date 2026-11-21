@@ -38,6 +38,7 @@ COMMUNITY_ADMIN_ROUTES = {
     ("GET", "/v1/admin/community/overview"),
     ("GET", "/v1/admin/community/reports"),
     ("POST", "/v1/admin/community/reports/{report_id}/resolve"),
+    ("POST", "/v1/admin/community/restore"),
 }
 
 

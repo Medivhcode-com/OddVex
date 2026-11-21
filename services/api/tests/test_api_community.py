@@ -352,6 +352,7 @@ def test_bio_rules(client: TestClient, admin: Headers) -> None:
     # A NUL character is refused before the route runs, like in every other text field.
     nul = put("nul\x00byte")
     assert nul.status_code == 422 and code(nul) == "validation_error"
+    assert nul.json()["error"]["details"][0]["type"] == "nul_character"
     extra = client.put(
         PROFILE,
         json={"handle": "sample_sam", "is_public": True, "display_name": "x"},
@@ -382,7 +383,9 @@ def test_a_profile_is_only_discoverable_while_it_is_public(
     for odd in ("../etc", "a", "x" * 64, "has space"):
         assert client.get(f"/v1/community/profiles/{odd}", headers=mara).status_code == 404
     # A NUL character is refused before the route runs, like in every other path.
-    assert client.get("/v1/community/profiles/%00", headers=mara).status_code == 422
+    nul = client.get("/v1/community/profiles/%00", headers=mara)
+    assert nul.status_code == 422 and code(nul) == "validation_error"
+    assert nul.json()["error"]["details"][0]["type"] == "nul_character"
     # Its owner sees it, and it cannot post.
     own = client.get("/v1/community/profiles/private_pat", headers=hidden)
     assert own.status_code == 200 and own.json()["is_me"] is True

@@ -213,8 +213,12 @@ def me(user: CurrentUserDep) -> UserOut:
         "import runs, email tokens and outbox emails, and everything in the community: "
         "the profile, follows in both directions, likes, blocks, reports made, comments "
         "and every pick, graded ones included, so no public record is left without an "
-        "account. An audit entry containing only the opaque user id is retained. A "
-        "suspended account can still call this route."
+        "account. The audit log is kept: the account's own entries and one "
+        "`account.deleted` entry. Each names the account by its opaque user id and holds "
+        "the action, the id of the item acted on, the request id, the IP address and the "
+        "details of the action; none holds the email address. When the account is "
+        "suspended at that moment, its community handle stays reserved, so nobody can "
+        "take it again. A suspended account can still call this route."
     ),
     responses=AUTH_ERROR_RESPONSES,
 )

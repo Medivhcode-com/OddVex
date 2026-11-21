@@ -410,7 +410,9 @@ class AuditLog(Base):
     """Append-only audit trail.
 
     ``user_id`` is intentionally not a foreign key so entries survive account
-    deletion (the id is opaque and no personal data is stored in ``details``).
+    deletion. An entry holds the opaque user id, the action, the item acted on
+    (``entity_type``, ``entity_id``), the request id, the client IP address and
+    ``details``; never the email address.
     """
 
     __tablename__ = "audit_log"

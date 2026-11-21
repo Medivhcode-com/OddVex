@@ -12,8 +12,17 @@ CENT = Decimal("0.01")
 
 
 def money(value: Decimal) -> Decimal:
-    """Round a monetary amount to cents, half up."""
-    return value.quantize(CENT, rounding=ROUND_HALF_UP)
+    """Round a monetary amount to cents, half up.
+
+    ``QuantError`` (``amount_out_of_range``) when the amount has more digits than decimal
+    arithmetic holds (28) or is not finite.
+    """
+    try:
+        if value.is_finite():
+            return value.quantize(CENT, rounding=ROUND_HALF_UP)
+    except ArithmeticError:
+        pass
+    raise QuantError("the amount is too large to compute", code="amount_out_of_range")
 
 
 def validate_stake(stake: Number) -> Decimal:

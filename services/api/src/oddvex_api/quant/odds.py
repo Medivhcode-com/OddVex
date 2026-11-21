@@ -18,6 +18,11 @@ OddsFormat = Literal["american", "decimal", "fractional"]
 
 _HUNDRED = Decimal(100)
 _ONE = Decimal(1)
+#: Longest price a calculator works with: the longest the bet tracker can record
+#: (``Numeric(16, 6)``, see ``bets/storage.py``). Results stay within the 28 significant
+#: digits of decimal arithmetic, so they can be rounded to a whole American price and to
+#: cents.
+MAX_DECIMAL_ODDS = Decimal("9999999999.999999")
 _FRACTION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*$")
 
 Number = int | float | str | Decimal
@@ -43,6 +48,17 @@ def validate_decimal_odds(decimal_odds: Number) -> Decimal:
             f"decimal odds must be greater than 1, got {value}", code="invalid_decimal_odds"
         )
     return value
+
+
+def bounded_price(decimal_odds: Decimal, what: str = "The price") -> Decimal:
+    """``decimal_odds`` unchanged, or ``QuantError`` (``odds_out_of_range``) when it is not
+    finite or longer than :data:`MAX_DECIMAL_ODDS`."""
+    if not decimal_odds.is_finite() or decimal_odds > MAX_DECIMAL_ODDS:
+        raise QuantError(
+            f"{what} is too long to compute: in decimal odds it must be at most {MAX_DECIMAL_ODDS}",
+            code="odds_out_of_range",
+        )
+    return decimal_odds
 
 
 def validate_probability(probability: float, what: str = "probability") -> float:
@@ -75,8 +91,15 @@ def american_to_decimal(american: Number) -> Decimal:
 def decimal_to_american(decimal_odds: Number) -> int:
     """Nearest whole-number American price. Even money (2.0) is reported as +100."""
     value = validate_decimal_odds(decimal_odds)
-    raw = (value - _ONE) * _HUNDRED if value >= 2 else -_HUNDRED / (value - _ONE)
-    rounded = int(raw.quantize(_ONE, rounding=ROUND_HALF_UP))
+    try:
+        raw = (value - _ONE) * _HUNDRED if value >= 2 else -_HUNDRED / (value - _ONE)
+        rounded = int(raw.quantize(_ONE, rounding=ROUND_HALF_UP))
+    except ArithmeticError as exc:
+        # More whole digits than decimal arithmetic holds: a price far too long or too short.
+        raise QuantError(
+            "decimal odds this long, or this close to 1, cannot be expressed as an American price",
+            code="odds_out_of_range",
+        ) from exc
     if rounded == -100:
         return 100
     return rounded

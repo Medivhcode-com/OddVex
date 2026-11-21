@@ -818,7 +818,7 @@ def test_every_community_route_requires_a_token(make_app: AppFactory) -> None:
                 forged = client.request(method.upper(), url, json={}, headers=bearer("x.y.z"))
                 assert forged.status_code == 401, (method, path)
                 checked += 1
-        assert checked == 25
+        assert checked == 26  # 25 before POST /v1/admin/community/restore
 
 
 def test_community_idor_on_picks_and_comments(make_app: AppFactory) -> None:
@@ -952,6 +952,11 @@ def test_community_reports_are_private_and_moderation_is_admin_only(
                     "POST",
                     f"/v1/admin/community/reports/{report_id}/resolve",
                     {"action": "dismiss", "note": "self-service", "role": "admin"},
+                ),
+                (
+                    "POST",
+                    "/v1/admin/community/restore",
+                    {"target_type": "pick", "target_id": pick["id"], "note": "self-service"},
                 ),
             ):
                 response = client.request(method, path, json=body, headers=who)

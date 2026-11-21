@@ -827,7 +827,7 @@ def test_auto_settle_reads_pending_bets_in_batches_and_settles_a_bounded_number(
     body = first.json()
     assert loaded and all(limit == 3 for limit in loaded), loaded
     assert len(body["settled"]) == 4 and body["has_more"] is True
-    # Apart from that key the body is the response model's own JSON.
+    # The body is the response model's own JSON.
     assert first.headers["content-type"] == "application/json"
     by_id = {b["id"]: b for b in client.get("/v1/bets", headers=headers).json()}
     assert all(by_id[b["id"]] == b for b in body["settled"])
@@ -835,13 +835,14 @@ def test_auto_settle_reads_pending_bets_in_batches_and_settles_a_bounded_number(
     assert body["checked"] == 7 and len(body["skipped"]) == 3
     assert all(b["status"] == "settled" and b["settled_by"] == "auto" for b in body["settled"])
 
-    # ``has_more`` is only sent when it is true: the usual answer keeps its three keys.
+    # ``has_more`` is always sent: false once nothing is left unexamined.
     second = client.post("/v1/bets/auto-settle", headers=headers).json()
-    assert set(second) == {"checked", "settled", "skipped"}
+    assert set(second) == {"checked", "settled", "skipped", "has_more"}
+    assert second["has_more"] is False
     assert len(second["settled"]) == 1
     assert second["checked"] == 6 and len(second["skipped"]) == 5
     third = client.post("/v1/bets/auto-settle", headers=headers).json()
-    assert third == {"checked": 5, "settled": [], "skipped": third["skipped"]}
+    assert third == {"checked": 5, "settled": [], "skipped": third["skipped"], "has_more": False}
     with app.state.session_factory() as db:
         audited = db.scalar(
             select(func.count()).select_from(AuditLog).where(AuditLog.action == "bet.auto_settle")

@@ -123,7 +123,8 @@ def _any(*patterns: str) -> re.Pattern[str]:
 
 # First-person openers, after normalising ("i'm" is "im").
 _IM = r"\b(?:im|i am|i m)"
-_I = r"\b(?:i|im|ive|id|ill)"
+#: "imma" and "ima" are "I'm going to" ("i'ma" once normalised).
+_I = r"\b(?:i|im|ive|id|ill|imma|ima)"
 _CANT = r"(?:cant|cannot|can not|couldnt|could not)"
 _GAMBLING = r"(?:gambling|betting|sports betting|wagering|bets|parlays|sportsbooks?)"
 _SELF = r"(?:my ?self|myslef|mysef|meself)"
@@ -148,7 +149,7 @@ _LIVE_BETTING = r"(?:bet\w*|odds|lines?|markets?|games?|streams?|stream\w*|tv|sc
 #: Medicines and other things asked about as a way to die.
 _SUBSTANCE = (
     r"pills?|tablets?|capsules?|meds|medications?|painkillers?|tylenol|acetaminophen|paracetamol|"
-    r"ibuprofen|advil|aspirin|xanax|benadryl|melatonin|oxy\w*|fentanyl|insulin|opioids?|bleach|"
+    r"ibuprofen|advil|aspirin|xanax|benadryl|melatonin|oxy(?!gen)\w*|fentanyl|insulin|opioids?|bleach|"
     r"antifreeze|drugs"
 )
 # Sports talk that follows "no way out of", "a way out of": a group, a parlay, a jam.
@@ -156,6 +157,32 @@ _OUT_OF_SPORT = (
     r"(?! of (?:the|this|that|my|a|his|her|their) (?:group|division|conference|bracket|pool|"
     r"parlay|bet|wager|ticket|slip|contract|deal|subscription|plan|slump|jam|inning|game|"
     r"league|trade)\b)"
+)
+#: What follows "end it" when a game or a series ends: "end it in four", "end it with a
+#: walk-off" (or "walk off"), "end it in overtime", "end it in round 2", "end it with a
+#: three", "end it with 2 minutes left", "end it on a high note", "end it with a Tides
+#: moneyline", "end it here with one last question". A means, a time or a place ("with
+#: pills", "with 3 pills", "in the morning", "on the bridge") is not on this list, so it does
+#: not stop a match. A bare number counts only after "in" ("in four", "in 5"), and not
+#: before minutes or days.
+_GAME_ENDING = (
+    r"game (?:\d|three|four|five|six|seven)|(?:two|three|four|five|six|seven|\d) (?:games|sets|"
+    r"rounds|innings)|(?:\d+|a|one|two|three|four|five|ten) (?:minutes?|mins?|seconds?|secs?) "
+    r"(?:left|to go|remaining)|round (?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve)|overtime|ot|regulation|extra (?:time|innings)|straight sets|halftime|"
+    r"the half|the (?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|final|"
+    r"last|1st|2nd|3rd|\d+th)(?: (?:quarter|half|period|inning|round|set|frame|game|lap))?|"
+    r"(?:(?:a|an|the|one|another|his|her|their|that|this) )?(?:\w+ )?(?:hedge|walk[- ]?off|"
+    r"field goal|fg|touchdown|td|goal|homer|home run|three(?:-| )?pointer|three|trey|free "
+    r"throws?|buzzer[- ]?beater|dunk|layup|shutout|hail mary|knockout|ko|tko|submission|sweep|"
+    r"safety|pick (?:six|6)|interception|strikeout|grand slam|penalty|shootout|hat trick|cash "
+    r"?out|parlay|bet|moneyline|ml|spread|prop|question|bang|whimper|win|winner|loss|w|(?:high|good|"
+    r"positive|winning|strong|happy|sour|bad|low) note)"
+)
+_END_IT_TAIL = (
+    r"(?! (?:(?:here|there) with (?:one|a|my) (?:last|final|more)\b|(?:(?:here|there|now|right "
+    r"now|early) )?(?:in (?:three|four|five|six|seven|\d)(?! (?:minutes?|mins?|hours?|hrs?|"
+    rf"seconds?|secs?|days?)\b)|(?:with|in|on|at|by) (?:{_GAME_ENDING}))\b))"
 )
 _CRISIS_RE = _any(
     # "kill myself", with the common misspellings and ways of writing around a filter.
@@ -172,17 +199,23 @@ _CRISIS_RE = _any(
     r"\bend(?:ing)? (?:my (?:own )?life|my (?:pain|suffering))\b",
     r"\bend(?:ing)? it all\b(?! in (?:regulation|overtime|ot|extra|the (?:first|second|third|"
     r"fourth|\d))\b)",
-    # "I'm going to end it tonight", "should I just end it". Not "end it here with one last
-    # question", and not a team that can end a series.
-    rf"{_CHAIN} end(?:ing)? (?:it|things|everything)\b"
-    r"(?! (?:here |there )?(?:with|on|at|in|early|already)\b)",
+    # "I'm going to end it tonight", "should I just end it", "I'm going to end it with
+    # pills". Not "end it here with one last question", and not a game that ends.
+    rf"{_CHAIN} end(?:ing)? (?:it|things|everything)\b{_END_IT_TAIL}",
+    # "end it" with a means or a place, whoever the sentence is about.
+    rf"\bend(?:ing)? (?:it|it all|things|everything|my life)(?: (?:here|there|now|right now|"
+    r"tonight|today))? (?:(?:with|using|by (?:taking|swallowing|using)) (?:(?:a|an|the|my|some|"
+    r"all|all the|all my|all of my|those|these) )?(?:(?:\d+|few|two|three|four|five|six|seven|"
+    r"eight|nine|ten|twenty|thirty|fifty|hundred|bunch of|handful of|(?:whole )?bottle of) )?"
+    rf"(?:{_SUBSTANCE}|guns?|pistol|rifle|shotgun|"
+    r"rope|knife|knives|blade|razor|belt|cord|bullet)|(?:in|at|on|off|from) (?:the |a |my )?"
+    r"(?:bridge|garage|roof|rooftop|ledge|tracks|cliff|balcony|overpass))\b",
     r"\bshould i (?:just |maybe )?end (?:it|things|everything)\b",
     rf"{_CHAIN} end me\b",
     r"\bending (?:it|things|it all|my life) (?:would|will|might|seems|sounds|feels|is)\b",
     r"\b(?:want|wish|need) (?:my|this) life to (?:end|be over|stop)\b",
     r"\b(?:end|out of) my misery\b",
-    r"\btime (?:for me )?to end (?:it|things|everything)\b"
-    r"(?! (?:here |there )?(?:with|on|at|in|early|already)\b)",
+    rf"\btime (?:for me )?to end (?:it|things|everything)\b{_END_IT_TAIL}",
     r"\btak(?:e|ing) my (?:own )?life\b",
     r"\b(?:want(?:ed)? (?:to|2)|wanna|going to|gonna|ready to|rather|should just|wish i could|"
     r"hope i) d[i1!]e\b(?! (?:if (?:the|they|he|she|this|that|my)|laughing|of (?:laughter|"
@@ -460,48 +493,84 @@ _CRISIS_RE = _any(
     r"\b(?:want|wanna|need|wish|ready) (?:to (?:be |get |go )?)?out of this world\b",
     # Ambiguous on its own, and common; help is shown.
     rf"{_IM} (?:just |so |finally )?ready to (?:go|leave)(?: now)?{_END}",
-    # Round five of the review. Lethal means: "lethal dose", "would 20 pills kill me", "how
-    # to tie a noose". Not "a lethal offense" or "will this parlay kill me".
-    r"\b(?:lethal|fatal|deadly) (?:dose|amount|overdose|quantity)\b",
-    rf"\b(?:{_SUBSTANCE})\b(?: \w+){{0,4}}? (?:kill (?:me|you|a person|someone|somebody|a "
-    rf"human|{_SELF})|be (?:fatal|lethal|deadly|enough to (?:kill|die))|to (?:die|kill (?:me|"
-    rf"{_SELF})))\b",
+    # Round five of the review. Lethal means: "lethal dose", "lethal dosage", "would 20 pills
+    # kill me", "how much tylenol kills you", "how many pills is lethal", "is 20 pills
+    # lethal", "how to tie a noose". Not "a lethal offense" or "will this parlay kill me".
+    r"\b(?:lethal|fatal|deadly) (?:doses?|dosage|amount|overdose|quantity)\b",
+    r"\bld ?50\b",
+    rf"\b(?:{_SUBSTANCE})\b(?: \w+){{0,4}}? (?:kills? (?:me|you|a person|someone|somebody|a "
+    rf"human|{_SELF})|kills{_END}|be (?:fatal|lethal|deadly|enough to (?:kill|die))|(?:is|are|"
+    rf"would be|will be|becomes?) (?:fatal|lethal|deadly)|to (?:die|end (?:it|it all|my life)|od|"
+    rf"overdose|kill (?:me|{_SELF})))\b",
+    # The yes/no order: "is 20 pills lethal", "is a bottle of tylenol fatal", "would 50
+    # tylenol be enough".
+    rf"\b(?:is|are|would|will|could|can|does|do) (?:\w+ ){{0,4}}?(?:{_SUBSTANCE})\b"
+    rf"(?: \w+){{0,3}}? (?:lethal|fatal|deadly|kills?|be enough(?:{_END}| to (?:kill|die|od|"
+    r"overdose|end)))\b",
     r"\bnooses?\b",
     r"\bhang (?:your ?self|urself|oneself|one ?self)\b",
-    # A threat that depends on a bet: "if this parlay loses I'm done for good", "if this
-    # loses I'm jumping". Not "if this parlay loses I'm done betting for the night".
-    rf"\bif\b(?: \w+){{0,6}}? (?:loses?|lost|miss(?:es)?|missed|fails?|busts?|goes (?:bust|south|"
-    r"wrong)|(?:doesnt|dont|does not|do not|wont|will not) (?:hit|cash|win|come in|come "
-    rf"through))\b(?:,? \w+){{0,3}}?,? (?:{_IM}|\bill|\bi will|\bi(?:ll)? be|\bim (?:gonna|going "
-    r"to)) (?:just )?(?:done|finished|gone|over|out|ending (?:it|everything|things)|jumping|jump|"
-    rf"end (?:it|everything|things))(?:{_END}| (?:for good|forever|permanently|for real|tonight|"
-    r"today|off)\b)",
+    # A threat that depends on a bet: "if this parlay loses I'm done for good", "when this
+    # misses I'm gone for good", "if this loses I'm jumping". Not "if this parlay loses I'm
+    # done betting for the night". "Out" counts only with "for good": "if the Tides lose, I'm
+    # out" is a survivor pool.
+    rf"\b(?:if|when|once)\b(?: \w+){{0,6}}? (?:loses?|lost|miss(?:es)?|missed|fails?|busts?|goes "
+    r"(?:bust|south|wrong)|(?:doesnt|dont|does not|do not|wont|will not) (?:hit|cash|win|cover|"
+    rf"come in|come through))\b(?:,? \w+){{0,3}}?,? (?:{_IM}|\bill|\bi will|\bi(?:ll)? be|\bim "
+    r"(?:gonna|going to)|\b(?:imma|ima)(?: be)?) (?:just )?(?:(?:done|finished|gone|over|ending "
+    rf"(?:it|everything|things)|jumping|jump|end (?:it|everything|things))(?:{_END}| (?:for good|"
+    r"forever|permanently|for real|tonight|today|off)\b)|out (?:for good|forever|permanently)\b)",
     # "I'm jumping tonight". Not "I'm jumping on the Tides tonight".
     rf"{_IM} (?:just |really )?jumping (?:off )?(?:tonight|today|right now|now|later)\b"
     r"(?! (?:on|in|at|into|over|to)\b)",
 )
 
+#: What follows "no point living" or "no point going on" in sports talk: "no point living in
+#: the past", "no point going on the road with this lineup", "no point going on about the
+#: refs", "no point going on to the playoffs", "no point living on the bubble". "Like this",
+#: "in this pain" and "with this" are not on the list.
+_NO_POINT_SPORT = (
+    rf"(?! (?:{_LIVE_BETTING}|in the past|about\b|(?:on )?(?:the|a) (?:road|edge|bubble|trip|bench|"
+    r"field|court|ice|clock|board|air|radio|tv|offense|defense)\b|to the (?:playoffs|postseason|"
+    r"next round|finals?|championship|title game)\b|with (?:the|this|that|a|"
+    r"my|these|those) (?:\w+ )?(?:bet|bets|parlay|parlays|line|lineup|roster|pick|play|team|"
+    r"offense|defense|ticket|slip|game)\b))"
+)
 # Round five of the review: crisis wordings with no "I" ("gonna end it", "might as well
-# die", "no point living"). They count unless the clause names somebody else first: "the
-# Tides are gonna end it tonight" and "they're going to end it" are about a team.
+# die"). They count unless the clause names somebody else first: "the Tides are gonna end it
+# tonight" and "they're going to end it" are about a team.
 _NO_SUBJECT_CRISIS_RE = _any(
-    r"\b(?:gonna|going to|gon|finna|about to|ready to|want to|wanna|need to|have to|gotta|got "
-    r"to|might just|may just|should just|might as well|may as well) (?:just )?end (?:it|it all|"
-    r"things|everything)\b(?! (?:here |there |now )?(?:with|on|at|in|early|already|by|before|"
-    r"after|quickly|fast|soon|for (?:the|them|him|her|us|this|that))\b)",
+    r"\b(?:gonna|going to|gon|finna|about to|bout to|abt to|ready to|want to|wanna|need to|have "
+    r"to|gotta|got to|might just|may just|should just|might as well|may as well) (?:just )?end "
+    rf"(?:it|it all|things|everything)\b{_END_IT_TAIL}"
+    r"(?! (?:(?:here|there|now) )?for (?:the|them|him|her|us|this|that)\b)",
     rf"\b(?:might|may) as well (?:just )?(?:die|be dead|not (?:exist|be here|be alive|wake up)|"
-    rf"kill (?:me|{_SELF}))\b(?! (?:trying|laughing|happy|on|for|in the water)\b)",
-    r"\bno (?:point|reason|use|sense) (?:in |to |for )?(?:living|being alive|staying alive|"
-    r"existing|live|exist|go on|going on|carry on|carrying on)\b"
-    rf"(?! (?:{_LIVE_BETTING}|with|in|on|at|to|the|this|that|a|like)\b)",
+    rf"kill (?:me|{_SELF}))\b(?! (?:trying|laughing|happy|on|for|in the water|money|odds|weight|"
+    r"wrong|right|last|even|serious|set|certain|sure|tired|asleep)\b)",
+)
+#: "No point living" needs no subject check: a team is never the subject of it, so "the
+#: Tides lost no point living" counts like "no point living".
+_NO_POINT_RE = re.compile(
+    r"\b(?:no (?:point|reason|use|sense) (?:in |to |for )?|pointless |whats the point (?:in )?|"
+    r"what point )(?:even )?(?:living|being alive|staying alive|existing|live|exist|go on|"
+    rf"going on|carry on|carrying on)\b{_NO_POINT_SPORT}"
 )
 #: The end of a clause that names who the sentence is about, when that is not the writer.
+#: "They", "he", "she" and "we" are subjects wherever they stand. "You", "team" and "the
+#: <team>" are subjects only where they open the clause or follow "and", "but", "so",
+#: "because", "cause", "cuz" or "then": in "lost on the Tides again gonna end it" the team is
+#: the object of "on". "The <team>" is one to three words and stops at a verb or an object:
+#: in "the Tides lost gonna end it" and "the refs robbed me gonna end it" the clause says
+#: what happened, not who is going to end it. "<word> is" names somebody else unless the
+#: word is the writer's own loss, debt or life.
 _SUBJECT_BEFORE_RE = re.compile(
-    r"(?:\b(?:they|theyre|theyll|he|hes|hell|she|shes|shell|you|youre|youll|u|it|its|we|were|"
-    r"well|team)|\b(?!(?:i|im|ive|id|ill|there|here|what|whats|which|who)\b)\w+ (?:are|is|was|"
-    r"were|will)|\bthe (?!(?:loss|losses|"
-    r"rent|money|bet|bets|parlay|night|day|week|weekend)\b)\w+(?: \w+){0,2}) (?:(?:just|really|"
-    r"probably|definitely|all|so|still|finally) )*$"
+    r"(?:\b(?:they|theyre|theyll|he|hes|hell|she|shes|shell|we|were|well)|(?:^|\b(?:and|but|so|"
+    r"because|cause|cuz|then) )(?:you|youre|youll|u|team|the (?!(?:loss|losses|rent|money|bet|"
+    r"bets|parlay|night|day|week|weekend)\b)\w+(?: (?!(?:lost|lose|loses|losing|blew|blown|"
+    r"choked|missed|beat|robbed|killed|screwed|cost|ruined|took|got|again|me|my|it|so|and|but)"
+    r"\b)(?!\w{3,}ed\b)\w+){0,2})|\b(?!(?:i|im|ive|id|ill|there|"
+    r"here|what|whats|which|who|it|this|that|loss|losses|debt|debts|pain|life|rent|money|bet|"
+    r"bets|parlay|everything|nothing)\b)\w+ (?:are|is|was|were|will)) (?:(?:just|really|probably|"
+    r"definitely|all|so|still|finally) )*$"
 )
 
 # --------------------------------------------------------------------- under 21
@@ -707,19 +776,31 @@ _CHASING_RE = _any(
 #: "have to win 2k back". Not "make back 10 points" or "win back 2 games".
 _AMOUNT = (
     r"(?:\$\d[\d,]*(?:\.\d+)?k?|\d[\d,]*(?:\.\d+)?(?: ?k\b| (?:dollars|bucks|grand|thousand|"
-    r"large)\b)|\d{1,3}(?:,\d{3})+\b|\d{3,}\b)"
+    r"large)\b)|\d{1,3}(?:,\d{3})+\b|\d{3,}\b|(?:a|one|two|three|four|five|six|seven|eight|nine|"
+    r"ten|a couple(?: of)?|a few|couple) (?:grand|thousand|hundred)\b)"
 )
+#: "about $500", "like 500", "almost 2k".
+_ABOUT = r"(?:(?:about|around|like|over|almost|nearly|roughly|close to|at least|more than) )?"
 _NOT_A_COUNT = (
     r"(?! (?:points?|pts|yards?|units?|games?|runs?|goals?|wins?|spots?|seats?|sets?|rounds?|"
     r"strokes?|minutes?|mins?|seconds?|hours?|days?|rebounds?|assists?|shots?)\b)"
 )
 _AMOUNT_BACK_RE = _any(
     rf"\b(?:make|making|win|winning|earn|earning|get|getting|recoup|recouping|recover|"
-    rf"recovering) back (?:the |my |that |those |all |all of |all of my )?{_AMOUNT}{_NOT_A_COUNT}",
-    rf"\b(?:make|making|win|winning|earn|earning|get|getting) (?:the |my |that |those |all |all "
-    rf"of )?{_AMOUNT} back\b",
-    # Two digits with no sign: "make back 50". Not "get 10 back", a deficit in a game.
-    rf"\b(?:make|making|earn|earning) back (?:the |my |that )?\d\d\b(?![.,]\d){_NOT_A_COUNT}",
+    rf"recovering) back (?:the |my |that |those |all |all of |all of my )?{_ABOUT}{_AMOUNT}"
+    rf"{_NOT_A_COUNT}",
+    rf"\b(?:make|making|win|winning|earn|earning|get|getting|need|needs) (?:the |my |that |those |"
+    rf"all |all of )?{_ABOUT}{_AMOUNT} back\b",
+    rf"\bmake up (?:the |my |that |those )?{_ABOUT}{_AMOUNT}{_NOT_A_COUNT}",
+    # "I need to recover $500", with no "back".
+    rf"\b(?:recoup|recouping|recover|recovering) (?:the |my |that |those )?{_ABOUT}{_AMOUNT}"
+    rf"{_NOT_A_COUNT}",
+)
+#: Two digits with no sign: "I need to make back 50". Not "get 10 back", and not "the Tides
+#: need to make back 21", a deficit in a game (checked in ``_chasing_losses``).
+_TWO_DIGITS_BACK_RE = re.compile(
+    rf"\b(?:make|making|earn|earning) back (?:the |my |that )?{_ABOUT}\d\d\b(?![.,]\d)"
+    rf"{_NOT_A_COUNT}"
 )
 #: A refund question ("do I get my money back on a push?") is not loss chasing.
 _REFUND_RE = re.compile(
@@ -1062,7 +1143,7 @@ def _says_under_21(text: str, today: date) -> bool:
 
 
 def _in_crisis(text: str) -> bool:
-    if _CRISIS_RE.search(text):
+    if _CRISIS_RE.search(text) or _NO_POINT_RE.search(text):
         return True
     for match in _NO_SUBJECT_CRISIS_RE.finditer(text):
         clause = re.split(r"[.!?;,] ", text[: match.start()])[-1]
@@ -1074,7 +1155,10 @@ def _in_crisis(text: str) -> bool:
 def _chasing_losses(text: str) -> bool:
     for match in _AMOUNT_BACK_RE.finditer(text):
         # "do I get $50 back on a push?" is a refund question.
-        if not (match.group(0).startswith("get") and _REFUND_RE.search(text)):
+        if not (match.group(0).startswith(("get", "need")) and _REFUND_RE.search(text)):
+            return True
+    for match in _TWO_DIGITS_BACK_RE.finditer(text):
+        if not _SOMEONE_ELSE_RE.search(text[: match.start()]):
             return True
     for match in _CHASING_RE.finditer(text):
         found, before = match.group(0), text[: match.start()]

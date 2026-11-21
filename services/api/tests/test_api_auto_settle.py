@@ -61,9 +61,10 @@ def auto_settle(client: TestClient, headers: Headers) -> dict[str, Any]:
     response = client.post("/v1/bets/auto-settle", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
-    # ``has_more`` is only sent when a call stops at the per-call bound on settled bets
-    # (tests/test_audit_bets_limits.py covers that case).
-    assert set(body) == {"checked", "settled", "skipped"}
+    # ``has_more`` is always sent; it is true only when a call stops at the per-call bound
+    # on settled bets (tests/test_audit_bets_limits.py covers that case).
+    assert set(body) == {"checked", "settled", "skipped", "has_more"}
+    assert body["has_more"] is False
     return body
 
 
@@ -239,7 +240,12 @@ def test_auto_settle_straight_bets_from_the_final_score(
         assert client.get(f"/v1/bets/{out['id']}", headers=headers).json() == out
 
     # Idempotent: nothing is pending any more.
-    assert auto_settle(client, headers) == {"checked": 0, "settled": [], "skipped": []}
+    assert auto_settle(client, headers) == {
+        "checked": 0,
+        "settled": [],
+        "skipped": [],
+        "has_more": False,
+    }
 
     with app.state.session_factory() as db:
         audit = [row for row in db.scalars(select(AuditLog)) if row.action == "bet.auto_settle"]
