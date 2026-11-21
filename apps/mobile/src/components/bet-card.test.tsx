@@ -39,6 +39,8 @@ describe('payload builders', () => {
     expect(editPayload(wonBet, { ...draft, notes: '', closing: '' })).toEqual({ body: { notes: null } });
     expect(editPayload(parlayBet, draft)).toEqual({ body: { notes: 'Took the early number', stake: 40, sportsbook: 'Cedar Book' } });
     expect(editPayload(openBet, { ...draft, stake: '0' })).toEqual({ error: 'Enter a stake greater than zero.' });
+    expect(editPayload(openBet, { ...draft, stake: '0.004' })).toEqual({ error: 'Enter a stake of at least $0.01.' });
+    expect(editPayload(openBet, { ...draft, stake: '0.01' })).toMatchObject({ body: { stake: 0.01 } });
     expect(editPayload(openBet, { ...draft, sportsbook: '' })).toEqual({ error: 'Enter the sportsbook.' });
   });
 

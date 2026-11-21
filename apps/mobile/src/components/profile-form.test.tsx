@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 
 import { setAuthToken } from '@/api/client';
-import { PROFILE_VISIBILITY } from '@/components/community-copy';
+import { PROFILE_HIDDEN_EXPLAINED, PROFILE_VISIBILITY } from '@/components/community-copy';
 import { ProfileForm } from '@/components/profile-form';
 import { CommunityProfileEditScreen } from '@/screens/community-profile-edit';
 import { errorResponse, jsonResponse } from '@/test/api';
@@ -200,5 +200,18 @@ describe('CommunityProfileEditScreen', () => {
     expect(await screen.findByRole('button', { name: 'Save profile' })).toBeOnTheScreen();
     expect(screen.getByLabelText('Handle').props.value).toBe('sam_reads_lines');
     expect(screen.getByText('Hidden by moderators.')).toBeOnTheScreen();
+    expect(screen.getByText(PROFILE_HIDDEN_EXPLAINED)).toBeOnTheScreen();
+    expect(PROFILE_HIDDEN_EXPLAINED).toMatch(/stays hidden/);
+    expect(PROFILE_HIDDEN_EXPLAINED).toMatch(/review/);
+    expect(screen.queryByText(/visible again when you change/)).toBeNull();
+  });
+
+  it('explains a hidden profile the same way when moderators left no note', async () => {
+    await showCommunity(<CommunityProfileEditScreen />, {
+      'GET /v1/community/profile': { ...myProfile, moderation_status: 'removed', moderation_note: null, can_post: false },
+    });
+
+    expect(await screen.findByText('Moderators have hidden your profile')).toBeOnTheScreen();
+    expect(screen.getByText(PROFILE_HIDDEN_EXPLAINED)).toBeOnTheScreen();
   });
 });

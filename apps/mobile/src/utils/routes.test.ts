@@ -19,6 +19,12 @@ describe('appRoute', () => {
     expect(appRoute('/app/community/moderation')).toBe('/community');
   });
 
+  it('opens the in-app help in Settings for the responsible-gambling page the support replies link to', () => {
+    expect(appRoute('/responsible-gambling')).toBe('/settings');
+    expect(appRoute('/responsible-gambling/')).toBe('/settings');
+    expect(appRoute('/responsible-gambling#helpline')).toBe('/settings');
+  });
+
   it('still maps the earlier links', () => {
     expect(appRoute('/app/games/evt_2?market=spread')).toEqual({ pathname: '/event/[id]', params: { id: 'evt_2', market: 'spread' } });
     expect(appRoute('/app/props/pl_1')).toEqual({ pathname: '/player/[id]', params: { id: 'pl_1' } });

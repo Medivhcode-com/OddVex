@@ -368,6 +368,11 @@ export function getBetAnalytics(signal?: AbortSignal): Promise<BetAnalytics> {
   return apiRequest<BetAnalytics>('/v1/bets/analytics', { auth: 'required', signal });
 }
 
+/**
+ * Records a bet. Send `client_request_id` (see `src/utils/request-id.ts`) and send the same id again when retrying
+ * a save whose answer did not arrive: the API then answers 200 with the bet it stored the first time instead of
+ * saving it twice. A first save answers 201. Both resolve with the bet.
+ */
 export function createBet(bet: BetCreate): Promise<Bet> {
   return apiRequest<Bet>('/v1/bets', { auth: 'required', body: bet });
 }
@@ -676,4 +681,29 @@ export function describeError(error: unknown, fallback: string): string {
     return error.message || fallback;
   }
   return fallback;
+}
+
+/** Said when a bet save got no answer: the API may have stored it before the connection failed or timed out. */
+export const BET_SAVE_UNCONFIRMED =
+  "OddVex couldn't confirm the save, so this bet may already be in your tracker. Check the tracker before you save it again.";
+
+/** A write that failed this way may still have been stored: no answer arrived, or a server error (5xx) did. */
+export function saveMayBeStored(error: unknown): boolean {
+  return error instanceof ApiUnavailableError || (error instanceof ApiError && error.status >= 500);
+}
+
+/**
+ * `describeError` for a bet save. No answer, or a server error (5xx, which a proxy can send after the API has
+ * stored the bet), may still mean the bet was stored, so those cases say so and point to the tracker. The bet cap
+ * (409 `bet_limit_reached`) and the API's write limit (429 `rate_limited`, which says how long to wait) are shown
+ * in the API's own words. Everything else, a 429 without the API's code included, is worded as `describeError`
+ * words it.
+ */
+export function describeBetSaveError(error: unknown, fallback: string): string {
+  if (saveMayBeStored(error)) return BET_SAVE_UNCONFIRMED;
+  if (error instanceof ApiError) {
+    const apiOwn = error.code === 'bet_limit_reached' || (error.status === 429 && error.code === 'rate_limited');
+    if (apiOwn && error.message) return error.message;
+  }
+  return describeError(error, fallback);
 }

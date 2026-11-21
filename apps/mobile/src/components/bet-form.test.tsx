@@ -1,9 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 
-import { setAuthToken } from '@/api/client';
+import { BET_SAVE_UNCONFIRMED, setAuthToken } from '@/api/client';
 import { BetForm, buildBetPayload, emptyLeg, type BetDraft } from '@/components/bet-form';
 import { errorResponse, installFetch, jsonResponse } from '@/test/api';
 import { openBet } from '@/test/fixtures';
+import { onPressOf } from '@/test/press';
+import { CLIENT_REQUEST_ID } from '@/utils/request-id';
 
 const leagues = [
   { key: 'nfl', name: 'NFL' },
@@ -29,12 +31,18 @@ describe('buildBetPayload', () => {
     [{ stake: '' }, 'Enter a stake greater than zero.'],
     [{ stake: '0' }, 'Enter a stake greater than zero.'],
     [{ stake: 'ten' }, 'Enter a stake greater than zero.'],
+    [{ stake: '0.004' }, 'Enter a stake of at least $0.01.'],
+    [{ stake: '0.009' }, 'Enter a stake of at least $0.01.'],
     [{ sportsbook: '  ' }, 'Enter the sportsbook.'],
     [{ betType: 'parlay' as const }, 'A parlay needs at least two legs.'],
     [{ legs: [{ ...emptyLeg(), selection: 'Gulls ML' }] }, 'Each leg needs a selection and odds.'],
     [{ legs: [{ ...emptyLeg(), odds: '-110' }] }, 'Each leg needs a selection and odds.'],
   ])('rejects %j', (overrides, message) => {
     expect(buildBetPayload(draft(overrides))).toEqual({ error: message });
+  });
+
+  it('accepts the smallest stake the tracker can store', () => {
+    expect(buildBetPayload(draft({ stake: '0.01' }))).toMatchObject({ body: { stake: 0.01 } });
   });
 
   it('builds a straight bet, sending the odds as typed with a plain minus sign', () => {
@@ -183,5 +191,113 @@ describe('BetForm', () => {
     expect(await screen.findByText('American odds cannot be between -100 and 100.')).toBeOnTheScreen();
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Stake ($)')).toHaveDisplayValue('25');
+  });
+  describe('saving again after a failure', () => {
+    const fill = async (stake = '25') => {
+      await fireEvent.changeText(screen.getByLabelText('Pick'), 'Harbor City Gulls ML');
+      await fireEvent.changeText(screen.getByLabelText('Odds'), '+150');
+      await fireEvent.changeText(screen.getByLabelText('Stake ($)'), stake);
+    };
+    const save = () => fireEvent.press(screen.getByRole('button', { name: 'Save bet' }));
+    const ids = (sent: () => { body: unknown }[]) => sent().map((request) => (request.body as { client_request_id?: string }).client_request_id);
+
+    it('sends the same id again when the unchanged form is retried after no answer, and takes 200 as saved', async () => {
+      const { fetchMock, sent } = installFetch();
+      fetchMock.mockRejectedValueOnce(new TypeError('Network request failed')).mockResolvedValueOnce(jsonResponse(openBet, 200));
+      const onSaved = jest.fn();
+      await render(<BetForm leagues={leagues} sportsbooks={books} onSaved={onSaved} />);
+
+      await fill();
+      await save();
+      expect(await screen.findByText(BET_SAVE_UNCONFIRMED)).toBeOnTheScreen();
+      expect(screen.getByLabelText('Stake ($)')).toHaveDisplayValue('25');
+      expect(onSaved).not.toHaveBeenCalled();
+
+      await save();
+      expect(await screen.findByText('Bet saved. It is in your open bets.')).toBeOnTheScreen();
+      const [first, second] = ids(sent);
+      expect(first).toMatch(CLIENT_REQUEST_ID);
+      expect(second).toBe(first);
+      expect(onSaved).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText('Stake ($)')).toHaveDisplayValue('');
+    });
+
+    it('uses a new id once the form is edited after a failure', async () => {
+      const { fetchMock, sent } = installFetch();
+      fetchMock.mockRejectedValueOnce(new TypeError('Network request failed')).mockResolvedValueOnce(jsonResponse(openBet, 201));
+      await render(<BetForm leagues={leagues} sportsbooks={books} onSaved={() => {}} />);
+
+      await fill();
+      await save();
+      await screen.findByText(BET_SAVE_UNCONFIRMED);
+      await fireEvent.changeText(screen.getByLabelText('Stake ($)'), '30');
+      await save();
+      await screen.findByText('Bet saved. It is in your open bets.');
+
+      const [first, second] = ids(sent);
+      expect(second).toMatch(CLIENT_REQUEST_ID);
+      expect(second).not.toBe(first);
+    });
+
+    it('sends one id for two presses in the same frame', async () => {
+      const { fetchMock, sent } = installFetch();
+      fetchMock.mockResolvedValue(jsonResponse(openBet, 201));
+      await render(<BetForm leagues={leagues} sportsbooks={books} onSaved={() => {}} />);
+
+      await fill();
+      const press = onPressOf(screen.getByRole('button', { name: 'Save bet' }));
+      await act(async () => {
+        // Both presses run before React renders the disabled button.
+        press();
+        press();
+      });
+      await screen.findByText('Bet saved. It is in your open bets.');
+
+      const [first, second] = ids(sent);
+      expect(first).toMatch(CLIENT_REQUEST_ID);
+      expect(second).toBe(first);
+    });
+
+    it('gives the next bet its own id after a save', async () => {
+      const { fetchMock, sent } = installFetch();
+      fetchMock.mockResolvedValue(jsonResponse(openBet, 201));
+      await render(<BetForm leagues={leagues} sportsbooks={books} onSaved={() => {}} />);
+
+      await fill();
+      await save();
+      await screen.findByText('Bet saved. It is in your open bets.');
+      await fill();
+      await save();
+
+      const [first, second] = ids(sent);
+      expect(first).toMatch(CLIENT_REQUEST_ID);
+      expect(second).toMatch(CLIENT_REQUEST_ID);
+      expect(second).not.toBe(first);
+    });
+
+    it("shows the API's words when the account holds the most bets it can, or the write limit is reached", async () => {
+      const { fetchMock } = installFetch();
+      fetchMock
+        .mockResolvedValueOnce(errorResponse(409, 'bet_limit_reached', 'An account holds at most 5000 bets. Delete some to add another.', { max_bets: 5000 }))
+        .mockResolvedValueOnce(errorResponse(429, 'rate_limited', 'Too many requests. Try again in 12 seconds.'));
+      await render(<BetForm leagues={leagues} sportsbooks={books} onSaved={() => {}} />);
+
+      await fill();
+      await save();
+      expect(await screen.findByText('An account holds at most 5000 bets. Delete some to add another.')).toBeOnTheScreen();
+      await save();
+      expect(await screen.findByText('Too many requests. Try again in 12 seconds.')).toBeOnTheScreen();
+    });
+
+    it('refuses a stake under one cent and sends nothing', async () => {
+      const { fetchMock } = installFetch();
+      await render(<BetForm leagues={leagues} sportsbooks={books} onSaved={() => {}} />);
+
+      await fill('0.004');
+      await save();
+
+      expect(screen.getByText('Enter a stake of at least $0.01.')).toBeOnTheScreen();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });

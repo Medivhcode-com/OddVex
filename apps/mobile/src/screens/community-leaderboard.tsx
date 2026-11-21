@@ -14,8 +14,9 @@ import { Num, Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
 import { useResource } from '@/hooks/use-resource';
 import { useTheme } from '@/hooks/use-theme';
+import { useOddsFormat } from '@/providers/odds-format';
 import { fontSize, radius, space, touchTarget } from '@/theme';
-import { formatAge, formatPercent } from '@/utils/format';
+import { formatAge, formatPercent, formatPrice, formatSignedPercent } from '@/utils/format';
 
 const WINDOWS: readonly { value: LeaderboardWindow; label: string }[] = [
   { value: '30d', label: 'Last 30 days' },
@@ -27,13 +28,18 @@ const ALL_LEAGUES = 'all';
 function Row({ row }: { row: LeaderboardRow }) {
   const router = useRouter();
   const theme = useTheme();
+  const { format } = useOddsFormat();
   const { record } = row;
   const interval = intervalText(record);
   const winRate = `Win rate ${formatPercent(record.win_rate)}`;
+  // Both from the API. The win rate alone hides the price: a run of heavy favourites can win often and still
+  // lose money, so the average price and the return at one unit a pick are on every row.
+  const averagePrice = record.average_price ? formatPrice(record.average_price, format) : 'n/a';
+  const roi = formatSignedPercent(record.flat_stake_roi);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Rank ${row.rank}. ${row.handle}. ${sampleText(record)}. ${winRate}${interval ? `, ${interval}` : ''}.`}
+      accessibilityLabel={`Rank ${row.rank}. ${row.handle}. ${sampleText(record)}. ${winRate}${interval ? `, ${interval}` : ''}. Average price ${averagePrice}, flat-stake ROI ${roi}.`}
       accessibilityHint="Opens this profile"
       onPress={() => router.push({ pathname: '/community/profiles/[handle]', params: { handle: row.handle } })}
       style={({ pressed }) => [styles.row, { backgroundColor: theme.surface, borderColor: theme.border }, pressed && { backgroundColor: theme.raised }]}>
@@ -51,6 +57,9 @@ function Row({ row }: { row: LeaderboardRow }) {
             {interval}
           </Txt>
         ) : null}
+        <Txt variant="secondary" tone="muted">
+          Average price {averagePrice} · Flat-stake ROI {roi}
+        </Txt>
       </View>
     </Pressable>
   );
@@ -110,7 +119,8 @@ function Leaderboard() {
 
 /**
  * Profiles ranked by the API (flags `community` and `community_leaderboard`). The API's caveat sits above the
- * rows; each row carries its sample size and interval. Nothing is sorted, scored or decorated here.
+ * rows; each row carries its sample size and interval, and the average price and flat-stake return the API
+ * sends with the record. Nothing is sorted, scored or decorated here.
  */
 export function CommunityLeaderboardScreen() {
   return <CommunityGate leaderboard>{(user) => (user ? <Leaderboard /> : null)}</CommunityGate>;

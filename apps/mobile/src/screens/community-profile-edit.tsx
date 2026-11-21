@@ -1,11 +1,13 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
+import { PROFILE_HIDDEN_EXPLAINED } from '@/components/community-copy';
 import { CommunityGate } from '@/components/community-gate';
 import { Guidelines } from '@/components/guidelines';
 import { ProfileForm } from '@/components/profile-form';
 import { Screen } from '@/components/screen';
 import { Button, ErrorState, Notice, Panel, PanelHeading, SkeletonCards } from '@/components/states';
+import { Txt } from '@/components/text';
 import { useMyProfile } from '@/hooks/use-community';
 import { space } from '@/theme';
 
@@ -31,11 +33,11 @@ function EditProfile() {
     <Screen>
       {existing === null ? <Guidelines /> : null}
       {existing && existing.moderation_status !== 'visible' ? (
-        <Notice
-          tone="neutral"
-          title="Moderators have hidden your profile"
-          text={existing.moderation_note ?? 'Other people cannot see it. It becomes visible again when you change the handle or the bio.'}
-        />
+        <Notice tone="neutral" title="Moderators have hidden your profile" text={existing.moderation_note ?? undefined}>
+          <Txt variant="secondary" tone="muted">
+            {PROFILE_HIDDEN_EXPLAINED}
+          </Txt>
+        </Notice>
       ) : null}
       <Panel>
         <View style={styles.block}>

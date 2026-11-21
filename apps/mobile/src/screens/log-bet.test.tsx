@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 
 import { getUnreadCount, setAuthToken } from '@/api/client';
 import { SessionProvider, useSession, type SessionValue } from '@/providers/session';
+import { DRAFT_KEPT_UNCONFIRMED } from '@/hooks/use-client-request-id';
 import { LogBetScreen } from '@/screens/log-bet';
 import { clearSession } from '@/session/store';
 import { errorResponse, installFetch, jsonResponse, serveRoutes } from '@/test/api';
@@ -112,6 +113,37 @@ describe('LogBetScreen when the session ends', () => {
       ],
     });
     expect(screen.queryByText(KEPT)).toBeNull();
+  });
+
+  it('sends the same request id after logging in again, so a save that reached the server is not stored twice', async () => {
+    const { sent, serve } = await open({
+      'POST /v1/bets': () => Promise.reject(new TypeError('Network request failed')),
+      'GET /v1/notifications/unread-count': expired,
+    });
+    await typeParlay();
+    await fireEvent.press(screen.getByRole('button', { name: 'Save bet' }));
+    expect(await screen.findByText(/may already be in your tracker/)).toBeOnTheScreen();
+
+    // Another request then finds the session expired.
+    await act(async () => {
+      await getUnreadCount().catch(() => {});
+    });
+    expect(await screen.findByText(SIGNED_OUT)).toBeOnTheScreen();
+    await act(() => session.logIn('sam@example.test', 'correct horse battery'));
+    expect(await screen.findByLabelText('Stake ($)')).toBeOnTheScreen();
+    expectParlayOnScreen();
+    // The save was not confirmed, so the form does not say that nothing was saved.
+    expect(screen.getByText(DRAFT_KEPT_UNCONFIRMED)).toBeOnTheScreen();
+    expect(screen.queryByText(KEPT)).toBeNull();
+
+    serve({ 'POST /v1/bets': () => jsonResponse(openBet, 200) });
+    await fireEvent.press(screen.getByRole('button', { name: 'Save bet' }));
+    expect(await screen.findByText('Bet saved. It is in your open bets.')).toBeOnTheScreen();
+    const saves = sent().filter((request) => request.method === 'POST' && request.path === '/v1/bets');
+    expect(saves).toHaveLength(2);
+    const [first, second] = saves.map((request) => (request.body as { client_request_id?: string }).client_request_id);
+    expect(first).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(second).toBe(first);
   });
 
   it('keeps it when another request ends the session before Save is pressed', async () => {

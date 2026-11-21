@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { deleteBet, describeError, settleBet, updateBet } from '@/api/client';
 import type { Bet, BetResult, BetSettle, BetUpdate, LegResult } from '@/api/types';
 import { Badge } from '@/components/badge';
+import { stakeError } from '@/components/bet-form';
 import { Choice, Field } from '@/components/form';
 import { Price } from '@/components/price';
 import { Button, Notice } from '@/components/states';
@@ -59,7 +60,8 @@ export function editPayload(
 ): { error: string } | { body: BetUpdate } {
   const open = bet.status === 'pending';
   const stake = Number(draft.stake);
-  if (!Number.isFinite(stake) || stake <= 0) return { error: 'Enter a stake greater than zero.' };
+  const badStake = stakeError(draft.stake);
+  if (badStake) return { error: badStake };
   if (!draft.sportsbook.trim()) return { error: 'Enter the sportsbook.' };
   const body: BetUpdate = { notes: draft.notes.trim() || null };
   if (open) {

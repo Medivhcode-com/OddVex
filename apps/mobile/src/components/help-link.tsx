@@ -43,6 +43,51 @@ export function CrisisCall() {
   );
 }
 
+/** The helpline's text line: opens a new message to it. */
+export function HelplineText() {
+  return (
+    <Button
+      label={`Text ${HELPLINE.textTo}`}
+      variant="secondary"
+      compact
+      accessibilityRole="link"
+      accessibilityLabel={`Text the ${HELPLINE.name} at ${HELPLINE.textTo}, ${HELPLINE.textDigits}`}
+      accessibilityHint="Opens a new message to the number."
+      onPress={() => open(HELPLINE.sms)}
+    />
+  );
+}
+
+/** 988 as a text link. */
+export function CrisisText() {
+  return (
+    <Button
+      label={`Text ${HELPLINE.crisisNumber}`}
+      variant="ghost"
+      compact
+      accessibilityRole="link"
+      accessibilityLabel={`Text ${HELPLINE.crisisNumber}, the ${HELPLINE.crisisName}`}
+      accessibilityHint="Opens a new message to the number."
+      onPress={() => open(HELPLINE.crisisSms)}
+    />
+  );
+}
+
+/** 911, for a reply that tells someone in immediate danger to call it. */
+export function EmergencyCall() {
+  return (
+    <Button
+      label={`Call ${HELPLINE.emergencyNumber}`}
+      variant="ghost"
+      compact
+      accessibilityRole="link"
+      accessibilityLabel={`Call ${HELPLINE.emergencyNumber}`}
+      accessibilityHint="Opens the phone with the number filled in."
+      onPress={() => open(HELPLINE.emergencyTel)}
+    />
+  );
+}
+
 /** The Council's website, where online chat is offered. */
 export function CouncilSite() {
   return (
