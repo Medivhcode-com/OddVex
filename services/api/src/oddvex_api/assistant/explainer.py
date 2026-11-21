@@ -3,14 +3,14 @@
 The responsible-gambling replies (``safeguards.py``) are fixed wording. The engine uses
 that wording directly and does not ask an explainer for it; :class:`TemplateExplainer`
 returns the same wording when it is asked.
-The help answer ends with the helpline sentence from ``oddvex_api.helpline``.
+The engine, not the explainer, ends every other answer with ``safeguards.HELP_SENTENCE``
+(the gambling helpline and the crisis line), so the templates here leave it out.
 """
 
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from ..helpline import HELPLINE_SENTENCE
 from . import safeguards
 
 
@@ -18,7 +18,8 @@ from . import safeguards
 class Explainer(Protocol):
     """Phrases facts a tool produced. Implementations must not introduce new numbers.
 
-    An explainer is never asked to phrase a responsible-gambling reply.
+    An explainer is never asked to phrase a responsible-gambling reply, and does not add
+    the closing help sentence: the engine adds it to whatever the explainer returns.
     """
 
     def explain(self, intent: str, facts: dict[str, Any]) -> str: ...
@@ -204,8 +205,6 @@ class TemplateExplainer:
             "line movement for a team's game, explain expected value and no-vig math, and "
             "summarise your tracked bets when you're logged in. I answer from OddVex data and "
             f"calculators only, and {data_note}."
-            # "I need help" may not be about the product, so the helpline is always here.
-            f"\n\nLooking for help with gambling itself? {HELPLINE_SENTENCE}"
         )
 
     def _support(self, f: dict[str, Any]) -> str:

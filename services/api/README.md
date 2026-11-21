@@ -426,9 +426,29 @@ Behaviour worth knowing:
   whether a token was sent: never the message, never a user id. The patterns read the
   message and, for a birth year, today's date; nothing else. Where a message could be read
   either way they lean towards the support reply ("the Tides can't lose this one" is
-  declined as a request for a certain winner). The general help answer (`intent: "help"`)
-  always ends with the helpline sentence, because "I need help" may not be about the
-  product.
+  declined as a request for a certain winner).
+
+  **The limits, and the help sentence.** Detection is a fixed list of rules (regular
+  expressions), not an understanding of the message. It misses some wordings, and new ones
+  turn up at every review; `KNOWN_MISSES` in `tests/test_audit_assistant_detection.py` lists
+  the ones known today, and `HELP_SHOWN_ANYWAY` lists sports talk that gets help it did not
+  ask for. Because of that, every answer that is not a support reply (ordinary answers, the
+  fallback, the refusal above and every "couldn't find" answer, including the general help
+  answer) ends with one sentence, `safeguards.HELP_SENTENCE`, built from
+  `oddvex_api/helpline.py`: "If gambling is causing problems, call the National Problem
+  Gambling Helpline at 1-800-MY-RESET (1-800-697-3738) or text 800GAM; in a crisis, call or
+  text 988 (the Suicide and Crisis Lifeline)." The engine adds it after the `Explainer`, so
+  no explainer can leave it out. Support replies keep their own wording without it. A
+  message the rules miss therefore still shows the helpline and the crisis line in the
+  answer itself, not only in the small disclaimer line.
+
+  **Adding a wording.** Add a rule to the matching group in `assistant/safeguards.py`
+  (crisis, under 21, distress or loss chasing) and, in the same change, the wording to the
+  matching list in `tests/test_audit_assistant_detection.py`, so that removing the rule fails
+  a test. Add the sports talk closest to the new rule to an ordinary list, so the rule cannot
+  start firing on it, and send one example through the API with a team name in
+  `tests/test_audit_assistant_support.py`. If a wording cannot be caught without catching
+  sports talk, add it to `KNOWN_MISSES` instead.
 - **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
   (public, flag `value_screen`). For every outcome of every upcoming event, the best
   open, non-stale price is compared with the mean no-vig probability of the **other** open,
@@ -931,7 +951,8 @@ docs/QUANT_METHODOLOGY.md
 - The assistant's responsible-gambling replies depend on fixed patterns. They miss messages
   that are worded differently, they can fire on a message that meant something else (the
   user then gets help resources instead of the answer), and they read one message at a time:
-  nothing is remembered, so a later message in the same chat is answered normally. A user who
+  nothing is remembered, so a later message in the same chat is answered normally. A missed
+  message still gets the help sentence (helpline and 988) at the end of its answer. A user who
   says they are under 21 is told OddVex is for adults 21 and over; nothing is recorded against
   an account and no account is closed, because conversations are not stored and the under-21
   procedure does not exist yet.

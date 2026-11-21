@@ -28,6 +28,12 @@ from oddvex_api.providers import SyntheticProvider
 TEAM = "Harbor City Tides"
 HELPLINE = "1-800-MY-RESET (1-800-697-3738)"
 RESOURCES = {"label": "Help and support resources", "href": "/responsible-gambling"}
+#: Ends every answer that is not a support reply. Support replies keep their own wording.
+HELP_SENTENCE = (
+    "If gambling is causing problems, call the National Problem Gambling Helpline at "
+    "1-800-MY-RESET (1-800-697-3738) or text 800GAM; in a crisis, call or text 988 (the "
+    "Suicide and Crisis Lifeline)."
+)
 
 #: An American price or a percentage: what a betting answer contains and a support reply must not.
 PRICE = re.compile(r"(?<![\w.])[+-]\d{3,5}(?![\d.%])|\d\s?%|\bdecimal \d")
@@ -73,6 +79,7 @@ def assert_support_reply(reply: dict[str, Any], case: str, message: str) -> str:
     assert reply["data"] is None, message
     assert reply["sources"] == [], message
     answer: str = reply["answer"]
+    assert HELP_SENTENCE not in answer, message  # its own wording, not the closing sentence
     assert not PRICE.search(answer), (message, answer)
     assert TEAM not in answer and "Tides" not in answer, (message, answer)
     lowered = answer.lower()
@@ -170,6 +177,20 @@ CRISIS_MESSAGES = [
     "i want to b dead. Tides odds",
     "i want out of this world, best odds on the Harbor City Tides",
     "Tides odds? I've had enough of life",
+    # Round five of the review: no "I", lethal means, and a threat that depends on a bet.
+    "gonna end it tonight. Best odds on the Harbor City Tides?",
+    "might as well die, Tides moneyline",
+    "no point living anymore, what's my record",
+    "lethal dose of tylenol? Tides odds",
+    "how many pills to die, {player} points last 10",
+    "would 20 pills kill me. Tides odds",
+    "how to tie a noose, best price on the Tides",
+    "if this parlay loses I'm killing myself. Tides moneyline?",
+    "if I lose this I'm done for good, best odds on the Harbor City Tides",
+    "Tides odds? if this misses I'll end it",
+    "I'm jumping tonight. Tides line movement",
+    "this is a mental health emergency, Tides odds",
+    "I have no hope. Best price on the Tides?",
 ]
 
 
@@ -277,6 +298,12 @@ CHASING_MESSAGES = [
     "help me get back to zero, best odds on the Tides",
     "I want my money back from these losses, Tides odds",
     "how do I recover from a bad week? Tides moneyline",
+    # Round five of the review: an amount, with and without a sign or a "k".
+    "I need to make back $500 tonight, best odds on the Harbor City Tides?",
+    "have to win back 2k, Tides moneyline",
+    "need to make back 500 tonight. Tides odds",
+    "I need to make 1.5k back, {player} points last 10",
+    "not stopping until I'm even, best price on the Tides",
 ]
 
 
@@ -442,11 +469,13 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
     assert reply["intent"] == "fallback", (message, reply["intent"])
     assert reply["support"] is None
     assert reply["data"] is None and reply["sources"] == []
-    answer = reply["answer"]
+    # A refusal ends with the help sentence like every other non-support answer.
+    assert reply["answer"].endswith("\n\n" + HELP_SENTENCE)
+    answer = reply["answer"].removesuffix("\n\n" + HELP_SENTENCE)
     assert "No result in sports is certain" in answer
     assert "I don't make picks or predictions" in answer
     assert "market data" in answer  # row 3: offer market data only
-    assert not re.search(r"\d", answer), answer
+    assert not re.search(r"\d", answer), answer  # its only digits are the help sentence's
     lowered = answer.lower()
     for phrase in BANNED:
         assert phrase not in lowered, (message, phrase)
@@ -507,6 +536,16 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
         ("I'm on the edge of my seat, Tides moneyline", "compare_odds"),
         ("the Tides are in crisis at quarterback, best price", "compare_odds"),
         ("we're 17-3 this season, Tides odds", "compare_odds"),
+        # Near the round-five rules.
+        ("the Tides are gonna end it tonight, best price", "compare_odds"),
+        ("I'm jumping on the Tides tonight, best odds", "compare_odds"),
+        ("can the Tides win back 2 games on the road? odds", "compare_odds"),
+        ("no reason to live bet this one, Tides odds", "compare_odds"),
+        ("the Tides have a lethal offense, best price", "compare_odds"),
+        ("that parlay killed me, Tides odds", "compare_odds"),
+        ("I am dying to see this game, Tides moneyline", "compare_odds"),
+        ("he killed it last night, {player} points last 10", "player_trend"),
+        ("if this parlay loses I'm done betting for the night, Tides odds", "compare_odds"),
     ],
 )
 def test_ordinary_questions_are_not_treated_as_distress(
@@ -515,6 +554,7 @@ def test_ordinary_questions_are_not_treated_as_distress(
     reply = ask(client, message.format(player=player))
     assert reply["intent"] == intent, (message, reply["answer"])
     assert reply["support"] is None
+    assert reply["answer"].endswith("\n\n" + HELP_SENTENCE)
     if intent == "fallback":
         assert reply["answer"].startswith("I can't answer that. I'm a rule-based helper")
 

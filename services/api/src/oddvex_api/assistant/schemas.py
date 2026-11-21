@@ -54,7 +54,12 @@ class AssistantSupportOut(BaseModel):
 
 class AssistantResponse(BaseModel):
     intent: AssistantIntent
-    answer: str
+    answer: str = Field(
+        description=(
+            "The reply. Every answer that is not a support reply ends with one sentence giving "
+            "the gambling helpline and the crisis line."
+        )
+    )
     data: dict[str, Any] | None = Field(
         default=None,
         description="The structured facts the answer was written from. Null when none apply.",

@@ -2039,6 +2039,166 @@ def test_first_person_and_die_dead_or_death_joined_by_filler_words_is_crisis() -
         assert not detect(message).crisis, message
 
 
+# ------------------------------------------------------------- round five of the review
+# The last review closed with a fixed list of open findings. Each family below has a test
+# that fails when its rule is removed; tests/test_audit_assistant_support.py sends the same
+# families through the API with a team name in the message.
+
+#: Crisis wordings with no "I": "gonna end it", "might as well die", "no point living".
+CRISIS_WITHOUT_I = [
+    "gonna end it",
+    "gonna end it tonight",
+    "Gonna end it all tonight.",
+    "going to end it",
+    "about to end it",
+    "ready to end it all",
+    "need to end it tonight",
+    "might just end it tonight",
+    "might as well end it",
+    "might as well die",
+    "might as well just die",
+    "may as well die",
+    "might as well be dead",
+    "lost my rent, might as well die",
+    "no point living",
+    "no point living anymore",
+    "there's no point living",
+    "there is no point living anymore",
+    "after this loss gonna end it",
+    "no point to living",
+    "no point being alive",
+    "no reason to live",
+    "no reason to go on",
+    "no point going on anymore",
+]
+
+#: Chasing with a stated amount, with and without a currency sign or a "k".
+CHASING_AN_AMOUNT = [
+    "I need to make back $500 tonight",
+    "have to win back 2k",
+    "need to make back 500",
+    "need to make back 500 tonight",
+    "gotta make back 300 bucks",
+    "how do I win back $1,200",
+    "trying to make back 2k before sunday",
+    "I need to make $500 back tonight",
+    "have to win 2k back",
+    "need to earn back 750 dollars",
+    "how can I get back $500",
+    "need to make back 1.5k",
+    "make back 2 grand by friday",
+    "win back 500 by tonight",
+    "need to recoup 2k",
+    "I need to make back 50",
+]
+
+#: Questions about lethal means.
+LETHAL_MEANS = [
+    "lethal dose",
+    "what's a lethal dose of tylenol",
+    "lethal amount of sleeping pills",
+    "fatal dose of ibuprofen",
+    "how many pills to die",
+    "how many pills does it take to die",
+    "how many pills would kill me",
+    "how many tylenol would kill me",
+    "how much insulin would kill me",
+    "would 20 pills kill me",
+    "will 30 sleeping pills kill me",
+    "could a bottle of advil kill me",
+    "noose",
+    "how to tie a noose",
+    "tying a noose",
+    "how do you tie a noose",
+    "how to hang yourself",
+]
+
+#: A threat that depends on the result of a bet, and "I'm jumping tonight".
+IF_THE_BET_LOSES = [
+    "if this parlay loses I'm killing myself",
+    "if I lose this I'm done for good",
+    "if this misses I'll end it",
+    "I'm jumping tonight",
+    "if this parlay loses im done for good",
+    "if the Tides lose I'm done forever",
+    "if this bet misses I'm gone for good",
+    "if this doesn't hit I'm ending it",
+    "if I lose this one, I'm done for good",
+    "im jumping off tonight",
+    "if this loses I'm jumping",
+]
+
+#: The four rules the last tests review found no test for: each message here is caught by
+#: that rule alone, so removing the rule fails the test.
+ONLY_ONE_RULE = {
+    # \bmental health (?:crisis|emergency)\b
+    "this is a mental health emergency": "crisis",
+    "having a mental health crisis tonight": "crisis",
+    # \band (?:then )?(?:kill |shoot |hang |end )?myself ...
+    "the bookie first, and then myself.": "crisis",
+    "gonna shoot him and then myself": "crisis",
+    # \bi (?:have|had|got) (?:no|zero) hope ...
+    "I have no hope.": "crisis",
+    "i got zero hope anymore": "crisis",
+    # \b(?:until|till|til) (?:im|i am|i get|i break|...) (?:even|zero)\b
+    "not stopping until I'm even": "distress",
+    "I'll keep going till I break even": "distress",
+}
+
+#: Sports talk next to the round-five rules. None of it is a support case.
+ORDINARY_NEAR_ROUND_FIVE = [
+    "the Tides are gonna end it tonight",
+    "they're going to end it in four",
+    "the refs need to end it early",
+    "we might as well die trying to cover this spread",
+    "no point living in the past, Tides odds",
+    "no reason to live bet this one",
+    "no point going on the road with this lineup",
+    "the Tides need to make back 10 points",
+    "the offense has to make back 120 yards",
+    "they need to get 100 yards back",
+    "they need to get 10 back before the half",
+    "can the Tides win back 2 games on the road",
+    "do I get $50 back on a push?",
+    "the Tides have a lethal offense",
+    "how many points would kill the spread",
+    "will this parlay kill me",
+    "how many threes to win the prop",
+    "I'm jumping on the Tides tonight",
+    "I'm jumping in on the over tonight",
+    "they jumped out to an early lead",
+    "if this parlay loses I'm done betting for the night",
+    "if the Tides lose I'm done with them for the season",
+    "if he misses the game he's done for the season",
+    "Okafor is done for good, torn ACL",
+    "that parlay killed me",
+    "I am dying to see this game",
+    "the Bulls are dead in the water",
+    "he killed it last night",
+]
+
+
+@pytest.mark.parametrize("message", [*CRISIS_WITHOUT_I, *LETHAL_MEANS, *IF_THE_BET_LOSES])
+def test_round_five_crisis_wordings_are_detected(message: str) -> None:
+    assert detect(message).case == "crisis", message
+
+
+@pytest.mark.parametrize("message", CHASING_AN_AMOUNT)
+def test_chasing_a_stated_amount_is_detected(message: str) -> None:
+    signals = detect(message)
+    assert signals.chasing_losses and signals.case == "distress", message
+
+
+@pytest.mark.parametrize("message", ONLY_ONE_RULE)
+def test_each_rule_the_last_review_named_has_a_message_only_it_catches(message: str) -> None:
+    assert detect(message).case == ONLY_ONE_RULE[message], message
+
+
+@pytest.mark.parametrize("message", ORDINARY_NEAR_ROUND_FIVE)
+def test_sports_talk_near_the_round_five_rules_is_not_a_support_case(message: str) -> None:
+    assert detect(message).case is None, message
+
+
 #: Help shown where none was asked for. Kept on purpose: the rules lean towards showing
 #: help, and telling these apart from the real thing would lose real cases.
 HELP_SHOWN_ANYWAY = {
@@ -2061,14 +2221,20 @@ HELP_SHOWN_ANYWAY = {
     "end the pain, Tides fans": "crisis",
     "I've been cutting back on parlays": "distress",
     "what is the cost of a fake id": "underage",
+    # Round five. A team named with no "the" and no verb is not told apart from the writer;
+    # "done" after a bet that loses may mean done betting; "lethal" is sometimes sports talk.
+    "Tides gonna end it tonight": "crisis",
+    "if this leg misses im done": "crisis",
+    "a lethal dose of threes from the Tides": "crisis",
 }
 
 
 #: Wordings the rules are known to miss, kept here as the stopping line for the next review.
 #: Some are arguable on their own ("goodbye", "I want out"); the rest need a rule nobody has
 #: found a safe form for yet. When a rule starts to catch one, move it to the list it belongs
-#: in. A miss in the assistant still gets an answer without a support case; the standard
-#: disclaimer carries the gambling helpline but not 988.
+#: in. A miss in the assistant still gets its normal answer without a support case, and
+#: that answer ends with the help sentence: the gambling helpline and 988 for a crisis
+#: (tests/test_api_assistant.py checks every non-support answer for it).
 KNOWN_MISSES = (
     "I'm going to finish it",
     "goodbye",
@@ -2077,6 +2243,10 @@ KNOWN_MISSES = (
     "I'm all alone and can't do this",
     "I'm 20\u00bd",
     "I am a student, 17",
+    # Round five. "done for good" is also how people say they have quit; "my 500 back" is
+    # also a refund.
+    "I'm done for good.",
+    "I want my 500 back",
 )
 
 
@@ -2155,6 +2325,12 @@ def test_the_rules_stay_fast_on_awkward_input() -> None:
         "promised " * 60,
         "nobody would " * 40,
         "and but just still cant stop " * 18,
+        # Round five.
+        "if " * 166,
+        "if x loses, a, b, c, " * 25,
+        "the a b c gonna end it " * 22,
+        "make back " + "1," * 245,
+        "pills a b c d " * 35,
     ]
     started = time.perf_counter()
     for message in awkward:

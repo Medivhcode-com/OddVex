@@ -2,6 +2,9 @@
 
 Every message goes through the responsible-gambling checks in :mod:`.safeguards` before
 any intent is matched. When one applies, no data tool runs and the reply is fixed wording.
+Those checks are a fixed list of rules and miss some wordings, so every other answer ends
+with :data:`.safeguards.HELP_SENTENCE` (the gambling helpline and the crisis line), added
+here after the explainer so that no explainer can leave it out.
 """
 
 from __future__ import annotations
@@ -12,12 +15,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..bets.service import summarize
+from ..bets.service import load_bet_facts, summarize
 from ..board import Board
-from ..db import Bet, User
+from ..db import User
 from ..helpline import HELPLINE_CONTACT
 from ..providers import Player, Team
 from ..quant import QuantError, american_to_decimal, expected_value, no_vig
@@ -102,6 +104,14 @@ def _suggest(label: str, href: str) -> AssistantSuggestionOut:
     return AssistantSuggestionOut(label=label, href=href)
 
 
+def with_help_sentence(answer: str) -> str:
+    """``answer`` with :data:`.safeguards.HELP_SENTENCE` as its last paragraph, once."""
+    answer = answer.rstrip()
+    if answer.endswith(safeguards.HELP_SENTENCE):
+        return answer
+    return f"{answer}\n\n{safeguards.HELP_SENTENCE}" if answer else safeguards.HELP_SENTENCE
+
+
 def _word_in(needle: str, haystack: str) -> bool:
     return re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack) is not None
 
@@ -128,11 +138,16 @@ class Assistant:
                 "assistant_support_reply",
                 extra={"case": result.support_case, "signed_in": self.user is not None},
             )
+        answer = (
+            result.fixed_answer
+            if result.fixed_answer is not None
+            else self.explainer.explain(result.intent, result.facts)
+        )
+        if result.support_case is None:
+            answer = with_help_sentence(answer)
         return AssistantResponse(
             intent=result.intent,  # type: ignore[arg-type]
-            answer=result.fixed_answer
-            if result.fixed_answer is not None
-            else self.explainer.explain(result.intent, result.facts),
+            answer=answer,
             data=result.facts if result.has_data else None,
             sources=result.sources,
             suggestions=result.suggestions,
@@ -445,7 +460,9 @@ class Assistant:
                 suggestions=[_suggest("Log in", "/login"), _suggest("Bet tracker", "/app/tracker")],
                 has_data=False,
             )
-        bets = list(self.db.scalars(select(Bet).where(Bet.user_id == self.user.id)))
+        # Plain columns, as GET /v1/bets/summary reads them: mapped rows with their legs and
+        # notes would cost hundreds of MiB for an account at the bet cap.
+        bets = load_bet_facts(self.db, self.user.id)
         suggestions = [_suggest("Open your tracker", "/app/tracker")]
         if not bets:
             return ToolResult(

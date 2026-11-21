@@ -13,16 +13,22 @@ tested against four groups of fixed patterns, and the first that applies decides
 Everything here is a deterministic rule. No language model is involved and nothing is
 remembered between messages. The only input besides the message is today's date, which
 turns "I was born in 2009" into an age. Rules like these miss cases and that is a known
-limit; where a phrase could be read either way, the patterns lean towards showing help,
-and ``HELP_SHOWN_ANYWAY`` in the tests lists examples of help shown where none was asked
-for. The tests in ``tests/test_audit_assistant_detection.py`` list what must match and,
-next to it, the ordinary sports talk that must not ("the Tides can't stop the run",
-"under 21.5", "I'm 15 units up", "that parlay killed me", "I think my parlay is dead").
+limit: ``KNOWN_MISSES`` in the tests lists the misses known today. Because of it, every
+answer that is not a support reply ends with :data:`HELP_SENTENCE` (the gambling helpline
+and the crisis line), so a message the rules miss still shows where help is. Where a
+phrase could be read either way, the patterns lean towards showing help, and
+``HELP_SHOWN_ANYWAY`` in the tests lists examples of help shown where none was asked for.
+The tests in ``tests/test_audit_assistant_detection.py`` list what must match and, next to
+it, the ordinary sports talk that must not ("the Tides can't stop the run", "under 21.5",
+"I'm 15 units up", "that parlay killed me", "I think my parlay is dead"). A new wording is
+added as a rule here and a message in those lists that only the new rule catches.
 
 Most patterns name a wording or a small family of wordings. The widest is for wordings no
 list has: a first-person subject joined to "die", "dead", "death", "end it", "kill" and a
 few other words by filler words only (``_CHAIN``). "I just really want to be dead"
-matches; "I think my parlay is dead" does not, because "my parlay is" is not filler.
+matches; "I think my parlay is dead" does not, because "my parlay is" is not filler. A few
+crisis wordings have no "I" at all ("gonna end it", "might as well die", "no point
+living"); they count unless the clause names somebody else first (``_SUBJECT_BEFORE_RE``).
 
 Before matching, the message is lower-cased, accents are dropped and Cyrillic or Greek
 look-alike letters become Latin ones: "die" written with a Cyrillic "i" (U+0456) reads
@@ -45,7 +51,11 @@ from ..helpline import (
     CRISIS_LINE_NAME,
     CRISIS_SENTENCE,
     EMERGENCY_NUMBER,
+    HELPLINE_DIGITS,
+    HELPLINE_NAME,
+    HELPLINE_NUMBER,
     HELPLINE_SENTENCE,
+    HELPLINE_TEXT_CODE,
 )
 
 SupportCase = Literal["crisis", "distress", "underage"]
@@ -133,6 +143,14 @@ _CHAIN_WORD = (
 _CHAIN = rf"{_I}(?: {_CHAIN_WORD}){{0,6}}"
 
 # ------------------------------------------------------------------------ crisis
+#: What follows "live" when it means betting during a game: "live bet", "live odds".
+_LIVE_BETTING = r"(?:bet\w*|odds|lines?|markets?|games?|streams?|stream\w*|tv|scores?|wager\w*)\b"
+#: Medicines and other things asked about as a way to die.
+_SUBSTANCE = (
+    r"pills?|tablets?|capsules?|meds|medications?|painkillers?|tylenol|acetaminophen|paracetamol|"
+    r"ibuprofen|advil|aspirin|xanax|benadryl|melatonin|oxy\w*|fentanyl|insulin|opioids?|bleach|"
+    r"antifreeze|drugs"
+)
 # Sports talk that follows "no way out of", "a way out of": a group, a parlay, a jam.
 _OUT_OF_SPORT = (
     r"(?! of (?:the|this|that|my|a|his|her|their) (?:group|division|conference|bracket|pool|"
@@ -255,7 +273,9 @@ _CRISIS_RE = _any(
     r"\b(?:dont|do not) (?:want|wanna) (?:to )?(?:live|be alive|be here|be around|exist|"
     r"wake up|go on(?! (?:the|a|my|this|that|tilt)\b))\b",
     r"\b(?:reason|point) (?:to|in|for) (?:keep(?:ing)? )?(?:live|living|go on|going on|"
-    r"being alive|being here|stay(?:ing)? alive)\b",
+    r"being alive|being here|stay(?:ing)? alive)\b"
+    # "no reason to live bet this one": live betting is betting during the game.
+    rf"(?! {_LIVE_BETTING})",
     r"\breason to keep going\b(?! (?:with|for|at|to|after|on (?:this|that|the|my|a))\b)",
     r"\bnothing (?:left )?to live for\b",
     r"\bworth living\b",
@@ -440,6 +460,48 @@ _CRISIS_RE = _any(
     r"\b(?:want|wanna|need|wish|ready) (?:to (?:be |get |go )?)?out of this world\b",
     # Ambiguous on its own, and common; help is shown.
     rf"{_IM} (?:just |so |finally )?ready to (?:go|leave)(?: now)?{_END}",
+    # Round five of the review. Lethal means: "lethal dose", "would 20 pills kill me", "how
+    # to tie a noose". Not "a lethal offense" or "will this parlay kill me".
+    r"\b(?:lethal|fatal|deadly) (?:dose|amount|overdose|quantity)\b",
+    rf"\b(?:{_SUBSTANCE})\b(?: \w+){{0,4}}? (?:kill (?:me|you|a person|someone|somebody|a "
+    rf"human|{_SELF})|be (?:fatal|lethal|deadly|enough to (?:kill|die))|to (?:die|kill (?:me|"
+    rf"{_SELF})))\b",
+    r"\bnooses?\b",
+    r"\bhang (?:your ?self|urself|oneself|one ?self)\b",
+    # A threat that depends on a bet: "if this parlay loses I'm done for good", "if this
+    # loses I'm jumping". Not "if this parlay loses I'm done betting for the night".
+    rf"\bif\b(?: \w+){{0,6}}? (?:loses?|lost|miss(?:es)?|missed|fails?|busts?|goes (?:bust|south|"
+    r"wrong)|(?:doesnt|dont|does not|do not|wont|will not) (?:hit|cash|win|come in|come "
+    rf"through))\b(?:,? \w+){{0,3}}?,? (?:{_IM}|\bill|\bi will|\bi(?:ll)? be|\bim (?:gonna|going "
+    r"to)) (?:just )?(?:done|finished|gone|over|out|ending (?:it|everything|things)|jumping|jump|"
+    rf"end (?:it|everything|things))(?:{_END}| (?:for good|forever|permanently|for real|tonight|"
+    r"today|off)\b)",
+    # "I'm jumping tonight". Not "I'm jumping on the Tides tonight".
+    rf"{_IM} (?:just |really )?jumping (?:off )?(?:tonight|today|right now|now|later)\b"
+    r"(?! (?:on|in|at|into|over|to)\b)",
+)
+
+# Round five of the review: crisis wordings with no "I" ("gonna end it", "might as well
+# die", "no point living"). They count unless the clause names somebody else first: "the
+# Tides are gonna end it tonight" and "they're going to end it" are about a team.
+_NO_SUBJECT_CRISIS_RE = _any(
+    r"\b(?:gonna|going to|gon|finna|about to|ready to|want to|wanna|need to|have to|gotta|got "
+    r"to|might just|may just|should just|might as well|may as well) (?:just )?end (?:it|it all|"
+    r"things|everything)\b(?! (?:here |there |now )?(?:with|on|at|in|early|already|by|before|"
+    r"after|quickly|fast|soon|for (?:the|them|him|her|us|this|that))\b)",
+    rf"\b(?:might|may) as well (?:just )?(?:die|be dead|not (?:exist|be here|be alive|wake up)|"
+    rf"kill (?:me|{_SELF}))\b(?! (?:trying|laughing|happy|on|for|in the water)\b)",
+    r"\bno (?:point|reason|use|sense) (?:in |to |for )?(?:living|being alive|staying alive|"
+    r"existing|live|exist|go on|going on|carry on|carrying on)\b"
+    rf"(?! (?:{_LIVE_BETTING}|with|in|on|at|to|the|this|that|a|like)\b)",
+)
+#: The end of a clause that names who the sentence is about, when that is not the writer.
+_SUBJECT_BEFORE_RE = re.compile(
+    r"(?:\b(?:they|theyre|theyll|he|hes|hell|she|shes|shell|you|youre|youll|u|it|its|we|were|"
+    r"well|team)|\b(?!(?:i|im|ive|id|ill|there|here|what|whats|which|who)\b)\w+ (?:are|is|was|"
+    r"were|will)|\bthe (?!(?:loss|losses|"
+    r"rent|money|bet|bets|parlay|night|day|week|weekend)\b)\w+(?: \w+){0,2}) (?:(?:just|really|"
+    r"probably|definitely|all|so|still|finally) )*$"
 )
 
 # --------------------------------------------------------------------- under 21
@@ -591,7 +653,10 @@ _CHASING_RE = _any(
     r"loss|losses|rent|cash|stake|savings|bankroll|paycheck|bets?)|my \$?\d+k?|what i(?:ve| have)"
     r"? lost) )?back(?![-\w])(?! (?:the|a|their|his|her|its) (?:title|lead|belt|crown|trophy|"
     r"cup|championship|ball|possession|momentum|division|conference|job|starting|spot|fans|"
-    r"serve|series|game)\b)",
+    r"serve|series|game)\b)"
+    # "can the Tides win back 2 games": a count, not money.
+    r"(?! (?:\d+|one|two|three|four|five|a few|some) (?:of (?:the|their|those) )?(?:games?|points?|"
+    r"runs?|goals?|sets?|spots?|seats?|rounds?|strokes?|wins?|matches)\b)",
     r"\b(?:make|making|earn|earning) (?:it|it all|everything|my money|my losses|the money|"
     r"what i(?:ve| have)? lost) back\b(?! to (?:the|a) (?:playoffs|postseason|finals|top|lead|"
     r"lineup|line up|field|court|series|game|dugout|bench)\b)",
@@ -637,6 +702,24 @@ _CHASING_RE = _any(
     r"\b(?:until|till|til) (?:im|i am|i get|i break|im back to|i am back to) (?:even|zero)\b",
     r"\b(?:martingale\w*|doubl(?:e|ing) (?:down|up|my (?:bets?|stakes?))) (?:\w+ )?(?:to|until|"
     r"till) (?:recover|get|win|break|make|im even)\b",
+)
+#: Round five of the review: an amount to win back. "I need to make back $500 tonight",
+#: "have to win 2k back". Not "make back 10 points" or "win back 2 games".
+_AMOUNT = (
+    r"(?:\$\d[\d,]*(?:\.\d+)?k?|\d[\d,]*(?:\.\d+)?(?: ?k\b| (?:dollars|bucks|grand|thousand|"
+    r"large)\b)|\d{1,3}(?:,\d{3})+\b|\d{3,}\b)"
+)
+_NOT_A_COUNT = (
+    r"(?! (?:points?|pts|yards?|units?|games?|runs?|goals?|wins?|spots?|seats?|sets?|rounds?|"
+    r"strokes?|minutes?|mins?|seconds?|hours?|days?|rebounds?|assists?|shots?)\b)"
+)
+_AMOUNT_BACK_RE = _any(
+    rf"\b(?:make|making|win|winning|earn|earning|get|getting|recoup|recouping|recover|"
+    rf"recovering) back (?:the |my |that |those |all |all of |all of my )?{_AMOUNT}{_NOT_A_COUNT}",
+    rf"\b(?:make|making|win|winning|earn|earning|get|getting) (?:the |my |that |those |all |all "
+    rf"of )?{_AMOUNT} back\b",
+    # Two digits with no sign: "make back 50". Not "get 10 back", a deficit in a game.
+    rf"\b(?:make|making|earn|earning) back (?:the |my |that )?\d\d\b(?![.,]\d){_NOT_A_COUNT}",
 )
 #: A refund question ("do I get my money back on a push?") is not loss chasing.
 _REFUND_RE = re.compile(
@@ -978,7 +1061,21 @@ def _says_under_21(text: str, today: date) -> bool:
     return any(10 <= today.year - int(born.group(1)) <= 20 for born in _BORN_RE.finditer(text))
 
 
+def _in_crisis(text: str) -> bool:
+    if _CRISIS_RE.search(text):
+        return True
+    for match in _NO_SUBJECT_CRISIS_RE.finditer(text):
+        clause = re.split(r"[.!?;,] ", text[: match.start()])[-1]
+        if not _SUBJECT_BEFORE_RE.search(clause):
+            return True
+    return False
+
+
 def _chasing_losses(text: str) -> bool:
+    for match in _AMOUNT_BACK_RE.finditer(text):
+        # "do I get $50 back on a push?" is a refund question.
+        if not (match.group(0).startswith("get") and _REFUND_RE.search(text)):
+            return True
     for match in _CHASING_RE.finditer(text):
         found, before = match.group(0), text[: match.start()]
         if _GET_BACK_RE.fullmatch(found) and _REFUND_RE.search(text):
@@ -1015,7 +1112,7 @@ def detect(message: str, today: date | None = None) -> Signals:
     text = normalise(message)
     chasing = _chasing_losses(text)
     return Signals(
-        crisis=_CRISIS_RE.search(text) is not None,
+        crisis=_in_crisis(text),
         underage=_says_under_21(text, today or datetime.now(UTC).date()),
         distress=chasing or _in_distress(text),
         chasing_losses=chasing,
@@ -1077,6 +1174,16 @@ def reply(signals: Signals) -> str:
     raise ValueError("no support case")
 
 
+#: The sentence that ends every answer that is not a support reply: ordinary answers, the
+#: fallback, the refusal below and every "couldn't find" answer. The rules above are a fixed
+#: list and miss some wordings; a message they miss still gets the helpline and the crisis
+#: line in the answer itself. Support replies keep their own wording and do not get it.
+HELP_SENTENCE = (
+    f"If gambling is causing problems, call the {HELPLINE_NAME} at {HELPLINE_NUMBER} "
+    f"({HELPLINE_DIGITS}) or text {HELPLINE_TEXT_CODE}; in a crisis, call or text {CRISIS_LINE} "
+    f"(the {CRISIS_LINE_NAME})."
+)
+
 #: Kept next to the support wording because the same review covers it.
 NO_CERTAINTY_REPLY = (
     "I can't answer that with a pick. No result in sports is certain, and I don't make picks "
@@ -1085,6 +1192,7 @@ NO_CERTAINTY_REPLY = (
 )
 
 __all__ = [
+    "HELP_SENTENCE",
     "NO_CERTAINTY_REPLY",
     "REMINDER_HREF",
     "REMINDER_LABEL",
