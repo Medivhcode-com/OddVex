@@ -28,7 +28,8 @@ In the code the facts live in one module per app: `services/api/src/oddvex_api/h
 
 **1-800-GAMBLER is not the national helpline.** It is the line of the Council on Compulsive Gambling of New Jersey.
 The national helpline used that number until 2026-01-29. The product gave it until the fixes of 2026-11-19 and
-2026-11-21; it now appears only on `/responsible-gambling`, in one sentence naming it as the New Jersey council's line.
+2026-11-21. In the code at `2b0c7c1` it appears on screen only on `/responsible-gambling`, in one sentence naming it as the
+New Jersey council's line.
 
 Standard short line, as built: **"21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET
 (1-800-697-3738)."** (`RESPONSIBLE_GAMBLING_LINE` in `apps/web/src/lib/site.ts` and `apps/mobile/src/helpline.ts`.)
@@ -54,7 +55,7 @@ State-specific wording may be required for advertising — to be confirmed by co
 
 | Area | Commitment | Milestone | Status |
 |---|---|---|---|
-| Global | RG short line with 21+ and the national helpline on the web app shell (every width) and the marketing footer | M1 | Built (web). Mobile shows it in Settings, on the tracker and on the sync panel; never seen on a device |
+| Global | RG short line with 21+ and the national helpline on the web app shell (every width) and the marketing footer | M1 | Built (web). Mobile shows it in Settings, on the tracker and on the sync panel; not reported as seen on a device |
 | Signup | 21+ attestation required | M1 | Built: the API refuses registration without it and stores the time only |
 | Marketing | `/responsible-gambling` page; banned-claims list enforced | M1 | Page built. Banned phrases are checked by tests on notification templates, community copy, marketing copy and assistant replies; no full copy audit |
 | Settings | RG resources section | M1 | Built. Web: the helpline with call and text links and a link to `/responsible-gambling`. Mobile: the helpline with call and text links, the not-an-emergency sentence with a "Call 988" link, and a link to the Council's site |

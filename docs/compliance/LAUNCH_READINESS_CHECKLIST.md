@@ -63,10 +63,10 @@ How boxes are ticked:
 
 | Done | Item | Evidence | Blocking gate or next step |
 |---|---|---|---|
-| [ ] | RG short line (21+, National Problem Gambling Helpline 1-800-MY-RESET) on every web, marketing and mobile surface [B] | Partial: web marketing footer and app shell at every width (`apps/web/src/lib/site.ts`, `RESPONSIBLE_GAMBLING_LINE`; `apps/web/e2e/marketing.spec.ts`). Mobile: Settings, the tracker in every state and the sync panel (`apps/mobile/src/helpline.ts`); never seen on a device | Mobile device testing; G-10 |
+| [ ] | RG short line (21+, National Problem Gambling Helpline 1-800-MY-RESET) on every web, marketing and mobile surface [B] | Partial: web marketing footer and app shell at every width (`apps/web/src/lib/site.ts`, `RESPONSIBLE_GAMBLING_LINE`; `apps/web/e2e/marketing.spec.ts`). Mobile: Settings, the tracker in every state and the sync panel (`apps/mobile/src/helpline.ts`); not reported as seen on a device | Mobile device testing; G-10 |
 | [ ] | 21+ gate enforced at signup on web and mobile [B] | Partial: API rejects registration without `age_confirmed` (`auth/schemas.py`); web and mobile forms require it. Mobile unverified on a device. Method not approved | G-10 (AG-01) |
 | [ ] | `/responsible-gambling` live and linked from app settings [B] | Page built and linked from web Settings; on the private preview behind its password. Not public. Mobile links to the Council's site instead | G-03, G-10 |
-| [ ] | Assistant distress/guarantee/under-21 behaviours tested [B] | Rules in `services/api/src/oddvex_api/assistant/safeguards.py`, tested in `services/api/tests/test_audit_assistant_detection.py` and `test_audit_assistant_support.py`. Known misses listed in `KNOWN_MISSES`; the help sentence on every other answer covers them. The AG-03 flag for under-21 users is not built. No counsel or RG review | G-10; RG review |
+| [ ] | Assistant distress/guarantee/under-21 behaviours tested [B] | Rules in `services/api/src/oddvex_api/assistant/safeguards.py`, tested in `services/api/tests/test_audit_assistant_detection.py` and `services/api/tests/test_audit_assistant_support.py`. Known misses listed in `KNOWN_MISSES`; the help sentence on every other answer covers them. The AG-03 flag for under-21 users is not built. No counsel or RG review | G-10; RG review |
 | [ ] | Notification copy reviewed for inducement (if notifications ship) | Automated banned-phrase scan only: `services/api/tests/test_notification_copy.py`. No human or counsel review | G-10 |
 | [ ] | Tracker shows losses plainly; no celebratory or chasing prompts [B] | Built; no review recorded | Product and RG review |
 | [ ] | Parlay screen shows the break-even rate with the payout, and the correlation warning | Break-even rate and same-game warning shown on web and mobile. No combined probability that every leg wins is shown (at `2b0c7c1` the screen reads "Combined probability: Not shown"; pull request 20 replaces it). Warning asserted in `apps/web/e2e/app.spec.ts`. No RG review recorded | Product and RG review |
@@ -78,10 +78,10 @@ How boxes are ticked:
 | Done | Item | Evidence | Blocking gate or next step |
 |---|---|---|---|
 | [ ] | Data inventory reconciled with actual implementation and vendors [B] | Reconciled with the code at `2b0c7c1` on 2026-11-21 (`PRIVACY_AND_DATA.md` section 2 and 3.1). Remaining mismatches with the design intent: `COUNSEL_REVIEW_PACKET.md` section 3.5. Hostinger's role as host is a counsel question | Engineering + G-10 |
-| [x] | Self-serve account deletion works end to end on web and API [B] | `DELETE /v1/me` (`auth/router.py`, `account/service.py`); web test "delete account removes access" in `apps/web/e2e/app.spec.ts`; cascades in `db/models.py`. Audit rows keep the user id, IP address and action details with no end date, and backups keep the account for about 14 days plus pre-deploy copies (`PRIVACY_AND_DATA.md` section 3.1) | Retention decision (counsel) |
-| [ ] | Self-serve account deletion verified in the mobile apps on a device [B] | Built with component tests; never run on a device | Mobile device testing (Founder decision) |
+| [x] | Self-serve account deletion works end to end on web and API [B] | `DELETE /v1/me` (`auth/router.py`, `services/api/src/oddvex_api/account/service.py`); web test "delete account removes access" in `apps/web/e2e/app.spec.ts`; cascades in `db/models.py`. Audit rows keep the user id, IP address and action details with no end date, and backups keep the account for about 14 days plus pre-deploy copies (`PRIVACY_AND_DATA.md` section 3.1) | Retention decision (counsel) |
+| [ ] | Self-serve account deletion verified in the mobile apps on a device [B] | Built with component tests; not reported as run on a device | Mobile device testing (Founder decision) |
 | [x] | Data export works [B] | `GET /v1/me/export`; `services/api/tests/test_api_account.py`; web test "export downloads my data without any password material" in `apps/web/e2e/app.spec.ts`. Web and API only: the mobile app has no export (`apps/mobile/README.md`) | — |
-| [ ] | Retention schedule implemented (logs, backups, analytics) [B] | Partial: daily dumps kept 14 days and the newest five pre-deploy dumps (`infrastructure/hostinger/compose.yaml`, `ops.sh`); notifications capped at 500 per user. Audit log, reserved handles, report text copies and logs have no end date | G-10; G-02 |
+| [ ] | Retention schedule implemented (logs, backups, analytics) [B] | Partial: daily dumps kept 14 days and the newest five pre-deploy dumps (`infrastructure/hostinger/compose.yaml`, `infrastructure/hostinger/ops.sh`); notifications capped at 500 per user. Audit log, reserved handles, report text copies and logs have no end date | G-10; G-02 |
 | [ ] | Sub-processor list published; DPAs signed with each vendor [B] | None engaged | G-02, G-13, G-10 |
 | [ ] | Analytics events audited: no emails, stakes, notes or assistant text [B] | No analytics instrumented | G-02, G-13 |
 | [ ] | Cookie/consent approach implemented per counsel | None. Web sets a session cookie and stores theme and odds format in the browser | G-10 |
@@ -97,7 +97,7 @@ How boxes are ticked:
 |---|---|---|---|
 | [ ] | SECURITY_BASELINE M1 verification checklist complete [B] | Not completed. Gaps listed in `THREAT_MODEL.md` (AU-03, AU-04, AU-06, DS-01, DS-02) | Engineering |
 | [ ] | All M2+ baseline controls implemented for production [B] | None | G-02, G-09 |
-| [ ] | Admin accounts use MFA; admin actions audit-logged [B] | No MFA exists. Admin actions, user searches (`admin.read`) and role changes (`role.granted`, `role.removed`) are audited since `2b0c7c1` (`services/api/src/oddvex_api/api/admin.py`, `deps.py`) | Engineering; O-12 |
+| [ ] | Admin accounts use MFA; admin actions audit-logged [B] | No MFA exists. Admin actions, user searches (`admin.read`) and role changes (`role.granted`, `role.removed`) are audited since `2b0c7c1` (`services/api/src/oddvex_api/api/admin.py`, `services/api/src/oddvex_api/deps.py`) | Engineering; O-12 |
 | [ ] | Secrets in a managed store [B] | None | G-02, G-09 |
 | [x] | Secret scan runs in CI over full git history [B] | `secrets` job (gitleaks, `fetch-depth: 0`) in `.github/workflows/ci.yml`. Job result on GitHub not re-checked in this pass | — |
 | [ ] | Dependency, secret and static scans clean or exceptions risk-accepted [B] | Secret scan, lint and the dependency audit job (`audit` in `.github/workflows/ci.yml`: `pnpm audit` at high and above, `pip-audit`) run in CI on `main` (D-012). No static security analysis | Founder to confirm thresholds and exceptions (O-01) |
@@ -135,7 +135,7 @@ How boxes are ticked:
 | [ ] | Assistant grounding test: 100 % of numbers traceable to tool output [B] | `services/api/tests/test_api_assistant.py` exists; the 100 % claim is not audited in this pass | Engineering review |
 | [x] | WCAG A and AA automated checks on web, dark and light themes | `apps/web/e2e/a11y.spec.ts` (axe), run by the `e2e` job | — |
 | [ ] | WCAG 2.2 AA manual audit with a screen reader and keyboard; issues resolved or documented | None (`BUILD_STATUS.md`, "Not verified") | Engineering; G-02 if an external audit is bought |
-| [ ] | Mobile a11y pass (VoiceOver, TalkBack, font scaling, contrast, targets) | None. The app has never run on a device or simulator | Mobile device testing (Founder decision) |
+| [ ] | Mobile a11y pass (VoiceOver, TalkBack, font scaling, contrast, targets) | None. The app has not been reported as run on a device or simulator | Mobile device testing (Founder decision) |
 | [ ] | Cross-browser/device matrix tested | Chromium only, desktop and phone viewports (`ci.yml` installs `chromium`) | Engineering |
 | [ ] | All screens implement loading / empty / stale / error states | Not audited per screen | Engineering review |
 | [ ] | Copy review complete (US English, tone, no placeholder text) | None | Product; G-10 |
@@ -155,7 +155,7 @@ How boxes are ticked:
 | [ ] | Demo account for reviewers with representative data | Preparation notes: `docs/marketing/STORE_SUBMISSION_PREP.md` | G-04 |
 | [ ] | Age rating questionnaire completed accurately | Preparation notes: `docs/marketing/STORE_SUBMISSION_PREP.md` | G-04 |
 | [ ] | App privacy details ("nutrition labels") match data inventory and SDKs | Preparation notes: `docs/marketing/STORE_SUBMISSION_PREP.md` | G-04 |
-| [ ] | In-app account deletion present and discoverable | Built in mobile Settings with component tests (`apps/mobile/src/components/account-forms.test.tsx`). Never seen on a device | G-04; mobile device testing |
+| [ ] | In-app account deletion present and discoverable | Built in mobile Settings with component tests (`apps/mobile/src/components/account-forms.test.tsx`). Not reported as seen on a device | G-04; mobile device testing |
 | [ ] | Privacy Policy and Terms URLs live; support URL live | Nothing is live; pages are drafts | G-03, G-10 |
 | [ ] | In-app purchase products configured and tested; subscription disclosures on paywall (if Premium ships) | Preparation notes: `docs/marketing/STORE_SUBMISSION_PREP.md` | G-04 |
 | [ ] | Screenshots/preview show real app UI with licensed or fictional data; no misleading claims | Preparation notes: `docs/marketing/STORE_SUBMISSION_PREP.md` | G-04 |

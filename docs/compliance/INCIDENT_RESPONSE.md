@@ -154,4 +154,4 @@ Pre-work for M2: counsel to supply a breach-notification matrix (PR-10) so timel
 
 During M1 (no production, no users): treat any committed secret, any real personal data appearing in fixtures, and any use of real brand/player/sportsbook names as SEV4 incidents — fix, record, and add a preventive check.
 
-Note of 2026-11-21: the paragraph above was written before the private preview existed. The preview runs in production mode with an open sign-up API (section header), so the full plan, including the data-breach paths, applies to it now; the SEV4 rule above still applies to the repository.
+Note of 2026-11-21: the paragraph above was written before the private preview existed. The preview runs in production mode with an open sign-up API (see the status line at the top), so the full plan, including the data-breach paths, applies to it now; the SEV4 rule above still applies to the repository.

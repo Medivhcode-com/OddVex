@@ -18,11 +18,11 @@ Last updated: 2026-11-21 (product facts in section 1 and the current positions c
 | OddVex does not accept, place, route or settle wagers and holds no user funds | Core boundary; any feature that blurs this needs prior legal review |
 | Information/analytics: odds comparison, prop research, calculators, tracker, assistant | — |
 | US market, adults 21+ by policy | Self-attestation at sign-up; the time is stored, nothing else |
-| Current build uses synthetic data and fictional teams/players/sportsbooks | No licensed data, no real brands. An internal-only replay with real NFL names exists and refuses to run in production mode (D-015) |
+| Current build uses synthetic data and fictional teams/players/sportsbooks | No licensed data, no real brands. An internal-only replay with real NFL names exists and refuses to run in production mode (`docs/product/DECISION_LOG.md`, D-015) |
 | Sportsbook sync is a mock; real sync only via authorized third-party vendors (planned M3) | No credential storage by OddVex |
 | No affiliate links, no ads, no subscriptions today | All planned later; each changes the analysis |
 | Community (user-generated content) is built and switched off | Profiles, picks, comments, follows, blocks, reports and moderation behind the `community` switch, off by default and on the preview. The screens are in the web and mobile code and appear when the switch is turned on |
-| A private preview is running | Since 2026-11-18 on a Hostinger server, in production mode on synthetic data. The web preview is behind a password; the API at `api-preview.oddvex.com` is open and accepts sign-ups from anyone (D-021) |
+| A private preview is running | Since 2026-11-18 on a Hostinger server, in production mode on synthetic data. The web preview is behind a password; the API at `api-preview.oddvex.com` is open and accepts sign-ups from anyone (`docs/product/DECISION_LOG.md`, D-021) |
 | Assistant is rule-based today; LLM-backed planned (M4) | Fixed rules for crisis, under-21, distress and certainty messages, with known misses (RESPONSIBLE_GAMBLING section 5) |
 
 **Triggers for fresh legal review:** affiliate/referral revenue; outbound sportsbook links; real brand names/logos; picks or projections; community/UGC; paid subscriptions; push/email marketing; any geo-targeting; non-US users; identity or location data collection.
