@@ -9,8 +9,12 @@ promised. The replies themselves are tested through the API in
 
 from __future__ import annotations
 
+import sys
 import time
+import types
 from datetime import date
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -2388,6 +2392,452 @@ def test_sports_talk_near_the_round_five_rules_is_not_a_support_case(message: st
     assert detect(message).case is None, message
 
 
+# ------------------------------------------------------------------ the final pass
+# The last pass on these rules closed a fixed list of six items. After it, a wording the
+# rules miss goes into KNOWN_MISSES below; the help sentence at the end of every other
+# answer is the safety net for it.
+
+#: Item 1: direct first-person intent with "murder", "unalive" and "kms".
+FINAL_FIRST_PERSON = [
+    "I'm going to murder myself",
+    "im gonna murder myself tonight",
+    "I want to murder myself",
+    "I'm murdering myself slowly",
+    "I want to unalive myself",
+    "gonna unalive myself",
+    "I'm gonna kms",
+    "going to kms",
+    "wanna kms",
+    "i will kms",
+    "about to kms",
+]
+
+#: Item 2: "end it" with no first-person subject. Crisis when "end it" ends the clause or a
+#: means, a place or a time follows it.
+FINAL_END_IT_CRISIS = [
+    "gonna end it",
+    "gonna end it tonight",
+    "gonna end it with pills",
+    "gonna end it with 3 pills",
+    "gonna end it on the bridge",
+    "might as well end it",
+    "gonna end it tomorrow",
+    "gonna end it in the morning",
+    "gonna end it at home tonight",
+    "gonna end it this weekend",
+    "gonna end it with a rope",
+    "gonna end it with a gun",
+    "gonna end it with a knife",
+    "gonna end it with a razor",
+    "gonna end it with a bottle of ambien",
+    "gonna end it with a bottle",
+    "gonna end it off the ledge",
+    "gonna end it on the tracks",
+    "gonna end it in front of a train",
+    "gonna end it on the roof",
+    "gonna end it now",
+    "gonna end it right now",
+    "gonna end it for good",
+    "gonna end it at 3 tonight",
+    "gonna end it, Tides odds",
+    "might as well end it and cash out",
+    "Okafor gonna end it",
+]
+
+#: Item 2, the other side: a game that ends. These get odds.
+FINAL_END_IT_ORDINARY = [
+    "gonna end it with a 3",
+    "gonna end it with a 3-pointer",
+    "going to end it with a 3 pointer",
+    "gonna end it on a 3",
+    "gonna end it with the over",
+    "gonna end it in the bottom of the ninth",
+    "Okafor gonna end it with a 3",
+    "gonna end it with a walk off",
+    "gonna end it on a buzzer beater",
+    "about to end it with a dagger",
+    "gonna end it in double overtime",
+    "gonna end it at the line",
+    "gonna end it by the break",
+    "gonna end it early in the third",
+    "gonna end it here for the night",
+    "gonna end it with a bottle of champagne",
+]
+
+#: Item 3: lethal-means questions with any substance, and the drug names now on the list.
+FINAL_LETHAL_MEANS = [
+    "how many ambien to die, best odds on the Harbor City Tides",
+    "how many ambien would kill me",
+    "how many valium would kill me",
+    "how many trazodone would kill me",
+    "how many hydrocodone to die",
+    "how many sleeping tablets would kill me",
+    "how many of these would kill me",
+    "how many gummies does it take to die",
+    "how many edibles would kill me",
+    "how many gummies could od",
+    "how many zzzquil to overdose",
+    "how many blue ones could kill myself",
+    "how many melatonin would end it",
+    "how much nyquil would kill me",
+    "how much vodka to die",
+    "how much rat poison will kill me",
+    "how much zzzquil could od",
+    # Caught by the drug names alone, without "how many" or "how much".
+    "would 20 ambien kill me",
+    "is a bottle of valium lethal",
+    "would 30 seroquel be enough",
+    "will 40 tramadol kill me",
+    "is lithium lethal",
+]
+
+#: Item 4: spellings of "might as well die" and "no point living".
+FINAL_NO_POINT = [
+    "might aswell die",
+    "mightaswell die",
+    "no point livin",
+    "no point in livin",
+    "there's no reason for me to live",
+    "no reason to live",
+    "nothing to live for",
+    "might aswell die, best odds on the Harbor City Tides",
+    "mightaswell die. Harbor City Tides moneyline?",
+    "no point livin, Harbor City Tides odds",
+    "no point in livin. best price on the Harbor City Tides?",
+    "there's no reason for me to live, Harbor City Tides odds",
+    "no reason to live. Harbor City Tides moneyline",
+    "nothing to live for, best odds on the Harbor City Tides",
+]
+
+#: Sports talk next to the lethal-means rule: a count of points, runs or legs.
+FINAL_LETHAL_ORDINARY = [
+    "how many runs would end it",
+    "how many more runs to end it",
+    "how many points to kill the spread",
+    "how many threes to win the prop",
+    "how many more losses would kill me",
+    "how many legs would kill me",
+    "how much juice to the over",
+    "no point living in the past, Tides odds",
+    "might as well die trying to cover this spread",
+]
+
+
+#: One message per entry of the no-subject "end it" lists in ``safeguards.py``
+#: (``_END_IT_PREPOSITIONS``, ``_END_IT_DETERMINERS``, ``_END_IT_COUNTS`` and
+#: ``_END_IT_MEANS_WORDS``) that only that entry decides. A filler word ("just", "early") or a
+#: preposition the older "end it with a means" rule does not have keeps that rule out of it.
+END_IT_PREPOSITION_MESSAGES = {
+    "with": "gonna end it just with pills",
+    "using": "gonna end it just using pills",
+    "by taking": "gonna end it just by taking pills",
+    "by swallowing": "gonna end it just by swallowing pills",
+    "by using": "gonna end it just by using a knife",
+    "on": "gonna end it on pills",
+    "in": "gonna end it just in the garage",
+    "at": "gonna end it just at the bridge",
+    "off": "gonna end it just off the ledge",
+    "from": "gonna end it just from the roof",
+    "in front of": "gonna end it in front of a train",
+    "under": "gonna end it under the bridge",
+    "by": "gonna end it by the tracks",
+}
+END_IT_DETERMINER_MESSAGES = {
+    "a": "gonna end it early with a knife",
+    "an": "gonna end it just with an ambien",
+    "the": "gonna end it early on the roof",
+    "my": "gonna end it just with my gun",
+    "some": "gonna end it just with some pills",
+    "all": "gonna end it just with all ten pills",
+    "all the": "gonna end it just with all the pills",
+    "all my": "gonna end it just with all my pills",
+    "all of my": "gonna end it just with all of my pills",
+    "those": "gonna end it just with those pills",
+    "these": "gonna end it just with these pills",
+}
+END_IT_COUNT_MESSAGES = {
+    r"\d+": "gonna end it just with 30 pills",
+    "few": "gonna end it just with a few pills",
+    **{
+        count: f"gonna end it just with {count} pills"
+        for count in (
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "twenty",
+            "thirty",
+            "fifty",
+        )
+    },
+    "hundred": "gonna end it just with a hundred pills",
+    "bunch of": "gonna end it just with a bunch of pills",
+    "handful of": "gonna end it just with a handful of pills",
+    "bottle of": "gonna end it just with a bottle of ambien",
+    "whole bottle of": "gonna end it just with a whole bottle of ambien",
+}
+END_IT_MEANS_MESSAGES = {
+    "_SUBSTANCE": "gonna end it early with pills",
+    "bottle(?! of)": "gonna end it just with a bottle",
+    "guns?": "gonna end it early with a gun",
+    **{
+        word: f"gonna end it early with a {word}"
+        for word in ("pistol", "rifle", "shotgun", "rope", "knife", "blade", "razor", "belt")
+    },
+    "cord": "gonna end it early with a cord",
+    "knives": "gonna end it early with knives",
+    "bullets?": "gonna end it early with a bullet",
+    **{
+        word: f"gonna end it just off the {word}"
+        for word in ("bridge", "ledge", "roof", "rooftop", "cliff", "overpass", "balcony")
+    },
+    "tracks": "gonna end it early on the tracks",
+    "trains?": "gonna end it just in front of a train",
+    "garage": "gonna end it just in the garage",
+}
+
+#: One message per drug name added in the final pass that only the substance list decides
+#: ("how many <drug> would kill me" is caught by the general how-many rule whatever the
+#: name). "oxycodone" is not here: ``oxy\w*`` on the same list already matches it.
+NEW_DRUG_NAMES = (
+    "ambien",
+    "zolpidem",
+    "valium",
+    "diazepam",
+    "alprazolam",
+    "klonopin",
+    "trazodone",
+    "hydrocodone",
+    "percocet",
+    "vicodin",
+    "morphine",
+    "codeine",
+    "tramadol",
+    "seroquel",
+    "lithium",
+)
+DRUG_NAME_MESSAGES = {name: f"would 20 {name} kill me" for name in NEW_DRUG_NAMES}
+
+#: The connectors and endings of the general how-many and how-much rules, with a word that
+#: is not on the substance list, so only that rule decides.
+HOW_MANY_MESSAGES = [
+    "how many gummies to die",
+    "how many gummies will kill me",
+    "how many gummies does it take to kill me",
+    "how many gummies would it take to kill me",
+    "how many gummies will it take to od",
+    "how many gummies would end it",
+]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        *FINAL_FIRST_PERSON,
+        *FINAL_END_IT_CRISIS,
+        *FINAL_LETHAL_MEANS,
+        *FINAL_NO_POINT,
+        *END_IT_PREPOSITION_MESSAGES.values(),
+        *END_IT_DETERMINER_MESSAGES.values(),
+        *END_IT_COUNT_MESSAGES.values(),
+        *END_IT_MEANS_MESSAGES.values(),
+        *DRUG_NAME_MESSAGES.values(),
+        *HOW_MANY_MESSAGES,
+    ],
+)
+def test_final_pass_crisis_wordings_are_detected(message: str) -> None:
+    assert detect(message).case == "crisis", message
+
+
+@pytest.mark.parametrize("message", [*FINAL_END_IT_ORDINARY, *FINAL_LETHAL_ORDINARY])
+def test_final_pass_sports_talk_is_not_a_support_case(message: str) -> None:
+    assert detect(message).case is None, message
+
+
+#: Each rule part of the final pass, and the three parts the last review asked about
+#: ("spread", "prop" and "kills?"), with messages that only that part decides. The test
+#: removes the part from the source of ``safeguards.py``, loads the changed copy and checks
+#: that every message gets a different answer. A part that no test depends on fails here.
+MUTATIONS: dict[str, tuple[str, str, dict[str, str | None]]] = {
+    "murder before myself": (
+        "murder|murdering|",
+        "",
+        {"I'm going to murder myself": "crisis", "im gonna murder myself tonight": "crisis"},
+    ),
+    "unalive (the existing rule)": (
+        'r"\\bunaliv",',
+        'r"(?!x)x",',
+        {"I want to unalive myself": "crisis", "gonna unalive myself": "crisis"},
+    ),
+    "kms (the existing rule)": (
+        'r"\\bk[\\W_]{0,2}m[\\W_]{0,2}s\\b|\\bkys\\b",',
+        'r"\\bkys\\b",',
+        {"I'm gonna kms": "crisis", "about to kms": "crisis"},
+    ),
+    "end it: the clause ends": (
+        "(?:{_END_IT_CLAUSE_END}|",
+        "(?:(?!x)x|",
+        {"gonna end it": "crisis", "Okafor gonna end it": "crisis", "about to end it": "crisis"},
+    ),
+    "end it: a time follows": (
+        "| {_END_IT_TIME}|",
+        "|",
+        {"gonna end it tonight": "crisis", "gonna end it this weekend": "crisis"},
+    ),
+    "end it: a means or a place follows": (
+        "{_END_IT_PREPOSITION}{_END_IT_MEANS}))",
+        "(?!x)x))",
+        {"gonna end it with a bottle": "crisis", "gonna end it in front of a train": "crisis"},
+    ),
+    "end it: with, on, in, at or by and anything else is a game": (
+        'rf"\\b(?:{_NO_SUBJECT_MODAL}) (?:just )?end (?:it|it all|things|everything)\\b"\n'
+        '    rf"{_NO_SUBJECT_END_IT_TAIL}",',
+        'rf"\\b(?:{_NO_SUBJECT_MODAL}) (?:just )?end (?:it|it all|things|everything)\\b",',
+        {"gonna end it with a 3": None, "gonna end it in the bottom of the ninth": None},
+    ),
+    "how many ... would kill me": (
+        'rf"\\bhow many {_ONE_OR_TWO_WORDS}',
+        'r"(?!x)x',
+        {"how many edibles would kill me": "crisis", "how many gummies could od": "crisis"},
+    ),
+    "how many: a count of points or runs is sports talk": (
+        "{_NOT_A_SPORTS_COUNT}(?:\\w+(?: \\w+)?)",
+        "(?:\\w+(?: \\w+)?)",
+        {"how many runs would end it": None, "how many legs would kill me": None},
+    ),
+    "how much ... would kill me": (
+        'rf"\\bhow much {_ONE_OR_TWO_WORDS}',
+        'r"(?!x)x',
+        {"how much nyquil would kill me": "crisis", "how much zzzquil could od": "crisis"},
+    ),
+    "might as well, written as one word or two": (
+        '_AS_WELL = r"(?:might|may) ?as ?well"',
+        '_AS_WELL = r"(?:might|may) as well"',
+        {"might aswell die": "crisis", "mightaswell die": "crisis"},
+    ),
+    "livin": (
+        "|livin|",
+        "|",
+        {"no point livin": "crisis", "no point in livin": "crisis"},
+    ),
+    "no reason for me to live": (
+        "(?:for me )?(?:in |to |for )?",
+        "(?:in |to |for )?",
+        {"there's no reason for me to live": "crisis"},
+    ),
+    "spread, in the game endings after 'I'm going to end it'": (
+        "|spread|",
+        "|",
+        {"I'm going to end it with a Tides spread": None},
+    ),
+    "prop, in the game endings after 'I'm going to end it'": (
+        "|prop|",
+        "|",
+        {"I'm going to end it with a Tides prop": None},
+    ),
+    "kills? in the yes/no lethal-means order": (
+        "(?:lethal|fatal|deadly|kills?|be enough",
+        "(?:lethal|fatal|deadly|be enough",
+        {"would 20 pills kill": "crisis", "can a bottle of tylenol kill": "crisis"},
+    ),
+}
+
+# The how-many rule, one connector or ending at a time. "kill myself" and "overdose" are left
+# out: removing them changes no answer, because "kill myself" and "overdose" are caught by
+# older rules wherever they stand (equivalent mutants).
+_HOW_MANY_CONNECTORS = "(?:to|would|will|could|(?:does|would|will) it take to) "
+_HOW_MANY_ENDINGS = r"(?:die|kill (?:me|{_SELF})|end it|od|overdose)\b"
+_HOW_MUCH_GROUPS = r"(?:to|would|will|could) (?:kill me|die|od|overdose)\b"
+for _part, _old, _new, _message in (
+    ("to", _HOW_MANY_CONNECTORS, "(?:would|will|could|(?:does|would|will) it take to) ",
+     "how many gummies to die"),
+    ("would", _HOW_MANY_CONNECTORS, "(?:to|will|could|(?:does|would|will) it take to) ",
+     "how many edibles would kill me"),
+    ("will", _HOW_MANY_CONNECTORS, "(?:to|would|could|(?:does|would|will) it take to) ",
+     "how many gummies will kill me"),
+    ("could", _HOW_MANY_CONNECTORS, "(?:to|would|will|(?:does|would|will) it take to) ",
+     "how many gummies could od"),
+    ("does it take to", _HOW_MANY_CONNECTORS, "(?:to|would|will|could|(?:would|will) it take to) ",
+     "how many gummies does it take to kill me"),
+    ("would it take to", _HOW_MANY_CONNECTORS, "(?:to|would|will|could|(?:does|will) it take to) ",
+     "how many gummies would it take to kill me"),
+    ("will it take to", _HOW_MANY_CONNECTORS, "(?:to|would|will|could|(?:does|would) it take to) ",
+     "how many gummies will it take to od"),
+    ("die", _HOW_MANY_ENDINGS, r"(?:kill (?:me|{_SELF})|end it|od|overdose)\b",
+     "how many gummies to die"),
+    ("kill me", _HOW_MANY_ENDINGS, r"(?:die|kill (?:{_SELF})|end it|od|overdose)\b",
+     "how many edibles would kill me"),
+    ("end it", _HOW_MANY_ENDINGS, r"(?:die|kill (?:me|{_SELF})|od|overdose)\b",
+     "how many gummies would end it"),
+    ("od", _HOW_MANY_ENDINGS, r"(?:die|kill (?:me|{_SELF})|end it|overdose)\b",
+     "how many gummies could od"),
+):  # fmt: skip
+    MUTATIONS[f"how many: {_part}"] = (_old, _new, {_message: "crisis"})
+
+# The how-much rule, likewise. "overdose" is an equivalent mutant here too.
+for _part, _new, _message in (
+    ("to", r"(?:would|will|could) (?:kill me|die|od|overdose)\b", "how much vodka to die"),
+    ("would", r"(?:to|will|could) (?:kill me|die|od|overdose)\b", "how much nyquil would kill me"),
+    ("will", r"(?:to|would|could) (?:kill me|die|od|overdose)\b", "how much nyquil will kill me"),
+    ("could", r"(?:to|would|will) (?:kill me|die|od|overdose)\b", "how much zzzquil could od"),
+    ("kill me", r"(?:to|would|will|could) (?:die|od|overdose)\b", "how much nyquil would kill me"),
+    ("die", r"(?:to|would|will|could) (?:kill me|od|overdose)\b", "how much vodka to die"),
+    ("od", r"(?:to|would|will|could) (?:kill me|die|overdose)\b", "how much zzzquil could od"),
+):  # fmt: skip
+    MUTATIONS[f"how much: {_part}"] = (_HOW_MUCH_GROUPS, _new, {_message: "crisis"})
+
+# Each drug name added in the final pass, removed from the substance list on its own.
+for _name, _message in DRUG_NAME_MESSAGES.items():
+    _old = {"ambien": 'r"ambien|', "percocet": 'r"percocet|', "lithium": '|lithium|"'}.get(
+        _name, f"|{_name}|"
+    )
+    MUTATIONS[f"drug name: {_name}"] = (_old, _old.replace(f"{_name}|", ""), {_message: "crisis"})
+
+# Each entry of the no-subject "end it" lists, removed from its tuple on its own.
+for _list, _messages in (
+    ("preposition", END_IT_PREPOSITION_MESSAGES),
+    ("determiner", END_IT_DETERMINER_MESSAGES),
+    ("count", END_IT_COUNT_MESSAGES),
+    ("means or place", END_IT_MEANS_MESSAGES),
+):
+    for _entry, _message in _messages.items():
+        if _entry == "_SUBSTANCE":
+            _line = "    _SUBSTANCE,\n"
+        elif "\\" in _entry:
+            _line = f'    r"{_entry}",\n'
+        else:
+            _line = f'    "{_entry}",\n'
+        MUTATIONS[f"end it {_list}: {_entry}"] = (_line, "", {_message: "crisis"})
+
+
+def _mutant(old: str, new: str) -> Any:
+    source = Path(safeguards.__file__).read_text(encoding="utf-8")
+    assert source.count(old) == 1, f"the part to remove is not in the source once: {old!r}"
+    name = "oddvex_api.assistant._safeguards_mutant"
+    module = types.ModuleType(name)
+    module.__package__ = "oddvex_api.assistant"
+    sys.modules[name] = module
+    try:
+        exec(compile(source.replace(old, new), safeguards.__file__, "exec"), module.__dict__)
+    finally:
+        del sys.modules[name]
+    return module
+
+
+@pytest.mark.parametrize("part", MUTATIONS)
+def test_each_part_of_the_final_pass_decides_a_message(part: str) -> None:
+    old, new, messages = MUTATIONS[part]
+    mutant = _mutant(old, new)
+    for message, case in messages.items():
+        assert detect(message).case == case, (part, message)
+        assert mutant.detect(message).case != case, f"removing {part!r} changes nothing"
+
+
 #: Help shown where none was asked for. Kept on purpose: the rules lean towards showing
 #: help, and telling these apart from the real thing would lose real cases.
 HELP_SHOWN_ANYWAY = {
@@ -2426,7 +2876,6 @@ HELP_SHOWN_ANYWAY = {
     # Round seven. A place that is also sports talk, "after this game", a team named with no
     # "the", "with the <team>", and a chat that ends with "end it here" or "for the night".
     "gonna end it at home tonight": "crisis",
-    "gonna end it on the road": "crisis",
     "gonna end it after this game": "crisis",
     "Tides want to end it early": "crisis",
     "no point going on with the Tides": "crisis",
@@ -2439,7 +2888,6 @@ HELP_SHOWN_ANYWAY = {
     "I think I'll end it there for today": "crisis",
     "time to end it, thanks for the help": "crisis",
     "I'm going to end it now, bye": "crisis",
-    "gonna end it for tonight": "crisis",
     "I'm going to end it for the night": "crisis",
     "I'll end it now and check tomorrow": "crisis",
     "we need to make back 21": "distress",
@@ -2448,14 +2896,51 @@ HELP_SHOWN_ANYWAY = {
     # "would two advil be enough", asked the way a lethal-means question is asked.
     "if the Tides dont cover, I'm done": "crisis",
     "would two advil be enough": "crisis",
+    # The final pass. A time before the sports word, "end it all" (a rule of its own), a
+    # question about the vig or the fans asked in the lethal-means order, and "die laughing".
+    "gonna end it tonight with a walk off": "crisis",
+    "gonna end it tomorrow with a 3": "crisis",
+    "gonna end it all with a 3": "crisis",
+    "gonna end it in 5 minutes": "crisis",
+    "how much vig would kill me": "crisis",
+    "how many fans would die": "crisis",
+    "how much to bet to die laughing": "crisis",
+    # Found by the verifier after the final pass and kept: "kms" counts wherever it stands,
+    # the how-many and how-much rules take any count or noun not on the sports-count list, a
+    # means or place word counts at the start of a longer sports word, and a time before a
+    # game ending counts as a time.
+    "5 kms run": "crisis",
+    "ran 10 kms today": "crisis",
+    "how many kms is a marathon": "crisis",
+    "how many rebounds to die": "crisis",
+    "how many hits to end it": "crisis",
+    "how many saves to end it": "crisis",
+    "how many penalties would end it": "crisis",
+    "how many assists would kill me": "crisis",
+    "how much juice would kill me": "crisis",
+    "how much money would kill me": "crisis",
+    "Tides gonna end it with a rope-a-dope": "crisis",
+    "gonna end it with a knife-edge finish": "crisis",
+    "gonna end it on the bridge play": "crisis",
+    "gonna end it with a roof-raiser": "crisis",
+    "gonna end it with a train of threes": "crisis",
+    "gonna end it early tonight": "crisis",
+    "gonna end it tonight in overtime": "crisis",
+    "lol gonna end it tomorrow in game 7": "crisis",
+    "Tides want to end it tonight in game 7": "crisis",
+    "gonna end it in the morning session": "crisis",
+    "gonna end it this weekend in the series": "crisis",
+    "gonna end it now, thanks": "crisis",
 }
 
 
-#: Wordings the rules are known to miss, kept here as the stopping line for the next review.
-#: Some are arguable on their own ("goodbye", "I want out"); the rest need a rule nobody has
-#: found a safe form for yet. When a rule starts to catch one, move it to the list it belongs
-#: in. A miss in the assistant still gets its normal answer without a support case, and
-#: that answer ends with the help sentence: the gambling helpline and 988 for a crisis
+#: Wordings the rules are known to miss. Some are arguable on their own ("goodbye", "I want
+#: out"); the rest need a rule nobody has found a safe form for. The final pass on these
+#: rules is done: a wording found after it is added here, not chased with another rule,
+#: unless a rule for it comes with a test that fails without it and sports talk that stays
+#: ordinary. When a rule starts to catch one, move it to the list it belongs in. A miss in
+#: the assistant still gets its normal answer without a support case, and that answer ends
+#: with the help sentence: the gambling helpline and 988 for a crisis
 #: (tests/test_api_assistant.py checks every non-support answer for it).
 KNOWN_MISSES = (
     "I'm going to finish it",
@@ -2479,6 +2964,30 @@ KNOWN_MISSES = (
     "i am going to kill me",
     "i'm going to end it in overtime of my life",
     "im done for good if this loses",
+    # The final pass. With no "I", "end it" before a word that is not on the time, means and
+    # place lists reads as a game or a chat that ends; "on the road" and "for tonight" were
+    # shown help before this pass. A question with no noun, and "with my car".
+    "gonna end it on the road",
+    "gonna end it for tonight",
+    "gonna end it lol",
+    "gonna end it with my car",
+    "how many would kill me",
+    # Found by the verifier after the final pass. "murder" takes only "myself"; a word
+    # before the means ("sleeping pills", "my dads gun"); time shorthand; "by" with a verb;
+    # a place not on the list; "before you die"; "aswel" with one l; "to be alive" and
+    # "left to live" after "no reason".
+    "I'm going to murder me",
+    "gonna end it with sleeping pills",
+    "gonna end it with my dads gun",
+    "gonna end it tn",
+    "gonna end it 2nite",
+    "gonna end it by jumping",
+    "gonna end it by hanging",
+    "gonna end it in the bathtub",
+    "how many sleeping pills before you die",
+    "might aswel die",
+    "no reason for me to be alive",
+    "no reason left to live",
 )
 
 

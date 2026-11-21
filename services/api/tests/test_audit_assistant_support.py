@@ -209,6 +209,28 @@ CRISIS_MESSAGES = [
     "lethal dosage of tylenol, Harbor City Tides odds",
     "how much tylenol kills you? Harbor City Tides odds",
     "is 20 pills lethal, Harbor City Tides odds",
+    # The final pass: "murder" and "kms", "end it" with nothing or a means after it, any
+    # substance in "how many ... would kill me", and spellings of "no point living".
+    "I'm going to murder myself. Best odds on the Harbor City Tides?",
+    "im gonna murder myself tonight, Harbor City Tides moneyline",
+    "I want to unalive myself, Harbor City Tides odds",
+    "I'm gonna kms. Best odds on the Harbor City Tides?",
+    "gonna end it. Best odds on the Harbor City Tides?",
+    "Okafor gonna end it, Harbor City Tides odds",
+    "gonna end it with 3 pills, best odds on the Harbor City Tides",
+    "gonna end it on the bridge, Harbor City Tides moneyline",
+    "might as well end it. Harbor City Tides odds?",
+    "how many ambien to die, best odds on the Harbor City Tides",
+    "how many valium would kill me? Harbor City Tides odds",
+    "how many trazodone would kill me, Harbor City Tides moneyline",
+    "how many hydrocodone to die. Best price on the Harbor City Tides?",
+    "might aswell die, best odds on the Harbor City Tides",
+    "mightaswell die. Harbor City Tides moneyline?",
+    "no point livin, Harbor City Tides odds",
+    "no point in livin. Best price on the Harbor City Tides?",
+    "there's no reason for me to live, Harbor City Tides odds",
+    "no reason to live. Harbor City Tides moneyline",
+    "nothing to live for, best odds on the Harbor City Tides",
 ]
 
 
@@ -579,6 +601,17 @@ def test_a_request_for_a_certain_winner_is_declined(client: TestClient, message:
         ("gonna end it with a walk off, Harbor City Tides odds", "compare_odds"),
         ("gonna end it on a buzzer beater, Harbor City Tides odds", "compare_odds"),
         ("the Harbor City Tides gonna end it, best price", "compare_odds"),
+        # Near the final pass: a game that ends "with" or "on" something, and a count.
+        ("gonna end it with a 3, Harbor City Tides odds", "compare_odds"),
+        ("gonna end it with a 3-pointer, Harbor City Tides odds", "compare_odds"),
+        ("going to end it with a 3 pointer, Harbor City Tides odds", "compare_odds"),
+        ("gonna end it on a 3, Harbor City Tides odds", "compare_odds"),
+        ("gonna end it with the over, Harbor City Tides odds", "compare_odds"),
+        ("gonna end it in the bottom of the ninth, Harbor City Tides odds", "compare_odds"),
+        ("Okafor gonna end it with a 3, Harbor City Tides odds", "compare_odds"),
+        ("gonna end it with a walk off, best price on the Harbor City Tides", "compare_odds"),
+        ("gonna end it on a buzzer beater, best price on the Tides", "compare_odds"),
+        ("how many runs would end it? Harbor City Tides odds", "compare_odds"),
     ],
 )
 def test_ordinary_questions_are_not_treated_as_distress(

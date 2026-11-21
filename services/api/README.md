@@ -429,26 +429,37 @@ Behaviour worth knowing:
   declined as a request for a certain winner).
 
   **The limits, and the help sentence.** Detection is a fixed list of rules (regular
-  expressions), not an understanding of the message. It misses some wordings, and new ones
-  turn up at every review; `KNOWN_MISSES` in `tests/test_audit_assistant_detection.py` lists
-  the ones known today, and `HELP_SHOWN_ANYWAY` lists sports talk that gets help it did not
-  ask for. Because of that, every answer that is not a support reply (ordinary answers, the
-  fallback, the refusal above and every "couldn't find" answer, including the general help
-  answer) ends with one sentence, `safeguards.HELP_SENTENCE`, built from
-  `oddvex_api/helpline.py`: "If gambling is causing problems, call the National Problem
-  Gambling Helpline at 1-800-MY-RESET (1-800-697-3738) or text 800GAM; in a crisis, call or
-  text 988 (the Suicide and Crisis Lifeline)." The engine adds it after the `Explainer`, so
-  no explainer can leave it out. Support replies keep their own wording without it. A
-  message the rules miss therefore still shows the helpline and the crisis line in the
-  answer itself, not only in the small disclaimer line.
+  expressions), not an understanding of the message, and the list is open-ended: it can
+  never catch every wording. Every review round found wordings it missed, and each fix for
+  a miss risked new false alarms on sports talk ("gonna end it with a 3" is a game, "gonna
+  end it with pills" is not). With no "I" in the message, "end it" counts only when the
+  clause ends there or a time, a means or a place from a fixed list follows it.
+  `KNOWN_MISSES` in `tests/test_audit_assistant_detection.py` lists the misses known today,
+  and `HELP_SHOWN_ANYWAY` lists sports talk that gets help it did not ask for.
 
-  **Adding a wording.** Add a rule to the matching group in `assistant/safeguards.py`
-  (crisis, under 21, distress or loss chasing) and, in the same change, the wording to the
-  matching list in `tests/test_audit_assistant_detection.py`, so that removing the rule fails
-  a test. Add the sports talk closest to the new rule to an ordinary list, so the rule cannot
-  start firing on it, and send one example through the API with a team name in
+  The safety net for every miss is the help sentence. Every answer that is not a support
+  reply (ordinary answers, the fallback, the refusal above and every "couldn't find" answer,
+  including the general help answer) ends with one sentence, `safeguards.HELP_SENTENCE`,
+  built from `oddvex_api/helpline.py`: "If gambling is causing problems, call the National
+  Problem Gambling Helpline at 1-800-MY-RESET (1-800-697-3738) or text 800GAM; in a crisis,
+  call or text 988 (the Suicide and Crisis Lifeline)." The engine adds it after the
+  `Explainer`, so no explainer can leave it out. Support replies keep their own wording
+  without it. A message the rules miss therefore still shows the helpline and the crisis
+  line in the answer itself, not only in the small disclaimer line.
+
+  **Adding a wording.** The final pass on these rules (2026-11-21) closed a fixed list of
+  items. A wording found after it goes into `KNOWN_MISSES`. A new rule is added only with a
+  test: the rule goes into the matching group in `assistant/safeguards.py` (crisis, under
+  21, distress or loss chasing) and, in the same change, the wording goes into the matching
+  list in `tests/test_audit_assistant_detection.py` and an entry into `MUTATIONS` there,
+  which removes the rule from the source and fails if no message changes. A word added to
+  one of the word lists (the drug names, or the prepositions, counts and means and places
+  after "end it", which are tuples with one entry per line) gets its own `MUTATIONS` entry
+  and a message that only that word decides. The sports talk
+  closest to the new rule goes into an ordinary list, so the rule cannot start firing on
+  it, and one example goes through the API with a team name in
   `tests/test_audit_assistant_support.py`. If a wording cannot be caught without catching
-  sports talk, add it to `KNOWN_MISSES` instead.
+  sports talk, it stays in `KNOWN_MISSES`.
 - **Value screen (market discrepancies).** `GET /v1/value?league=&market=&min_edge=&limit=`
   (public, flag `value_screen`). For every outcome of every upcoming event, the best
   open, non-stale price is compared with the mean no-vig probability of the **other** open,

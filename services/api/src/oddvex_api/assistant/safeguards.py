@@ -29,6 +29,14 @@ few other words by filler words only (``_CHAIN``). "I just really want to be dea
 matches; "I think my parlay is dead" does not, because "my parlay is" is not filler. A few
 crisis wordings have no "I" at all ("gonna end it", "might as well die", "no point
 living"); they count unless the clause names somebody else first (``_SUBJECT_BEFORE_RE``).
+With no "I", "end it" counts only when the clause ends there or a time, a means or a place
+from a fixed list follows it ("gonna end it tonight", "gonna end it with pills"); "gonna
+end it with a 3" is a game that ends.
+
+The list is open-ended and is never finished: every review has found wordings it missed,
+and every fix for a miss risked new false alarms on sports talk. The final pass on these
+rules closed a fixed list of items; a wording found after it goes into ``KNOWN_MISSES`` in
+the tests, and the help sentence at the end of every other answer is what covers it.
 
 Before matching, the message is lower-cased, accents are dropped and Cyrillic or Greek
 look-alike letters become Latin ones: "die" written with a Cyrillic "i" (U+0456) reads
@@ -150,21 +158,35 @@ _LIVE_BETTING = r"(?:bet\w*|odds|lines?|markets?|games?|streams?|stream\w*|tv|sc
 _SUBSTANCE = (
     r"pills?|tablets?|capsules?|meds|medications?|painkillers?|tylenol|acetaminophen|paracetamol|"
     r"ibuprofen|advil|aspirin|xanax|benadryl|melatonin|oxy(?!gen)\w*|fentanyl|insulin|opioids?|bleach|"
+    # Prescription and over-the-counter drugs, by name.
+    r"ambien|zolpidem|valium|diazepam|alprazolam|klonopin|trazodone|hydrocodone|oxycodone|"
+    r"percocet|vicodin|morphine|codeine|tramadol|seroquel|lithium|"
     r"antifreeze|drugs"
 )
+#: "might as well", also written "might aswell" and "mightaswell".
+_AS_WELL = r"(?:might|may) ?as ?well"
 # Sports talk that follows "no way out of", "a way out of": a group, a parlay, a jam.
 _OUT_OF_SPORT = (
     r"(?! of (?:the|this|that|my|a|his|her|their) (?:group|division|conference|bracket|pool|"
     r"parlay|bet|wager|ticket|slip|contract|deal|subscription|plan|slump|jam|inning|game|"
     r"league|trade)\b)"
 )
+#: A count in a game or a bet, in "how many <count> would end it": not a lethal-means question.
+_NOT_A_SPORTS_COUNT = (
+    r"(?!(?:more )?(?:points?|pts|runs?|goals?|games?|wins?|losses|outs?|strikes?|strikeouts?|"
+    r"ks|threes?|3s|baskets?|buckets?|shots?|touchdowns?|tds?|yards?|laps?|rounds?|sets?|"
+    r"innings?|legs?|units?|bets?|parlays?|picks?|minutes?|mins?|seconds?|turnovers?|fouls?)\b)"
+)
+#: The thing asked about in "how many <one or two words> would kill me".
+_ONE_OR_TWO_WORDS = rf"{_NOT_A_SPORTS_COUNT}(?:\w+(?: \w+)?)"
 #: What follows "end it" when a game or a series ends: "end it in four", "end it with a
 #: walk-off" (or "walk off"), "end it in overtime", "end it in round 2", "end it with a
 #: three", "end it with 2 minutes left", "end it on a high note", "end it with a Tides
 #: moneyline", "end it here with one last question". A means, a time or a place ("with
 #: pills", "with 3 pills", "in the morning", "on the bridge") is not on this list, so it does
 #: not stop a match. A bare number counts only after "in" ("in four", "in 5"), and not
-#: before minutes or days.
+#: before minutes or days. Used after a first-person subject ("I'm going to end it ...") and
+#: "time to end it"; with no subject, ``_NO_SUBJECT_END_IT_TAIL`` decides instead.
 _GAME_ENDING = (
     r"game (?:\d|three|four|five|six|seven)|(?:two|three|four|five|six|seven|\d) (?:games|sets|"
     r"rounds|innings)|(?:\d+|a|one|two|three|four|five|ten) (?:minutes?|mins?|seconds?|secs?) "
@@ -356,7 +378,8 @@ _CRISIS_RE = _any(
     r"\b(?:please|someone|somebody) make it (?:all )?stop\b|\bmake it all stop\b",
     rf"{_IM} in (?:so much|too much|constant|unbearable) pain\b",
     r"\bpain is (?:too much|unbearable)\b",
-    rf"\b(?:hurt|hurting|harm|harming|cut|cutting|shoot|shooting|hang|hanging|drown|drowning|"
+    rf"\b(?:murder|murdering|hurt|hurting|harm|harming|cut|cutting|shoot|shooting|hang|hanging|"
+    rf"drown|drowning|"
     rf"poison|poisoning|off|offing|end|ending|stab|stabbing|starve|starving|delete|deleting) "
     rf"{_SELF}\b",
     r"\b(?:slit|slitting|slash|slashing|cut|cutting) my (?:own )?(?:wrists?|throat|veins?)\b",
@@ -507,6 +530,11 @@ _CRISIS_RE = _any(
     rf"\b(?:is|are|would|will|could|can|does|do) (?:\w+ ){{0,4}}?(?:{_SUBSTANCE})\b"
     rf"(?: \w+){{0,3}}? (?:lethal|fatal|deadly|kills?|be enough(?:{_END}| to (?:kill|die|od|"
     r"overdose|end)))\b",
+    # The final pass: "how many <anything> would kill me" and "how much <anything> to die",
+    # whatever the substance is called. Not "how many runs would end it".
+    rf"\bhow many {_ONE_OR_TWO_WORDS} (?:to|would|will|could|(?:does|would|will) it take to) "
+    rf"(?:die|kill (?:me|{_SELF})|end it|od|overdose)\b",
+    rf"\bhow much {_ONE_OR_TWO_WORDS} (?:to|would|will|could) (?:kill me|die|od|overdose)\b",
     r"\bnooses?\b",
     r"\bhang (?:your ?self|urself|oneself|one ?self)\b",
     # A threat that depends on a bet: "if this parlay loses I'm done for good", "when this
@@ -538,21 +566,123 @@ _NO_POINT_SPORT = (
 # Round five of the review: crisis wordings with no "I" ("gonna end it", "might as well
 # die"). They count unless the clause names somebody else first: "the Tides are gonna end it
 # tonight" and "they're going to end it" are about a team.
+_NO_SUBJECT_MODAL = (
+    r"gonna|going to|gon|finna|about to|bout to|abt to|ready to|want to|wanna|need to|have to|"
+    rf"gotta|got to|might just|may just|should just|{_AS_WELL}"
+)
+# The final pass. With no "I" before it, "end it" is a crisis only when the clause ends there
+# ("gonna end it", "might as well end it and ...") or a time, a means or a place from the
+# lists below follows. Anything else after "with", "on", "in", "at" or "by" is a game that
+# ends ("gonna end it with a 3", "gonna end it in the bottom of the ninth"); so is any word
+# not on the lists ("gonna end it for the night").
+_END_IT_CLAUSE_END = r"(?=[.,!?;]|$| (?:and|but|so|or|because|cause|cuz|then)\b)"
+_END_IT_TIME = (
+    r"(?:tonight|today|tomorrow|soon|later|forever|for good|for real|this (?:weekend|week|"
+    r"morning|evening)|in the morning|before (?:the )?morning|at (?:midnight|home tonight|dawn)|"
+    r"at \d{1,2}(?::\d\d)? ?(?:am|pm|oclock|tonight|today|tomorrow)|in (?:a|an|one|two|three|"
+    r"a few|a couple(?: of)?|\d+) (?:minutes?|mins?|hours?|hrs?|days?)|after (?:tonight|today|"
+    r"this|the game|the loss|work))\b"
+)
+# The lists are tuples, one entry per line, so that the tests can remove each entry on its
+# own and check that a message changes (``MUTATIONS`` in tests/test_audit_assistant_detection.py).
+# "noose" is not on the means list: ``\bnooses?\b`` is a crisis wherever it stands.
+_END_IT_PREPOSITIONS = (
+    "with",
+    "using",
+    "by taking",
+    "by swallowing",
+    "by using",
+    "on",
+    "in",
+    "at",
+    "off",
+    "from",
+    "in front of",
+    "under",
+    "by",
+)
+_END_IT_DETERMINERS = (
+    "a",
+    "an",
+    "the",
+    "my",
+    "some",
+    "all",
+    "all the",
+    "all my",
+    "all of my",
+    "those",
+    "these",
+)
+_END_IT_COUNTS = (
+    r"\d+",
+    "few",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "twenty",
+    "thirty",
+    "fifty",
+    "hundred",
+    "bunch of",
+    "handful of",
+    "bottle of",
+    "whole bottle of",
+)
+_END_IT_MEANS_WORDS = (
+    _SUBSTANCE,
+    "bottle(?! of)",
+    "guns?",
+    "pistol",
+    "rifle",
+    "shotgun",
+    "rope",
+    "knife",
+    "knives",
+    "blade",
+    "razor",
+    "belt",
+    "cord",
+    "bullets?",
+    "bridge",
+    "ledge",
+    "roof",
+    "rooftop",
+    "tracks",
+    "trains?",
+    "cliff",
+    "garage",
+    "overpass",
+    "balcony",
+)
+_END_IT_PREPOSITION = rf"(?:(?:{'|'.join(_END_IT_PREPOSITIONS)}) )?"
+_END_IT_MEANS = (
+    rf"(?:(?:{'|'.join(_END_IT_DETERMINERS)}) )?(?:(?:{'|'.join(_END_IT_COUNTS)}) )?"
+    rf"(?:{'|'.join(_END_IT_MEANS_WORDS)})\b"
+)
+_NO_SUBJECT_END_IT_TAIL = (
+    r"(?:(?: (?:here|there|now|right now|early|just))?"
+    rf"(?:{_END_IT_CLAUSE_END}| {_END_IT_TIME}| {_END_IT_PREPOSITION}{_END_IT_MEANS}))"
+)
 _NO_SUBJECT_CRISIS_RE = _any(
-    r"\b(?:gonna|going to|gon|finna|about to|bout to|abt to|ready to|want to|wanna|need to|have "
-    r"to|gotta|got to|might just|may just|should just|might as well|may as well) (?:just )?end "
-    rf"(?:it|it all|things|everything)\b{_END_IT_TAIL}"
-    r"(?! (?:(?:here|there|now) )?for (?:the|them|him|her|us|this|that)\b)",
-    rf"\b(?:might|may) as well (?:just )?(?:die|be dead|not (?:exist|be here|be alive|wake up)|"
+    rf"\b(?:{_NO_SUBJECT_MODAL}) (?:just )?end (?:it|it all|things|everything)\b"
+    rf"{_NO_SUBJECT_END_IT_TAIL}",
+    rf"\b{_AS_WELL} (?:just )?(?:die|be dead|not (?:exist|be here|be alive|wake up)|"
     rf"kill (?:me|{_SELF}))\b(?! (?:trying|laughing|happy|on|for|in the water|money|odds|weight|"
     r"wrong|right|last|even|serious|set|certain|sure|tired|asleep)\b)",
 )
 #: "No point living" needs no subject check: a team is never the subject of it, so "the
 #: Tides lost no point living" counts like "no point living".
 _NO_POINT_RE = re.compile(
-    r"\b(?:no (?:point|reason|use|sense) (?:in |to |for )?|pointless |whats the point (?:in )?|"
-    r"what point )(?:even )?(?:living|being alive|staying alive|existing|live|exist|go on|"
-    rf"going on|carry on|carrying on)\b{_NO_POINT_SPORT}"
+    r"\b(?:no (?:point|reason|use|sense) (?:for me )?(?:in |to |for )?|pointless |whats the "
+    r"point (?:in )?|what point )(?:even )?(?:living|livin|being alive|staying alive|existing|"
+    rf"live|exist|go on|going on|carry on|carrying on)\b{_NO_POINT_SPORT}"
 )
 #: The end of a clause that names who the sentence is about, when that is not the writer.
 #: "They", "he", "she" and "we" are subjects wherever they stand. "You", "team" and "the
