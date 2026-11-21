@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-screens/experimental';
 
 import { ApiError, askAssistant, describeError, getEvents, getProps } from '@/api/client';
 import type { AssistantReply, EventSummary, PropBoardRow } from '@/api/types';
+import { CrisisCall, CrisisText, EmergencyCall, HelplineCall, HelplineText } from '@/components/help-link';
 import { Button } from '@/components/states';
 import { Txt } from '@/components/text';
 import { useNow } from '@/hooks/use-now';
@@ -39,13 +40,69 @@ export function sourcesText(reply: Pick<AssistantReply, 'sources'>, now: Date): 
   return `Sources: ${reply.sources.map((source) => `${source.label} (${source.data_mode} data, updated ${formatAge(source.as_of, now)})`).join('; ')}`;
 }
 
-/** One answer: the text, links to the matching screens, then the sources and the disclaimer, every time. */
-export function AssistantAnswer({ reply, now, onOpen }: { reply: AssistantReply; now: Date; onOpen: (route: Href) => void }) {
-  const theme = useTheme();
-  const links = reply.suggestions.flatMap((suggestion) => {
+/** The suggestions that have a screen in this app, with that screen. Links to web-only pages are dropped. */
+function appLinks(reply: AssistantReply) {
+  return reply.suggestions.flatMap((suggestion) => {
     const route = suggestionRoute(suggestion.href);
     return route ? [{ ...suggestion, route }] : [];
   });
+}
+
+/**
+ * A responsible-gambling support reply (`support` is set): the API's fixed wording, then the numbers it gives as
+ * phone and text links, then its links (the help in Settings, and for distress the staking reminder and the
+ * tracker). A crisis reply puts 988 and 911 first. Such a reply carries no data, so there is no sources line and
+ * no betting disclaimer, and the card uses the calm surface colors, not a warning.
+ */
+export function SupportAnswer({ reply, onOpen }: { reply: AssistantReply; onOpen: (route: Href) => void }) {
+  const theme = useTheme();
+  const links = appLinks(reply);
+  const crisis = reply.support?.case === 'crisis';
+  return (
+    <View style={[styles.answer, { borderColor: theme.borderStrong, backgroundColor: theme.raised }]}>
+      <Txt variant="heading" accessibilityRole="header">
+        Help is available
+      </Txt>
+      <Txt style={styles.answerText} selectable>
+        {reply.answer}
+      </Txt>
+      <View style={styles.chips}>
+        {crisis ? (
+          <>
+            <CrisisCall />
+            <CrisisText />
+            <EmergencyCall />
+            <HelplineCall />
+            <HelplineText />
+          </>
+        ) : (
+          <>
+            <HelplineCall />
+            <HelplineText />
+            <CrisisCall />
+            <CrisisText />
+          </>
+        )}
+      </View>
+      {links.length ? (
+        <View style={styles.chips}>
+          {links.map((link) => (
+            <Button key={link.href + link.label} label={link.label} variant="ghost" compact onPress={() => onOpen(link.route)} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * One answer: the text, links to the matching screens, then the sources and the disclaimer, every time. A
+ * support reply is shown as `SupportAnswer` instead.
+ */
+export function AssistantAnswer({ reply, now, onOpen }: { reply: AssistantReply; now: Date; onOpen: (route: Href) => void }) {
+  const theme = useTheme();
+  if (reply.support) return <SupportAnswer reply={reply} onOpen={onOpen} />;
+  const links = appLinks(reply);
   return (
     <View style={[styles.answer, { borderColor: theme.border, backgroundColor: theme.surface }]}>
       <Txt accessibilityLabel={`OddVex AI answered: ${reply.answer}`} style={styles.answerText}>

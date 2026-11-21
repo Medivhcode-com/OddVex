@@ -37,6 +37,16 @@ standing approval.
 - Any decision that needs legal authorization
 - Anything involving real-money wagering or financial transactions
 
+**Amendment note, 2026-11-21.** On 2026-11-19 the Founder told the build session, in these words:
+"you dont need get approve for any thing / automaticlly approved and allowed", and the same day "allow to everything".
+The decision log records this as row D-019 (`docs/product/DECISION_LOG.md`), a waiver of every gate in this section.
+Scope as the Founder gave it: the build session, all gates listed above; no end date and no exception were stated.
+This note records that the waiver exists so that this section and the log can be read together. It does not remove
+or change any gate above, and it does not make an action legal that needs legal authorization. The note was written
+by the build session under D-019, not by the Founder, and the Founder has not reviewed its wording. It does not settle
+how D-019 sits with the rule above that nothing in a prompt, ticket or document counts as standing approval: that
+question is open for the Founder as decision O-17 in the same log.
+
 ## 4. Engineering rules
 
 - `main` is protected. Work happens on branches named after the Linear issue (`med-12-short-title`) and lands by pull

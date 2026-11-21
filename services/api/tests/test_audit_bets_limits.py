@@ -12,6 +12,7 @@ import contextlib
 import json
 import re
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -257,28 +258,79 @@ def sync_notices(client: TestClient, headers: Headers) -> list[dict[str, Any]]:
     return [n for n in response.json()["items"] if n["kind"] == "sync_finished"]
 
 
+class UnstorableFirstProvider(ManyBetsProvider):
+    """``ManyBetsProvider`` whose first ``unstorable`` bets have a price of 1.0, a value
+    that cannot be stored, so the import leaves them out (counted as rejected)."""
+
+    def __init__(self, total: int, unstorable: int) -> None:
+        super().__init__(total)
+        self.unstorable = unstorable
+
+    def fetch_bets(self, state: dict[str, Any], now: datetime) -> FetchResult:
+        result = super().fetch_bets(state, now)
+        leg = ExternalLeg(selection="Tides ML", market="moneyline", odds_decimal=Decimal(1))
+        bets = tuple(
+            replace(item, legs=(leg,)) if index < self.unstorable else item
+            for index, item in enumerate(result.bets)
+        )
+        return replace(result, bets=bets)
+
+
 @pytest.mark.parametrize(
-    ("cap", "fetched", "sentence"),
+    ("cap", "fetched", "unstorable", "imported", "sentence"),
     [
-        (5, 8, "3 bets were not imported; the import history says why."),
-        (3, 4, "1 bet was not imported; the import history says why."),
+        pytest.param(
+            5, 8, 0, 5, "3 bets were not imported; the import history says why.", id="cap"
+        ),
+        pytest.param(
+            3, 4, 0, 3, "1 bet was not imported; the import history says why.", id="cap-one"
+        ),
+        # A bet left out because a value cannot be stored counts the same, with room to spare.
+        pytest.param(
+            10,
+            4,
+            1,
+            3,
+            "1 bet was not imported; the import history says why.",
+            id="rejected-one",
+        ),
+        pytest.param(
+            10,
+            6,
+            2,
+            4,
+            "2 bets were not imported; the import history says why.",
+            id="rejected",
+        ),
+        # Both reasons in one run: 2 rejected, then 6 storable bets for 5 places.
+        pytest.param(
+            5,
+            8,
+            2,
+            5,
+            "3 bets were not imported; the import history says why.",
+            id="rejected-and-cap",
+        ),
     ],
 )
 def test_the_import_notification_says_how_many_bets_the_run_left_out(
-    make_app: AppFactory, cap: int, fetched: int, sentence: str
+    make_app: AppFactory, cap: int, fetched: int, unstorable: int, imported: int, sentence: str
 ) -> None:
     app = make_app(max_bets_per_user=cap)
-    app.state.sync_registry = SyncRegistry([ManyBetsProvider(fetched)])
+    app.state.sync_registry = SyncRegistry([UnstorableFirstProvider(fetched, unstorable)])
     with TestClient(app) as client:
         headers = auth_headers(client)
         connection = client.post(
             "/v1/sync/connections", json={"provider": "many"}, headers=headers
         ).json()
         run = client.post(f"/v1/sync/connections/{connection['id']}/sync", headers=headers).json()
-        assert run["status"] == "succeeded" and left_out(run) == fetched - cap
+        assert run["status"] == "succeeded" and run["imported_count"] == imported
+        assert left_out(run) == fetched - imported
         [notice] = sync_notices(client, headers)
         assert notice["title"] == "Import finished"
-        assert notice["body"].startswith(f"Many import finished: {cap} new, 0 already imported.")
+        assert notice["body"].startswith(
+            f"Many import finished: {imported} new, 0 already imported."
+        )
         assert notice["body"].endswith(sentence)
 
 

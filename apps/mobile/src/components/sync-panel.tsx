@@ -53,7 +53,10 @@ export function SyncPanel({
         return { tone: 'warn', text: `Sync failed${result.retryable ? ' and can be retried' : ''}: ${result.error_message ?? 'no detail given'}.` };
       }
       const imported = `${result.imported_count} new ${result.imported_count === 1 ? 'bet' : 'bets'} imported`;
-      return { tone: 'accent', text: `Sync finished. ${imported}, ${result.duplicate_count} already here.` };
+      // A finished run can still have left bets out (the account's bet cap, or a value that cannot be recorded):
+      // the API says how many and why in `error_message`.
+      const leftOut = result.error_message ? ` ${result.error_message}` : '';
+      return { tone: leftOut ? 'warn' : 'accent', text: `Sync finished. ${imported}, ${result.duplicate_count} already here.${leftOut}` };
     });
 
   const disconnect = (connection: SyncConnection) =>

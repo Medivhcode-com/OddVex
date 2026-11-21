@@ -16,6 +16,13 @@ export const PRIVATE_PROFILE = 'Your profile is private. You can browse, but onl
 
 export const NEEDS_PUBLIC_PROFILE = 'You need a public community profile to do this.';
 
+/**
+ * Shown to the owner of a profile moderators hid or removed. Editing it does not bring it back: the API keeps it
+ * hidden and puts it back in the moderators' queue, and only a moderator can make it visible again.
+ */
+export const PROFILE_HIDDEN_EXPLAINED =
+  'Other people cannot see it, and you cannot post. If you change the handle or the bio, the profile stays hidden and goes back to the moderators for review. Only a moderator can make it visible again.';
+
 export const REPORT_SENT = 'Report sent. A moderator will review it. The person you reported is not told who sent it.';
 
 export const RANKING_EXPLAINED =

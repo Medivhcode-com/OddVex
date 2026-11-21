@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { createBet, describeError } from '@/api/client';
+import { createBet, describeBetSaveError, saveMayBeStored } from '@/api/client';
 import type { BetCreate, BetType, EntryOddsFormat } from '@/api/types';
 import { Choice, Field } from '@/components/form';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
+import { DRAFT_KEPT_UNCONFIRMED, useClientRequestId } from '@/hooks/use-client-request-id';
 import { useTheme } from '@/hooks/use-theme';
 import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { radius, space } from '@/theme';
@@ -38,6 +39,17 @@ const ODDS_PLACEHOLDER: Record<EntryOddsFormat, string> = { american: '-110', de
 
 export const isMulti = (betType: BetType) => betType === 'parlay' || betType === 'sgp';
 
+/**
+ * What is wrong with a typed stake, or null. The API stores stakes in cents and refuses one that would be
+ * stored as 0.00, so anything under one cent is refused here before it is sent.
+ */
+export function stakeError(text: string): string | null {
+  const stake = Number(text);
+  if (text.trim() === '' || !Number.isFinite(stake) || stake <= 0) return 'Enter a stake greater than zero.';
+  if (stake < 0.01) return 'Enter a stake of at least $0.01.';
+  return null;
+}
+
 export type BetDraft = {
   betType: BetType;
   format: EntryOddsFormat;
@@ -55,7 +67,8 @@ export function buildBetPayload(draft: BetDraft): { error: string } | { body: Be
   const multi = isMulti(draft.betType);
   const stake = Number(draft.stake);
   const used = multi ? draft.legs : draft.legs.slice(0, 1);
-  if (draft.stake.trim() === '' || !Number.isFinite(stake) || stake <= 0) return { error: 'Enter a stake greater than zero.' };
+  const badStake = stakeError(draft.stake);
+  if (badStake) return { error: badStake };
   if (!draft.sportsbook.trim()) return { error: 'Enter the sportsbook.' };
   if (multi && used.length < 2) return { error: 'A parlay needs at least two legs.' };
   if (used.some((leg) => !leg.selection.trim() || !leg.odds.trim())) return { error: 'Each leg needs a selection and odds.' };
@@ -82,6 +95,11 @@ export function buildBetPayload(draft: BetDraft): { error: string } | { body: Be
  * The fields are drafts (`useDraft`): if the session ends before the bet is saved, they are back in the form
  * after the same person logs in again. A bet that was saved is not brought back. One of these forms is on
  * screen at a time.
+ *
+ * Each save carries a `client_request_id` (`useClientRequestId`). Saving the same form again after a failure
+ * sends the same id, so a save that reached the server but whose answer was lost is not stored twice; editing
+ * the form after a failure makes a new id. The id is a draft too, so it survives an unexpected sign-out; the form
+ * that comes back then says the bet may already be in the tracker (`DRAFT_KEPT_UNCONFIRMED`).
  */
 export function BetForm({
   leagues,
@@ -101,6 +119,7 @@ export function BetForm({
   const [legs, setLegs] = useDraft<LegDraft[]>('log-bet:legs', () => [emptyLeg()]);
   // Said until the next Save: the fields came back after the session ended.
   const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept('log-bet');
+  const request = useClientRequestId('log-bet');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
@@ -123,15 +142,18 @@ export function BetForm({
     setError(null);
     setPending(true);
     try {
-      await createBet(built.body);
+      // 201 for a new bet, 200 for a repeat of this id: either way the bet is stored.
+      await createBet({ ...built.body, client_request_id: request.idFor(built.body) });
       setLegs(isMulti(betType) ? [emptyLeg(), emptyLeg()] : [emptyLeg()]);
       setStake('');
+      request.clear();
       // What is in the form now is the saved state: a later sign-out has nothing of this bet to bring back.
       draftSaved();
       setSaved(true);
       onSaved();
     } catch (caught) {
-      setError(describeError(caught, 'The bet was not saved. Try again.'));
+      if (saveMayBeStored(caught)) request.markUnconfirmed();
+      setError(describeBetSaveError(caught, 'The bet was not saved. Try again.'));
     } finally {
       setPending(false);
     }
@@ -139,7 +161,7 @@ export function BetForm({
 
   return (
     <View style={styles.form}>
-      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
+      {keptNotice ? <Notice tone="neutral" text={request.unconfirmed ? DRAFT_KEPT_UNCONFIRMED : DRAFT_KEPT} /> : null}
       <Choice label="Bet type" options={TYPES} value={betType} onChange={changeType} />
       <Choice
         label="League"

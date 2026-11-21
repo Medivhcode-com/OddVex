@@ -2601,6 +2601,128 @@ END_IT_MEANS_MESSAGES = {
     "garage": "gonna end it just in the garage",
 }
 
+#: One message per entry of ``_END_IT_CONJUNCTIONS``: a conjunction after "end it" ends the
+#: clause, as a full stop does.
+END_IT_CONJUNCTION_MESSAGES = {
+    "and": "gonna end it and that is that",
+    "but": "gonna end it but whatever",
+    "so": "gonna end it so yeah",
+    "or": "gonna end it or something",
+    "because": "gonna end it because why not",
+    "cause": "gonna end it cause why not",
+    "cuz": "gonna end it cuz why not",
+    "then": "gonna end it then whatever",
+}
+#: One message per entry of ``_END_IT_FILLERS``, the words that may stand between "end it"
+#: and the end of the clause, a time or a means.
+END_IT_FILLER_MESSAGES = {
+    "here": "might as well end it here",
+    "there": "might as well end it there",
+    "now": "gonna end it now",
+    "right now": "gonna end it right now",
+    "early": "gonna end it early with a knife",
+    "just": "gonna end it just with pills",
+}
+#: One message per entry of ``_END_IT_TIMES`` and of the short lists it is built from.
+END_IT_TIME_MESSAGES = {
+    "tonight": "gonna end it tonight",
+    "today": "gonna end it today",
+    "tomorrow": "gonna end it tomorrow",
+    "soon": "gonna end it soon",
+    "later": "gonna end it later",
+    "forever": "gonna end it forever",
+    "for good": "gonna end it for good",
+    "for real": "gonna end it for real",
+    "this ...": "gonna end it this weekend",
+    "in the morning": "gonna end it in the morning",
+    "before (?:the )?morning": "gonna end it before morning",
+    "at ...": "gonna end it at midnight",
+    "at <hour> ...": "gonna end it at 3 tonight",
+    "in <count> <unit>": "gonna end it in a few minutes",
+    "after ...": "gonna end it after the game",
+}
+END_IT_TIME_THIS_MESSAGES = {
+    word: f"gonna end it this {word}" for word in ("weekend", "week", "morning", "evening")
+}
+END_IT_TIME_AT_MESSAGES = {
+    word: f"gonna end it at {word}" for word in ("midnight", "home tonight", "dawn")
+}
+END_IT_TIME_CLOCK_MESSAGES = {
+    "am": "gonna end it at 3am",
+    "pm": "gonna end it at 11 pm",
+    "oclock": "gonna end it at 4 o'clock",
+    "tonight": "gonna end it at 3 tonight",
+    "today": "gonna end it at 9 today",
+    "tomorrow": "gonna end it at 6 tomorrow",
+}
+END_IT_TIME_COUNT_MESSAGES = {
+    "a": "gonna end it in a minute",
+    "an": "gonna end it in an hour",
+    "one": "gonna end it in one hour",
+    "two": "gonna end it in two hours",
+    "three": "gonna end it in three days",
+    "a few": "gonna end it in a few minutes",
+    "a couple(?: of)?": "gonna end it in a couple hours",
+    r"\d+": "gonna end it in 10 minutes",
+}
+END_IT_TIME_UNIT_MESSAGES = {
+    "minutes?": "gonna end it in 10 minutes",
+    "mins?": "gonna end it in 10 mins",
+    "hours?": "gonna end it in two hours",
+    "hrs?": "gonna end it in 2 hrs",
+    "days?": "gonna end it in three days",
+}
+END_IT_TIME_AFTER_MESSAGES = {
+    "tonight": "gonna end it after tonight",
+    "today": "gonna end it after today",
+    "this": "gonna end it after this",
+    "the game": "gonna end it after the game",
+    "the loss": "gonna end it after the loss",
+    "work": "gonna end it after work",
+}
+
+#: One message per entry of ``_SPORTS_COUNTS``: "how many <count> would end it" is about a
+#: game or a bet when the count is one of these, and only that entry keeps the general
+#: how-many rule out of it.
+SPORTS_COUNT_WORDS = {
+    "points?": "points",
+    "pts": "pts",
+    "runs?": "runs",
+    "goals?": "goals",
+    "games?": "games",
+    "wins?": "wins",
+    "losses": "losses",
+    "outs?": "outs",
+    "strikes?": "strikes",
+    "strikeouts?": "strikeouts",
+    "ks": "ks",
+    "threes?": "threes",
+    "3s": "3s",
+    "baskets?": "baskets",
+    "buckets?": "buckets",
+    "shots?": "shots",
+    "touchdowns?": "touchdowns",
+    "tds?": "tds",
+    "yards?": "yards",
+    "laps?": "laps",
+    "rounds?": "rounds",
+    "sets?": "sets",
+    "innings?": "innings",
+    "legs?": "legs",
+    "units?": "units",
+    "bets?": "bets",
+    "parlays?": "parlays",
+    "picks?": "picks",
+    "minutes?": "minutes",
+    "mins?": "mins",
+    "seconds?": "seconds",
+    "turnovers?": "turnovers",
+    "fouls?": "fouls",
+}
+SPORTS_COUNT_MESSAGES = {
+    entry: f"how many {word} would end it" for entry, word in SPORTS_COUNT_WORDS.items()
+}
+
 #: One message per drug name added in the final pass that only the substance list decides
 #: ("how many <drug> would kill me" is caught by the general how-many rule whatever the
 #: name). "oxycodone" is not here: ``oxy\w*`` on the same list already matches it.
@@ -2646,6 +2768,15 @@ HOW_MANY_MESSAGES = [
         *END_IT_DETERMINER_MESSAGES.values(),
         *END_IT_COUNT_MESSAGES.values(),
         *END_IT_MEANS_MESSAGES.values(),
+        *END_IT_CONJUNCTION_MESSAGES.values(),
+        *END_IT_FILLER_MESSAGES.values(),
+        *END_IT_TIME_MESSAGES.values(),
+        *END_IT_TIME_THIS_MESSAGES.values(),
+        *END_IT_TIME_AT_MESSAGES.values(),
+        *END_IT_TIME_CLOCK_MESSAGES.values(),
+        *END_IT_TIME_COUNT_MESSAGES.values(),
+        *END_IT_TIME_UNIT_MESSAGES.values(),
+        *END_IT_TIME_AFTER_MESSAGES.values(),
         *DRUG_NAME_MESSAGES.values(),
         *HOW_MANY_MESSAGES,
     ],
@@ -2654,7 +2785,10 @@ def test_final_pass_crisis_wordings_are_detected(message: str) -> None:
     assert detect(message).case == "crisis", message
 
 
-@pytest.mark.parametrize("message", [*FINAL_END_IT_ORDINARY, *FINAL_LETHAL_ORDINARY])
+@pytest.mark.parametrize(
+    "message",
+    [*FINAL_END_IT_ORDINARY, *FINAL_LETHAL_ORDINARY, *SPORTS_COUNT_MESSAGES.values()],
+)
 def test_final_pass_sports_talk_is_not_a_support_case(message: str) -> None:
     assert detect(message).case is None, message
 
@@ -2798,21 +2932,81 @@ for _name, _message in DRUG_NAME_MESSAGES.items():
     )
     MUTATIONS[f"drug name: {_name}"] = (_old, _old.replace(f"{_name}|", ""), {_message: "crisis"})
 
-# Each entry of the no-subject "end it" lists, removed from its tuple on its own.
-for _list, _messages in (
-    ("preposition", END_IT_PREPOSITION_MESSAGES),
-    ("determiner", END_IT_DETERMINER_MESSAGES),
-    ("count", END_IT_COUNT_MESSAGES),
-    ("means or place", END_IT_MEANS_MESSAGES),
+_SOURCE = Path(safeguards.__file__).read_text(encoding="utf-8")
+
+
+def _entry_removed(tuple_name: str, line: str) -> tuple[str, str]:
+    """The source of the tuple ``tuple_name`` in ``safeguards.py``, and the same without
+    ``line``. The whole tuple is replaced, so an entry may also appear in another tuple
+    ("tonight", "a"). A tuple or a line that is not there gives a part that ``_mutant``
+    reports as missing."""
+    start = _SOURCE.find(f"\n{tuple_name} = (\n") + 1
+    if not start:
+        return f"<no tuple {tuple_name}>", ""
+    block = _SOURCE[start : _SOURCE.index("\n)\n", start) + 3]
+    if block.count(line) != 1:
+        return f"<{line!r} not once in {tuple_name}>", ""
+    return block, block.replace(line, "")
+
+
+def _entry_line(entry: str) -> str:
+    """How ``entry`` is written on its own line of a tuple in ``safeguards.py``."""
+    if entry == "_SUBSTANCE":
+        return "    _SUBSTANCE,\n"
+    if "\\" in entry:
+        return f'    r"{entry}",\n'
+    return f'    "{entry}",\n'
+
+
+# Lines of ``_END_IT_TIMES`` that are built from a shorter list.
+_TIME_LINES = {
+    "this ...": "    rf\"this (?:{'|'.join(_END_IT_TIME_THIS)})\",\n",
+    "at ...": "    rf\"at (?:{'|'.join(_END_IT_TIME_AT)})\",\n",
+    "at <hour> ...": "    rf\"at \\d{{1,2}}(?::\\d\\d)? ?(?:{'|'.join(_END_IT_TIME_CLOCK)})\",\n",
+    "in <count> <unit>": (
+        "    rf\"in (?:{'|'.join(_END_IT_TIME_COUNTS)}) (?:{'|'.join(_END_IT_TIME_UNITS)})\",\n"
+    ),
+    "after ...": "    rf\"after (?:{'|'.join(_END_IT_TIME_AFTER)})\",\n",
+}
+
+# Each entry of the rule lists, removed from its tuple on its own.
+for _label, _tuple, _messages, _case in (
+    ("end it preposition", "_END_IT_PREPOSITIONS", END_IT_PREPOSITION_MESSAGES, "crisis"),
+    ("end it determiner", "_END_IT_DETERMINERS", END_IT_DETERMINER_MESSAGES, "crisis"),
+    ("end it count", "_END_IT_COUNTS", END_IT_COUNT_MESSAGES, "crisis"),
+    ("end it means or place", "_END_IT_MEANS_WORDS", END_IT_MEANS_MESSAGES, "crisis"),
+    ("end it conjunction", "_END_IT_CONJUNCTIONS", END_IT_CONJUNCTION_MESSAGES, "crisis"),
+    ("end it filler", "_END_IT_FILLERS", END_IT_FILLER_MESSAGES, "crisis"),
+    ("end it time", "_END_IT_TIMES", END_IT_TIME_MESSAGES, "crisis"),
+    ("end it time: this", "_END_IT_TIME_THIS", END_IT_TIME_THIS_MESSAGES, "crisis"),
+    ("end it time: at", "_END_IT_TIME_AT", END_IT_TIME_AT_MESSAGES, "crisis"),
+    ("end it time: at <hour>", "_END_IT_TIME_CLOCK", END_IT_TIME_CLOCK_MESSAGES, "crisis"),
+    ("end it time: in <count>", "_END_IT_TIME_COUNTS", END_IT_TIME_COUNT_MESSAGES, "crisis"),
+    ("end it time: <unit>", "_END_IT_TIME_UNITS", END_IT_TIME_UNIT_MESSAGES, "crisis"),
+    ("end it time: after", "_END_IT_TIME_AFTER", END_IT_TIME_AFTER_MESSAGES, "crisis"),
+    ("how many: a sports count", "_SPORTS_COUNTS", SPORTS_COUNT_MESSAGES, None),
 ):
     for _entry, _message in _messages.items():
-        if _entry == "_SUBSTANCE":
-            _line = "    _SUBSTANCE,\n"
-        elif "\\" in _entry:
-            _line = f'    r"{_entry}",\n'
-        else:
-            _line = f'    "{_entry}",\n'
-        MUTATIONS[f"end it {_list}: {_entry}"] = (_line, "", {_message: "crisis"})
+        _line = _TIME_LINES[_entry] if _entry in _TIME_LINES else _entry_line(_entry)
+        _old, _new = _entry_removed(_tuple, _line)
+        MUTATIONS[f"{_label}: {_entry}"] = (_old, _new, {_message: _case})
+
+# Optional words inside an entry.
+MUTATIONS["end it time: the 'of' in 'in a couple of hours'"] = (
+    '    "a couple(?: of)?",\n',
+    '    "a couple",\n',
+    {"gonna end it in a couple of hours": "crisis"},
+)
+MUTATIONS["end it time: the 'the' in 'before the morning'"] = (
+    '    "before (?:the )?morning",\n',
+    '    "before morning",\n',
+    {"gonna end it before the morning": "crisis"},
+)
+MUTATIONS["how many: 'more' before a sports count"] = (
+    "(?!(?:more )?(?:{'|'.join(_SPORTS_COUNTS)})\\b)",
+    "(?!(?:{'|'.join(_SPORTS_COUNTS)})\\b)",
+    {"how many more goals would end it": None},
+)
 
 
 def _mutant(old: str, new: str) -> Any:

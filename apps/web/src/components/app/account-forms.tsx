@@ -3,7 +3,8 @@
 import { useActionState, useState } from "react";
 import { Button, Field, Notice } from "@/components/ui/primitives";
 import { changePasswordAction } from "@/lib/auth-actions";
-import { clientApi, ClientApiError } from "@/lib/client-api";
+import { clientApi } from "@/lib/client-api";
+import { exportError } from "@/lib/tracker-messages";
 
 export function ChangePasswordForm() {
   const [state, action, pending] = useActionState(changePasswordAction, {} as { error?: string; done?: boolean });
@@ -35,7 +36,7 @@ export function ExportDataButton() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (caught) {
-      setError(caught instanceof ClientApiError ? caught.message : "The export failed. Try again.");
+      setError(exportError(caught));
     } finally {
       setBusy(false);
     }

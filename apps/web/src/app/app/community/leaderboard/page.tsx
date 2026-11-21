@@ -3,10 +3,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Schemas } from "@oddvex/types";
 import { CommunityHeader, intervalText, SignedOut } from "@/components/app/community/chrome";
+import { Price } from "@/components/app/odds-format";
 import { EmptyState, Notice, Panel, PanelHeader, Segmented } from "@/components/ui/primitives";
 import { api, withQuery } from "@/lib/api";
 import { COMMUNITY_HOME, communityContext, profileHref } from "@/lib/community";
-import { formatDateTime, formatPercent } from "@/lib/format";
+import { formatDateTime, formatPercent, formatSignedPercent } from "@/lib/format";
 import { getLeagues, pick } from "@/lib/leagues";
 
 export const metadata: Metadata = { title: "Community leaderboard" };
@@ -17,7 +18,11 @@ const WINDOWS = [
   { value: "all", label: "All time" },
 ] as const;
 
-/** Behind two flags: `community` and `community_leaderboard`. Rows are shown in the API's order. */
+/**
+ * Behind two flags: `community` and `community_leaderboard`. Rows are shown in the API's order.
+ * Each row also shows the API's average price and flat-stake return, which play no part in the
+ * order, so a record of short-priced wins is not read as the strongest.
+ */
 export default async function LeaderboardPage({ searchParams }: { searchParams: Promise<{ league?: string; window?: string }> }) {
   const context = await communityContext("community_leaderboard");
   if (!context.user) return <SignedOut next="/app/community/leaderboard" />;
@@ -59,13 +64,20 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
             title="Ranking"
             description="Ranked by the lower end of the win-rate interval, not the win rate itself, so a small sample can't top the list."
           />
+          {board.items.length ? (
+            <p className="max-w-prose border-b border-line px-4 py-3 text-sm text-muted sm:px-5">
+              A high win rate at short prices can still lose money, so each row also shows the average price of the graded picks and the
+              flat-stake return: the profit or loss per unit staked, at 1 unit per pick and the price recorded when it was posted. Neither
+              changes the order.
+            </p>
+          ) : null}
           {board.items.length === 0 ? (
             <EmptyState title="Nobody is ranked in this view yet">
               A profile is ranked once it has at least {board.minimum_graded_picks} graded picks in the window. Try a longer window or all leagues.
             </EmptyState>
           ) : (
             <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Ranking table, scrolls sideways">
-              <table className="w-full min-w-[36rem] border-collapse text-sm">
+              <table className="w-full min-w-[48rem] border-collapse text-sm">
                 <caption className="sr-only">Profiles ranked by the lower end of the 95% interval of their win rate</caption>
                 <thead>
                   <tr className="text-left text-xs text-muted">
@@ -73,7 +85,9 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
                     <th scope="col" className="px-2 py-2.5 font-medium">Profile</th>
                     <th scope="col" className="px-2 py-2.5 text-right font-medium">Graded picks</th>
                     <th scope="col" className="px-2 py-2.5 text-right font-medium">Win rate</th>
-                    <th scope="col" className="px-4 py-2.5 text-right font-medium sm:px-5">95% interval</th>
+                    <th scope="col" className="px-2 py-2.5 text-right font-medium">95% interval</th>
+                    <th scope="col" className="px-2 py-2.5 text-right font-medium">Average price</th>
+                    <th scope="col" className="px-4 py-2.5 text-right font-medium sm:px-5">Flat-stake return</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -87,7 +101,9 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
                       </th>
                       <td className="num px-2 py-2.5 text-right">{row.record.picks}</td>
                       <td className="num px-2 py-2.5 text-right">{formatPercent(row.record.win_rate)}</td>
-                      <td className="num px-4 py-2.5 text-right sm:px-5">{intervalText(row.record) ?? "n/a"}</td>
+                      <td className="num px-2 py-2.5 text-right">{intervalText(row.record) ?? "n/a"}</td>
+                      <td className="num px-2 py-2.5 text-right">{row.record.average_price ? <Price price={row.record.average_price} /> : "n/a"}</td>
+                      <td className="num px-4 py-2.5 text-right sm:px-5">{formatSignedPercent(row.record.flat_stake_roi)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,6 +1,6 @@
 # OddVex — Brand Voice
 
-Last updated: 2026-11-15 · Applies to: product UI, marketing site, store listings, blog, email, social, support, assistant responses.
+Last updated: 2026-11-21 · Applies to: product UI, marketing site, store listings, blog, email, social, support, assistant responses.
 
 ## 1. Brand in one paragraph
 
@@ -42,7 +42,7 @@ Tone by context:
 | Education | Clear, patient | "Implied probability is the win chance a price represents, before removing the sportsbook's margin." |
 | Marketing | Confident, concrete | "See every price side by side. Know what the number means." |
 | Assistant | Direct, sourced, bounded | "Best moneyline price for Harbor City is +118 at Book C (as of 7:42 PM ET). I can't predict the result." |
-| RG / sensitive | Warm, non-judgemental, direct | "If betting is causing you stress, free confidential help is available at 1-800-GAMBLER." |
+| RG / sensitive | Warm, non-judgemental, direct | "If betting is causing you stress, confidential help is available at 1-800-MY-RESET (1-800-697-3738)." |
 
 ## 4. Do / don't phrases
 
@@ -95,7 +95,7 @@ Note on the tagline: "Every Line" is brand language. In factual copy, do not cla
 
 | Element | Where |
 |---|---|
-| "21+. OddVex does not accept wagers. Gambling problem? Call 1-800-GAMBLER." | Footer of site/app, all ads and store listings, emails (state variants per counsel) |
+| "21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738)." (the line as built: `RESPONSIBLE_GAMBLING_LINE` in `apps/web/src/lib/site.ts`) | Footer of site/app, all ads and store listings, emails (state variants per counsel). The helpline is the National Problem Gambling Helpline, checked on 2026-11-19; check again before each release. 1-800-GAMBLER is the New Jersey council's line and is not used |
 | "For informational purposes only" + data-delay note | Near odds in marketing; Terms |
 | "Illustrative example — fictional data" | Any screenshot/mock using fixtures |
 | AI disclosure | Assistant UI and `/ai` page |

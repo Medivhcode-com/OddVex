@@ -1,9 +1,9 @@
 # OddVex — App Store and Google Play Listing Draft
 
-Last updated: 2026-11-15 · Status: **DRAFT. Not submitted. Submission requires Founder approval (G-04) and counsel review of copy and policy position.**
+Last updated: 2026-11-21 · Status: **DRAFT. Not submitted. Submission requires Founder approval (G-04) and counsel review of copy and policy position.**
 
 Reality check before using this draft:
-- The mobile app is **built in code and has never been run on a device or simulator** (see `apps/mobile/README.md` and `docs/product/BUILD_STATUS.md`). In code it covers games and odds comparison, the prop board and analyzer, calculators, parlay research, the bet tracker with mock sync, the watchlist, in-app alerts and notifications, OddVex AI, and account settings with in-app deletion, all on **synthetic data**. It has no push notifications, no data export, no profit chart or performance breakdowns, and no paywall. No screenshot below can be produced until the app has been run on real hardware. Store submission is planned for **M6**.
+- The mobile app is **built in code and has not been reported as run on a device or simulator** (see `apps/mobile/README.md` and `docs/product/BUILD_STATUS.md`). In code it covers games and odds comparison, the prop board and analyzer, calculators, parlay research, the bet tracker with mock sync, the watchlist, in-app alerts and notifications, OddVex AI, and account settings with in-app deletion, all on **synthetic data**. The community screens (feed, picks, comments, profiles, follows, blocks, reports, leaderboard) are also compiled into the app and appear when the server's `community` switch is turned on, with no new build; it is off. It has no push notifications, no data export, no profit chart or performance breakdowns, and no paywall. No screenshot below can be produced until the app has been run on real hardware. Store submission is planned for **M6**.
 - Listing copy below describes the **intended launch feature set**. At submission, remove any feature that is not actually in the shipped build (store metadata must be accurate).
 - Character limits and policy references reflect our understanding and **must be re-verified in App Store Connect / Play Console at submission time**.
 - No ratings, awards, user counts or testimonials are included, because none exist.
@@ -64,7 +64,7 @@ RUN THE NUMBERS
 • Every formula explained
 
 UNDERSTAND PARLAYS
-• Combined odds and combined probability together
+• Combined odds, payout and the break-even rate: how often the parlay must win to break even
 • Warnings when legs may be correlated
 
 TRACK YOUR BETS
@@ -82,7 +82,7 @@ BUILT RESPONSIBLY
 
 For adults 21 and over. OddVex provides information only and does not offer real-money gambling. Odds may be delayed or change; always confirm with your sportsbook. Betting involves risk.
 
-Gambling problem? Call 1-800-GAMBLER.
+Gambling problem? Call 1-800-MY-RESET (1-800-697-3738) or text 800GAM.
 
 Terms: https://oddvex.com/terms
 Privacy: https://oddvex.com/privacy
@@ -136,15 +136,15 @@ Rules: real app UI only; **fictional teams/players/sportsbooks or licensed data*
 
 | # | Screen | Caption (headline) | Sub-caption | Shows | Available in mobile build |
 |---|---|---|---|---|---|
-| 1 | Odds comparison | "Every line, side by side" | "Best available price highlighted" | Grid with best-line markers and "as of" time | No separate odds board on mobile; the Games tab and game detail show best prices. Built in code, not run on a device |
-| 2 | Game detail | "Scores and prices together" | "Know how fresh every number is" | Score header, odds by sportsbook, freshness label | Built in code, not run on a device |
-| 3 | Implied probability view | "See what the price implies" | "American, decimal or probability" | Format toggle; no-vig row | Built in code, not run on a device (odds format is set in Settings; no-vig consensus is on game detail) |
-| 4 | Player prop detail | "Props, backed by history" | "Results against the line, with sample sizes" | Game-log chart; "6 of 10" | Built in code, not run on a device |
-| 5 | Calculators | "Run the numbers" | "No-vig, EV, CLV and parlay maths" | EV calculator with formula link | Built in code, not run on a device ("Show the working" instead of a formula link: verify) |
-| 6 | Parlay research | "Understand the whole parlay" | "Probability alongside payout" | Correlation warning visible | Built in code, not run on a device |
-| 7 | Bet tracker | "Your record, honestly" | "Net result, ROI and breakdowns" | Summary tiles incl. a negative number (do not show only wins) | Built in code, not run on a device (breakdowns are web-only) |
-| 8 | OddVex AI | "Answers with sources" | "From verified data. No invented numbers." | Answer with source + timestamp chips | Built in code, not run on a device |
-| 9 | Responsible gambling | "Information, never pressure" | "21+. No picks. No guarantees." | RG resources screen | Not built as a screen: the app shows a responsible-gambling line in Settings and the staking-reminder notice |
+| 1 | Odds comparison | "Every line, side by side" | "Best available price highlighted" | Grid with best-line markers and "as of" time | No separate odds board on mobile; the Games tab and game detail show best prices. Built in code, not reported as run on a device |
+| 2 | Game detail | "Scores and prices together" | "Know how fresh every number is" | Score header, odds by sportsbook, freshness label | Built in code, not reported as run on a device |
+| 3 | Implied probability view | "See what the price implies" | "American, decimal or probability" | Format toggle; no-vig row | Built in code, not reported as run on a device (odds format is set in Settings; no-vig consensus is on game detail) |
+| 4 | Player prop detail | "Props, backed by history" | "Results against the line, with sample sizes" | Game-log chart; "6 of 10" | Built in code, not reported as run on a device |
+| 5 | Calculators | "Run the numbers" | "No-vig, EV, CLV and parlay maths" | EV calculator with formula link | Built in code, not reported as run on a device ("Show the working" instead of a formula link: verify) |
+| 6 | Parlay research | "Understand the whole parlay" | "Break-even rate alongside payout" | Break-even rate and correlation warning visible. Do not show or caption a combined probability: the app shows none | Built in code, not reported as run on a device |
+| 7 | Bet tracker | "Your record, honestly" | "Net result, ROI and breakdowns" | Summary tiles incl. a negative number (do not show only wins) | Built in code, not reported as run on a device (breakdowns are web-only) |
+| 8 | OddVex AI | "Answers with sources" | "From verified data. No invented numbers." | Answer with source + timestamp chips | Built in code, not reported as run on a device |
+| 9 | Responsible gambling | "Information, never pressure" | "21+. No picks. No guarantees." | RG resources screen | Not built as a screen: the app shows the responsible-gambling line and helpline in Settings, on the tracker and on the sync panel, and the staking-reminder notice |
 
 Use only screenshots of features present in the submitted build. Launch set (first five positions) to be chosen from what ships.
 
@@ -183,7 +183,7 @@ Bracketed items must be completed truthfully at submission.
 |---|---|
 | Apple | Answer the age-rating questionnaire accurately, including gambling-related questions. Even without real-money wagering, the app's theme is sports betting; **expect and accept the highest adult rating tier**. Apple revised its rating tiers in 2025 — verify current tiers and questions at submission. Do not attempt to obtain a lower rating. |
 | Google Play | Complete the IARC content-rating questionnaire accurately; disclose gambling-related themes. Set target audience to adults only. Expect a mature rating. |
-| Both | App enforces 21+ at signup regardless of store rating. If UGC ships (M5), declare it and describe moderation. If the assistant uses an LLM (M4), check current AI-content disclosure requirements. |
+| Both | App enforces 21+ at signup regardless of store rating. User-generated content screens are in the binary behind a server switch (off); whether they must be declared while switched off is a counsel question (`STORE_SUBMISSION_PREP.md` section 3). If the community is on at submission, declare it and describe moderation (report and block in the app, moderation by staff on the web). If the assistant uses an LLM (M4), check current AI-content disclosure requirements. |
 | Open (counsel) | Whether the app is treated as "simulated gambling", "gambling information", or neither under each store's definitions; any regional rating consequences (ST-01, ST-02). |
 
 ## 7. Privacy label inputs (to be finalised from the real build)
@@ -208,7 +208,8 @@ Position: **no tracking** as Apple defines it (no cross-app/third-party advertis
 - [ ] Every feature mentioned exists in the submitted build
 - [ ] No banned claims (BRAND_VOICE BC-01…BC-14)
 - [ ] "Does not accept wagers" and "21+" present in description
-- [ ] 1-800-GAMBLER present
+- [ ] National Problem Gambling Helpline present: 1-800-MY-RESET (1-800-697-3738), re-verified on the National Council on Problem Gambling's pages (last checked 2026-11-19). Never 1-800-GAMBLER, which is the New Jersey council's line
+- [ ] No combined-probability claim for parlays
 - [ ] No third-party trademarks in name, subtitle, keywords or screenshots
 - [ ] Character counts re-verified in the store consoles
 - [ ] Screenshots use licensed or fictional data and match current UI

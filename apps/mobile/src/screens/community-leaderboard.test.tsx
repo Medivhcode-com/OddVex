@@ -58,11 +58,25 @@ describe('CommunityLeaderboardScreen', () => {
     expect(strings.indexOf(leaderboard.caveat)).toBeLessThan(strings.indexOf('fictional_fox'));
   });
 
-  it('shows rank, handle, graded picks and the win rate with its interval on each row', async () => {
-    await show();
+  it('shows rank, handle, graded picks, the win rate with its interval, the average price and the flat-stake return on each row', async () => {
+    await show({
+      [BOARD]: {
+        ...leaderboard,
+        items: [leaderboard.items[0], { ...leaderboard.items[1], record: { ...leaderboard.items[1].record, average_price: null, flat_stake_roi: -0.0612 } }],
+      },
+    });
 
-    expect(await screen.findByRole('button', { name: 'Rank 1. fictional_fox. 36 graded picks. Win rate 50.0%, 95% interval 34.5% to 65.5%.' })).toBeOnTheScreen();
-    expect(screen.getByRole('button', { name: 'Rank 2. sample_sam. 32 graded picks. Win rate 46.9%, 95% interval 30.9% to 63.6%.' })).toBeOnTheScreen();
+    expect(
+      await screen.findByRole('button', {
+        name: 'Rank 1. fictional_fox. 36 graded picks. Win rate 50.0%, 95% interval 34.5% to 65.5%. Average price +119, flat-stake ROI +4.3%.',
+      }),
+    ).toBeOnTheScreen();
+    expect(
+      screen.getByRole('button', {
+        name: 'Rank 2. sample_sam. 32 graded picks. Win rate 46.9%, 95% interval 30.9% to 63.6%. Average price n/a, flat-stake ROI −6.1%.',
+      }),
+    ).toBeOnTheScreen();
+    expect(screen.getByText('Average price +119 · Flat-stake ROI +4.3%')).toBeOnTheScreen();
     expect(screen.getByText('@fictional_fox')).toBeOnTheScreen();
     expect(screen.getByText('36 graded picks · 18-18-0')).toBeOnTheScreen();
     expect(screen.getByText('Win rate 50.0%')).toBeOnTheScreen();

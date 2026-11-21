@@ -2,7 +2,10 @@
 
 Step 1 of the Founder's build prompt (`BUILD_PROMPT.md`). One section per already-built feature, plus three shared
 foundations the backlog leans on. Each section was produced by reading the code on 2026-11-19 and every path was
-checked to exist at that time. When code moves, correct the section rather than trusting it.
+checked to exist at that time. When code moves, correct the section rather than trusting it. Paths that moved or
+were added in pull requests #18 and #19 were corrected on 2026-11-21 for release `2b0c7c1` (the redirect check, the
+bridge allow-list, the account export, the assistant's safety rules, the helpline facts, the administrator bootstrap
+script, migrations 0006 and 0007, the web error digest); the prose was not re-checked line by line.
 
 ## Summary table
 
@@ -15,7 +18,7 @@ checked to exist at that time. When code moves, correct the section rather than 
 | 5 | [Calculators: expected value, no-vig, parlay, closing line value (CLV)](#5-calculators-expected-value-no-vig-parlay-closing-line-value-clv) | `services/api/src/oddvex_api/api/quant_routes.py`<br>`services/api/src/oddvex_api/quant/__init__.py`<br>and 16 more<br>`apps/web/src/app/app/tools/page.tsx`<br>and 12 more<br>`apps/mobile/src/screens/tools.tsx`<br>and 12 more | POST /v1/quant/convert<br>POST /v1/quant/no-vig<br>POST /v1/quant/ev<br>and 10 more | `services/api/tests/test_api_quant.py`<br>`services/api/tests/quant/test_novig_ev_clv.py`<br>and 13 more | P0.2, P0.3, P0.4, P0.6, F01, F03, F06, F07, F08, F09, F19, F20, F26, F28, F29, F32, F40, F41 |
 | 6 | [Bet tracker with auto-settlement, ROI analytics and sportsbook sync](#6-bet-tracker-with-auto-settlement-roi-analytics-and-sportsbook-sync) | `services/api/src/oddvex_api/bets/router.py`<br>`services/api/src/oddvex_api/bets/service.py`<br>and 25 more<br>`apps/web/src/app/app/tracker/page.tsx`<br>and 14 more<br>`apps/mobile/src/screens/tracker.tsx`<br>and 17 more | GET /v1/bets<br>POST /v1/bets<br>GET /v1/bets/summary<br>and 23 more | `services/api/tests/test_api_bets.py`<br>`services/api/tests/test_api_auto_settle.py`<br>and 24 more | P0.1, P0.2, P0.3, P0.4, P0.6, F01, F02, F03, F04, F05, F06, F07, F11, F14, F15, F18, F19, F20, F21, F23, F24, F26, F30, F35, F36, F38, F39, F41 |
 | 7 | [Watchlist, price and line-move alerts, in-app notifications](#7-watchlist-price-and-line-move-alerts-in-app-notifications) | `services/api/src/oddvex_api/alerts/evaluator.py`<br>`services/api/src/oddvex_api/alerts/service.py`<br>and 27 more<br>`apps/web/src/app/app/alerts/page.tsx`<br>and 14 more<br>`apps/mobile/src/screens/notifications.tsx`<br>and 19 more | GET /v1/watchlist (optional ?kind=)<br>POST /v1/watchlist<br>GET /v1/watchlist/events<br>and 22 more | `services/api/tests/test_alert_evaluator.py`<br>`services/api/tests/test_api_alerts.py`<br>and 23 more | P0.1, P0.2, P0.3, P0.4, P0.6, F04, F06, F07, F08, F11, F14, F16, F17, F23 |
-| 8 | [A rule-based assistant that answers from the app's own data and math](#8-a-rule-based-assistant-that-answers-from-the-app-s-own-data-and-math) | `services/api/src/oddvex_api/assistant/engine.py`<br>`services/api/src/oddvex_api/assistant/explainer.py`<br>and 12 more<br>`apps/web/src/app/app/assistant/page.tsx`<br>and 9 more<br>`apps/mobile/src/screens/assistant.tsx`<br>and 8 more | POST /v1/assistant/query<br>Web: /app/assistant (page), calls go through the /api/ov/v1/assistant/query proxy route<br>Web marketing: /ai links to /app/assistant<br>and 2 more | `services/api/tests/test_api_assistant.py`<br>`services/api/tests/test_platform.py`<br>and 8 more | P0.2, P0.3, P0.4, P0.6, F01, F07, F11, F13, F16 |
+| 8 | [A rule-based assistant that answers from the app's own data and math](#8-a-rule-based-assistant-that-answers-from-the-apps-own-data-and-math) | `services/api/src/oddvex_api/assistant/engine.py`<br>`services/api/src/oddvex_api/assistant/explainer.py`<br>and 12 more<br>`apps/web/src/app/app/assistant/page.tsx`<br>and 9 more<br>`apps/mobile/src/screens/assistant.tsx`<br>and 8 more | POST /v1/assistant/query<br>Web: /app/assistant (page), calls go through the /api/ov/v1/assistant/query proxy route<br>Web marketing: /ai links to /app/assistant<br>and 2 more | `services/api/tests/test_api_assistant.py`<br>`services/api/tests/test_platform.py`<br>and 8 more | P0.2, P0.3, P0.4, P0.6, F01, F07, F11, F13, F16 |
 | 9 | [Community features (built, switched off)](#9-community-features-built-switched-off) | `services/api/src/oddvex_api/community/service.py`<br>`services/api/src/oddvex_api/community/router.py`<br>and 20 more<br>`apps/web/src/app/app/community/page.tsx`<br>and 27 more<br>`apps/mobile/src/screens/community-feed.tsx`<br>and 31 more | GET /v1/community/guidelines<br>PUT /v1/community/profile<br>GET /v1/community/profile<br>and 41 more | `services/api/tests/test_api_community.py`<br>`services/api/tests/test_api_community_moderation.py`<br>and 24 more | P0.2, P0.3, P0.6, F07, F11, F19, F38 |
 | 10 | [Admin tools, feature flags, staking-limit reminders](#10-admin-tools-feature-flags-staking-limit-reminders) | `services/api/src/oddvex_api/api/admin.py`<br>`services/api/src/oddvex_api/flags/catalog.py`<br>and 23 more<br>`apps/web/src/lib/admin.ts`<br>and 20 more<br>`apps/mobile/src/providers/flags.tsx`<br>and 13 more | GET /v1/admin/overview<br>GET /v1/admin/users<br>POST /v1/admin/users/{user_id}/suspend<br>and 19 more | `services/api/tests/test_api_admin.py`<br>`services/api/tests/test_api_admin_manage.py`<br>and 19 more | P0.3, P0.4, P0.6, F05, F11, F20, F23, F24, F26, F30, F39, F40, F42, F44 |
 | 11 | [Shared foundation: accounts, sessions and per-user settings](#11-shared-foundation-accounts-sessions-and-per-user-settings) | `services/api/src/oddvex_api/auth/router.py`<br>`services/api/src/oddvex_api/deps.py`<br>and 25 more<br>`apps/web/src/lib/session.ts`<br>and 25 more<br>`apps/mobile/src/session/store.ts`<br>and 19 more | POST /v1/auth/register<br>POST /v1/auth/login<br>POST /v1/auth/logout<br>and 22 more | `services/api/tests/test_api_auth.py`<br>`services/api/tests/test_api_account.py`<br>and 19 more | P0.3, P0.4, P0.6, F05, F06, F08, F11, F14, F16, F23, F24, F25, F31, F39, F41, F42 |
@@ -286,7 +289,7 @@ None gate it. The line-history route has no auth, no require_flag and no plan ch
 
 **What a builder would get wrong by assuming**
 
-1) Nothing is persisted: every line-history point is recomputed per request from a deterministic model (hourly stamps plus the book's last_updated); there is no snapshot table, so no true history exists yet. 2) The 'replay' provider's history is also modelled: only the closing line is real, the movement before it is generated. 3) get_line_history is duplicated almost line for line in providers/synthetic.py and providers/replay.py, each with its own HISTORY_HOURS; they differ for live games (synthetic runs to now, replay stops at the close). 4) Mobile has no line-history chart and no client method, despite the starting hint; game-detail.tsx only carries the line-move alert form. 5) Line-move alerts do not use line history: they compare the current consensus line with alert_rules.baseline_line captured when the rule was armed, work for spread and total only (moneyline has no line), and are evaluated only when a user reads notifications, calls POST /v1/alerts/evaluate, or the script runs (no worker). 6) The web chart draws only the first outcome the API lists (price for moneyline, line for spread/total, so price moves on spread/total are invisible), and the '48 hours' text is hard-coded in page.tsx. 7) The page swallows a failed line-history fetch (.catch(() => null)) and shows 'No line history'. 8) odds_history_hours looks like a working plan limit but is read nowhere. 9) LineSeries carries provider provenance fields that LineSeriesOut drops; the response has only one as_of for the whole payload. 10) Alert-form and label logic for line moves is implemented separately in web and mobile.
+1) Nothing is persisted: every line-history point is recomputed per request from a deterministic model (hourly stamps plus the book's last_updated); there is no snapshot table, so no true history exists yet. 2) The 'replay' provider's history is also modelled: only the closing line is real, the movement before it is generated. 3) get_line_history is duplicated almost line for line in providers/synthetic.py and providers/replay.py, each with its own HISTORY_HOURS; they differ for live games (synthetic runs to now, replay stops at the close). 4) Mobile has no line-history chart and no client method, despite the starting hint; game-detail.tsx only carries the line-move alert form. 5) Line-move alerts do not use line history: they compare the current consensus line with alert_rules.baseline_line captured when the rule was armed, work for spread and total only (moneyline has no line), and are evaluated only when a user reads notifications, calls POST /v1/alerts/evaluate, or scripts/evaluate_alerts.py runs (on the Hostinger preview a worker container runs it every 120 s, `infrastructure/hostinger/compose.yaml`; nothing schedules it elsewhere). 6) The web chart draws only the first outcome the API lists (price for moneyline, line for spread/total, so price moves on spread/total are invisible), and the '48 hours' text is hard-coded in page.tsx. 7) The page swallows a failed line-history fetch (.catch(() => null)) and shows 'No line history'. 8) odds_history_hours looks like a working plan limit but is read nowhere. 9) LineSeries carries provider provenance fields that LineSeriesOut drops; the response has only one as_of for the whole payload. 10) Alert-form and label logic for line moves is implemented separately in web and mobile.
 
 ## 3. Player prop research: lines, best prices, hit rates with confidence intervals, game logs, splits
 
@@ -676,7 +679,7 @@ A complete manual bet tracker exists: users log straight/parlay/sgp/future bets 
 - `services/api/src/oddvex_api/entitlements/catalog.py`: tracker_analytics entitlement, same for both plans
 - `services/api/src/oddvex_api/notifications/service.py`: staked_this_week, check_stake_reminder read bets
 - `services/api/src/oddvex_api/notifications/templates.py`: bet_settled, sync_finished templates
-- `services/api/src/oddvex_api/account/router.py`: data export reuses bets.service.bet_out
+- `services/api/src/oddvex_api/account/export.py`: streamed data export reuses bets.service.bet_out
 - `services/api/src/oddvex_api/assistant/engine.py`: bet_summary answer reuses bets.service.summarize
 - `services/api/src/oddvex_api/seed.py`: demo bets incl. gradeable pending bets for auto-settle
 - `services/api/src/oddvex_api/api/admin.py`: bet and sync-connection counts only
@@ -780,7 +783,7 @@ A complete manual bet tracker exists: users log straight/parlay/sgp/future bets 
 
 **Data model**
 
-Tables: bets (user_id, bet_type, status pending|settled, result, sport, sportsbook free text + sportsbook_key, stake, odds_decimal, odds_source legs|override, payout, profit, notes, placed_at, settled_at, settled_by user|auto|null, source manual|sync, sync_connection_id FK SET NULL, external_provider, external_bet_id; unique uq_bets_user_external on user_id+external_provider+external_bet_id); bet_legs (bet_id, position, selection, market, league, event_id, event_label, line, outcome_key, odds_decimal, closing_odds_decimal, closing_opposite_odds_decimal, result); sync_connections (user_id, provider, status, label, provider_state JSON, last_synced_at, disconnected_at); sync_import_runs (connection_id, status, attempts, fetched/imported/duplicate counts, retryable, error_message, started_at, finished_at). Also writes audit_log and notifications, reads stake_reminders and feature_flags. Migrations: services/api/alembic/versions/0001_initial_schema.py (all four tables), 0002_watchlist_structured_legs_password.py (bets.settled_by, bet_legs.outcome_key), 0005_community_and_search_keys.py (bets.sportsbook_key). Summary, analytics, CLV, ROI, potential payout and gradeable are computed on request and never stored.
+Tables: bets (user_id, bet_type, status pending|settled, result, sport, sportsbook free text + sportsbook_key, stake, odds_decimal, odds_source legs|override, payout, profit, notes, placed_at, settled_at, settled_by user|auto|null, source manual|sync, sync_connection_id FK SET NULL, external_provider, external_bet_id, client_request_id; unique uq_bets_user_external on user_id+external_provider+external_bet_id, unique uq_bets_user_client_request on user_id+client_request_id); bet_legs (bet_id, position, selection, market, league, event_id, event_label, line, outcome_key, odds_decimal, closing_odds_decimal, closing_opposite_odds_decimal, result); sync_connections (user_id, provider, status, label, provider_state JSON, last_synced_at, disconnected_at); sync_import_runs (connection_id, status, attempts, fetched/imported/duplicate counts, retryable, error_message, started_at, finished_at). Also writes audit_log and notifications, reads stake_reminders and feature_flags. Migrations: services/api/alembic/versions/0001_initial_schema.py (all four tables), 0002_watchlist_structured_legs_password.py (bets.settled_by, bet_legs.outcome_key), 0005_community_and_search_keys.py (bets.sportsbook_key), 0006_bet_client_request_id.py (bets.client_request_id). Summary, analytics, CLV, ROI, potential payout and gradeable are computed on request and never stored.
 
 **Flags and plan checks today**
 
@@ -852,7 +855,7 @@ Signed-in users can follow teams, players and events (watchlist_items), create f
 - `services/api/src/oddvex_api/sync/router.py`: calls notify (sync_finished) and check_stake_reminder
 - `services/api/src/oddvex_api/community/router.py`: notify for pick_comment, new_follower
 - `services/api/src/oddvex_api/community/service.py`: notify for pick_graded
-- `services/api/src/oddvex_api/account/router.py`: data export includes watchlist, alerts, notifications
+- `services/api/src/oddvex_api/account/export.py`: data export includes watchlist, alerts, notifications
 - `services/api/src/oddvex_api/seed.py`: seed_demo_alerts builds and evaluates demo rules
 - `services/api/src/oddvex_api/middleware.py`: no-store prefixes include /v1/watchlist, not /v1/alerts or /v1/notifications
 - `infrastructure/hostinger/compose.yaml`: worker loop runs evaluate_alerts.py every 120 s
@@ -873,7 +876,7 @@ Signed-in users can follow teams, players and events (watchlist_items), create f
 - `apps/web/src/app/app/tracker/page.tsx`: StakeReminderNotice
 - `apps/web/src/lib/site.ts`: Alerts nav entry
 - `apps/web/src/components/app/nav.tsx`: alerts icon
-- `apps/web/src/app/api/ov/[...path]/route.ts`: proxy allowlist includes watchlist, alerts, notifications, me
+- `apps/web/src/lib/bridge-path.ts`: bridge allow-list includes watchlist, alerts, notifications, me
 
 **Mobile (`apps/mobile`)**
 
@@ -992,6 +995,8 @@ A stateless, rule-based assistant exists end to end: POST /v1/assistant/query ru
 - `services/api/src/oddvex_api/assistant/engine.py`: Assistant class: regex intent router, entity matching, 8 data tools, DISCLAIMER/REPLAY_DISCLAIMER, ToolResult
 - `services/api/src/oddvex_api/assistant/explainer.py`: Explainer protocol and TemplateExplainer (one _<intent> template per intent)
 - `services/api/src/oddvex_api/assistant/router.py`: POST /assistant/query, optional auth, rate_limit("assistant")
+- `services/api/src/oddvex_api/assistant/safeguards.py`: responsible-gambling rules (crisis, under 21, distress, certainty) run before intent routing; the help sentence
+- `services/api/src/oddvex_api/helpline.py`: helpline and crisis-line facts used by every API text
 - `services/api/src/oddvex_api/assistant/schemas.py`: AssistantIntent literal, request (message 1-500 chars), response, source and suggestion models
 - `services/api/src/oddvex_api/assistant/__init__.py`: exports Assistant, Explainer, TemplateExplainer, ToolResult
 - `services/api/src/oddvex_api/main.py`: mounts assistant router under /v1 (line 253), OpenAPI tag
@@ -1011,7 +1016,7 @@ A stateless, rule-based assistant exists end to end: POST /v1/assistant/query ru
 - `apps/web/src/lib/types.ts`: AssistantReply alias of Schemas AssistantResponse
 - `apps/web/src/lib/client-api.ts`: clientApi and ClientApiError used by the chat
 - `apps/web/src/lib/format.ts`: formatAge for source freshness
-- `apps/web/src/app/api/ov/[...path]/route.ts`: proxy allow-list includes v1/assistant
+- `apps/web/src/lib/bridge-path.ts`: bridge allow-list includes v1/assistant
 - `apps/web/src/lib/site.ts`: app nav entry /app/assistant labelled OddVex AI
 - `apps/web/src/app/app/page.tsx`: dashboard button linking to /app/assistant
 - `apps/web/src/app/(marketing)/ai/page.tsx`: marketing page with CTA to /app/assistant
@@ -1091,16 +1096,17 @@ A complete opt-in community (handle-only profiles, single-leg picks with a serve
 - `services/api/src/oddvex_api/quant/grading.py`: grade_leg shared with tracker auto-settlement
 - `services/api/src/oddvex_api/db/models.py`: CommunityProfile/Pick/Comment/Follow/Like/Block/Report (lines ~422-560)
 - `services/api/alembic/versions/0005_community_and_search_keys.py`: creates the seven community tables
+- `services/api/alembic/versions/0007_community_report_snapshots_reserved_handles.py`: community_reports snapshot columns, community_reserved_handles
 - `services/api/src/oddvex_api/flags/catalog.py`: community and community_leaderboard specs, both default False
 - `services/api/src/oddvex_api/main.py`: mounts both routers, community limiters and grade throttle on app.state
 - `services/api/src/oddvex_api/config.py`: community_*_per_day/hour limits, community_grade_min_seconds
 - `services/api/src/oddvex_api/notifications/templates.py`: pick_graded, pick_comment, follow templates and /app/community hrefs
 - `services/api/src/oddvex_api/notifications/schemas.py`: community notification kinds and preferences
-- `services/api/src/oddvex_api/account/router.py`: /v1/me/export includes community via service.export_out
+- `services/api/src/oddvex_api/account/export.py`: /v1/me/export includes community via service.export_out
 - `services/api/src/oddvex_api/account/schemas.py`: export schema embeds CommunityExportOut
 - `services/api/src/oddvex_api/seed.py`: with_community turns both flags on then seeds
 - `services/api/src/oddvex_api/api/admin.py`: flag toggle docs, shared account suspension used by moderation
-- `services/api/scripts/grade_picks.py`: batch grader for a future cron
+- `services/api/scripts/grade_picks.py`: batch grader; the Hostinger preview worker runs it every 120 s
 - `services/api/scripts/seed_demo.py`: --with-community option
 
 **Web (`apps/web`)**
@@ -1125,7 +1131,7 @@ A complete opt-in community (handle-only profiles, single-leg picks with a serve
 - `apps/web/src/lib/admin-actions.ts`: resolve report and admin comment removal server actions
 - `apps/web/src/lib/admin.ts`: review warning for community* flags
 - `apps/web/src/app/app/games/[id]/page.tsx`: Share a pick panel when flag on and game upcoming
-- `apps/web/src/app/api/ov/[...path]/route.ts`: browser proxy allowlist includes community
+- `apps/web/src/lib/bridge-path.ts`: bridge allow-list includes community
 - `apps/web/src/components/app/alerts-panels.tsx`: drops community notification links while flag off
 - `apps/web/src/components/app/notification-settings.tsx`: community notification switches when flag on
 - `apps/web/src/components/app/admin-controls.tsx`: Community admin tab when flag on
@@ -1247,7 +1253,7 @@ A complete opt-in community (handle-only profiles, single-leg picks with a serve
 
 **Data model**
 
-Migration 0005_community_and_search_keys.py (also adds unrelated users.search_key, bets.sportsbook_key). Tables: community_profiles (PK user_id, unique handle, bio, is_public, moderation_status); community_picks (id, user_id, event_id, league, event_label, selection, event_start_time, market, outcome_key, line, price_decimal, sportsbook_key/name, analysis, posted_at, status pending/graded/void, result, graded_at, home_score, away_score, moderation_status; unique user_id+event_id+market); community_comments (pick_id, user_id, body, moderation_status); community_follows (follower_id, followed_id); community_likes (pick_id, user_id); community_blocks (blocker_id, blocked_id); community_reports (reporter, target_type/id, target_user_id, reason, details, status, resolution fields). All FK to users with ON DELETE CASCADE. Also writes audit entries and in-app notifications; flag state lives in the flags tables. Records and leaderboard are not stored: computed on request.
+Migration 0005_community_and_search_keys.py (also adds unrelated users.search_key, bets.sportsbook_key). Tables: community_profiles (PK user_id, unique handle, bio, is_public, moderation_status); community_picks (id, user_id, event_id, league, event_label, selection, event_start_time, market, outcome_key, line, price_decimal, sportsbook_key/name, analysis, posted_at, status pending/graded/void, result, graded_at, home_score, away_score, moderation_status; unique user_id+event_id+market); community_comments (pick_id, user_id, body, moderation_status); community_follows (follower_id, followed_id); community_likes (pick_id, user_id); community_blocks (blocker_id, blocked_id); community_reports (reporter, target_type/id, target_user_id, reason, details, status, resolution fields; target_text_snapshot and target_summary_snapshot added by 0007_community_report_snapshots_reserved_handles.py). All FK to users with ON DELETE CASCADE. Migration 0007 also adds community_reserved_handles (handle, reserved_at; the handle of an account deleted while suspended, which nobody can take afterwards; no user FK). Also writes audit entries and in-app notifications; flag state lives in the flags tables. Records and leaderboard are not stored: computed on request.
 
 **Flags and plan checks today**
 
@@ -1265,11 +1271,11 @@ Flags `community` and `community_leaderboard` (flags/catalog.py, both default Fa
 
 **What a builder would get wrong by assuming**
 
-1) "Verified" (VERIFIED_NOTE) means a pick timestamped before the game and auto-graded; picks are not bets: no stake, no link to the bets or sync tables. F38 wants records "only from synced bets", so the existing record source cannot be reused as is. 2) Nothing is public: every route except guidelines needs sign-in, and the web pages live under /app. 3) Records and the leaderboard are computed on every request and never stored; the leaderboard runs one query per eligible user. Moderator-hidden picks still count in the record; void picks do not. 4) No background worker: grading runs lazily when someone reads the feed, picks or leaderboard, throttled by an in-process EvaluationThrottle (15 s default); scripts/grade_picks.py exists but nothing schedules it, and it runs even with the flag off. Rate limiters are also in process memory, so neither survives multiple workers. 5) The client never sends a price: build_pick takes Board.best_price and snapshots price, book, labels into the row; one pick per user per event per market; single-leg only; no deletion after start. 6) Leaderboard ranks by Wilson lower bound, not ROI, minimum 30 graded picks, windows 30d/90d/all. 7) Logic/copy duplicated: text limits and handle rules live in schemas.py, web lib/community-copy.ts and mobile components/community-copy.ts; error-message mapping is written separately per app with different export names; banned-phrase checks are separate tests per app plus content_rules.py for user text. 8) Misleading names: mobile profile-form.tsx, guidelines.tsx and report-form.tsx are community-only despite generic names; mobile "community/profile" equals web "/app/community/settings"; mobile community is a stack inside the Games tab, not a tab; mobile has no moderation UI. 9) Flags are per-database rows, not env config; seed_demo.py --with-community turns both on for everyone using that database. 10) Community reaches outside its folder: account export/deletion, notification kinds and preferences, admin suspension, the web /api/ov allowlist regex. 11) Other users are identified by handle only by design (no user id, email, name or plan in any schema); a creator page that needs plan or tracker data breaks that stated rule.
+1) "Verified" (VERIFIED_NOTE) means a pick timestamped before the game and auto-graded; picks are not bets: no stake, no link to the bets or sync tables. F38 wants records "only from synced bets", so the existing record source cannot be reused as is. 2) Nothing is public: every route except guidelines needs sign-in, and the web pages live under /app. 3) Records and the leaderboard are computed on every request and never stored; the leaderboard runs one query per eligible user. Moderator-hidden picks still count in the record; void picks do not. 4) Grading runs lazily when someone reads the feed, picks or leaderboard, throttled by an in-process EvaluationThrottle (15 s default); scripts/grade_picks.py is scheduled only on the Hostinger preview, where a worker container runs it every 120 s (`infrastructure/hostinger/compose.yaml`), and it runs even with the flag off. Rate limiters are also in process memory, so neither survives multiple workers. 5) The client never sends a price: build_pick takes Board.best_price and snapshots price, book, labels into the row; one pick per user per event per market; single-leg only; no deletion after start. 6) Leaderboard ranks by Wilson lower bound, not ROI, minimum 30 graded picks, windows 30d/90d/all. 7) Logic/copy duplicated: text limits and handle rules live in schemas.py, web lib/community-copy.ts and mobile components/community-copy.ts; error-message mapping is written separately per app with different export names; banned-phrase checks are separate tests per app plus content_rules.py for user text. 8) Misleading names: mobile profile-form.tsx, guidelines.tsx and report-form.tsx are community-only despite generic names; mobile "community/profile" equals web "/app/community/settings"; mobile community is a stack inside the Games tab, not a tab; mobile has no moderation UI. 9) Flags are per-database rows, not env config; seed_demo.py --with-community turns both on for everyone using that database. 10) Community reaches outside its folder: account export/deletion, notification kinds and preferences, admin suspension, the web /api/ov allowlist regex. 11) Other users are identified by handle only by design (no user id, email, name or plan in any schema); a creator page that needs plan or tracker data breaks that stated rule.
 
 ## 10. Admin tools, feature flags, staking-limit reminders
 
-Admin tools are a role-gated API router (/v1/admin/*, role synced from the ODDVEX_ADMIN_EMAILS allowlist on every token use) with a web-only console at /app/admin (overview, users, flags, audit, outbox, community moderation); every change and most reads write to the append-only audit_log table. Feature flags are six global on/off switches defined in code (flags/catalog.py) with optional overrides in the feature_flags table, served publicly at GET /v1/flags and enforced by require_flag on routes, by the web proxy plus pages, and by a mobile FlagsProvider. Entitlements are a two-plan in-code catalog (free, premium) that gates nothing today, and the weekly staking reminder is a per-user threshold in stake_reminders that creates one in-app notification when a manual bet or sync import takes the UTC-week total across it.
+Admin tools are a role-gated API router (/v1/admin/*, role re-synced on every token use: only an address listed in ODDVEX_ADMIN_EMAILS and verified holds it) with a web-only console at /app/admin (overview, users, flags, audit, outbox, community moderation); every change and most reads write to the append-only audit_log table. Feature flags are six global on/off switches defined in code (flags/catalog.py) with optional overrides in the feature_flags table, served publicly at GET /v1/flags and enforced by require_flag on routes, by the web proxy plus pages, and by a mobile FlagsProvider. Entitlements are a two-plan in-code catalog (free, premium) that gates nothing today, and the weekly staking reminder is a per-user threshold in stake_reminders that creates one in-app notification when a manual bet or sync import takes the UTC-week total across it.
 
 **API (`services/api`)**
 
@@ -1287,12 +1293,13 @@ Admin tools are a role-gated API router (/v1/admin/*, role synced from the ODDVE
 - `services/api/src/oddvex_api/notifications/templates.py`: stake_reminder draft, dedupe key per week
 - `services/api/src/oddvex_api/bets/router.py`: calls check_stake_reminder after bet create; tracker_analytics flag
 - `services/api/src/oddvex_api/sync/router.py`: calls check_stake_reminder after import
-- `services/api/src/oddvex_api/account/router.py`: export includes stake_reminder
+- `services/api/src/oddvex_api/account/export.py`: export includes stake_reminder
 - `services/api/src/oddvex_api/community/admin_router.py`: /v1/admin/community moderation, behind community flag
 - `services/api/src/oddvex_api/db/models.py`: StakeReminder, FeatureFlag, AuditLog, User.role/plan/status
 - `services/api/src/oddvex_api/config.py`: admin_emails setting, admin_email_set
 - `services/api/src/oddvex_api/main.py`: mounts admin, flags, entitlements routers under /v1
 - `services/api/src/oddvex_api/seed.py`: seed_demo_admin, only when allowlisted
+- `services/api/scripts/bootstrap_admin.py`: makes a listed address the administrator (verified, new random password); run on the server by ops.sh ACTION=admin
 - `services/api/src/oddvex_api/api/data.py`: value_screen flag on the value route
 - `services/api/src/oddvex_api/auth/router.py`: email_flows flag on verify/reset routes
 - `services/api/alembic/versions/0001_initial_schema.py`: audit_log, users.role
@@ -1314,10 +1321,11 @@ Admin tools are a role-gated API router (/v1/admin/*, role synced from the ODDVE
 - `apps/web/src/app/app/admin/audit/page.tsx`: audit log with cursor and filters
 - `apps/web/src/app/app/admin/outbox/page.tsx`: email outbox
 - `apps/web/src/app/app/admin/community/page.tsx`: report queue, needs community flag
-- `apps/web/src/app/api/ov/[...path]/route.ts`: browser bridge; deliberately excludes /v1/admin
+- `apps/web/src/lib/bridge-path.ts`: bridge allow-list; deliberately excludes /v1/admin
 - `apps/web/src/components/app/nav.tsx`: Admin link for admins; hides flagged nav items
 - `apps/web/src/app/app/layout.tsx`: loads flags for the shell
 - `apps/web/src/components/app/notification-settings.tsx`: StakeReminderForm, StakeReminderNotice
+- `apps/web/src/components/ui/helpline.tsx`: the helpline number as a phone link; the facts are in `apps/web/src/lib/site.ts` (HELPLINE)
 - `apps/web/src/app/app/settings/page.tsx`: reminder form, plan and preview line from entitlements
 - `apps/web/src/app/app/tracker/page.tsx`: StakeReminderNotice; tracker_analytics link
 - `apps/web/src/app/app/value/page.tsx`: requireFlag value_screen
@@ -1331,6 +1339,7 @@ Admin tools are a role-gated API router (/v1/admin/*, role synced from the ODDVE
 - `apps/mobile/src/api/types.ts`: Flags, StakeReminder, Entitlements aliases
 - `apps/mobile/src/hooks/use-notifications.ts`: useStakeReminder, refetches on bet revision
 - `apps/mobile/src/components/notification-settings.tsx`: StakeReminderForm, StakeReminderNotice
+- `apps/mobile/src/helpline.ts`: the helpline facts used by mobile copy
 - `apps/mobile/src/components/account-forms.tsx`: plan preview line from entitlements; email_flows flag
 - `apps/mobile/src/screens/settings.tsx`: settings screen hosting reminder form and plan
 - `apps/mobile/src/app/(tabs)/(settings)/settings.tsx`: route file for the settings screen
@@ -1395,7 +1404,7 @@ feature_flags (key PK, description, enabled, updated_at; migration 0004; a row i
 
 **Flags and plan checks today**
 
-Known flags (flags/catalog.py): community (off), community_leaderboard (off), value_screen (on), tracker_analytics (on), email_flows (on; off in production), premium_gating (off). Admin routes are gated by role only (AdminDep; role follows ODDVEX_ADMIN_EMAILS and, while email_flows is on, a verified email); /v1/admin/community additionally needs the community flag. The stake reminder and /v1/me/entitlements need only a signed-in user, no flag or plan. Plan checks: none enforced. require_entitlement is used on no route, premium_gating is off, and the catalog gives free and premium identical entitlements (alerts.max_active, value_screen, tracker_analytics, odds_history_hours 48), so /v1/me/entitlements reports preview=true. A plan changes only through PUT /v1/admin/users/{id}/plan.
+Known flags (flags/catalog.py): community (off), community_leaderboard (off), value_screen (on), tracker_analytics (on), email_flows (on; off in production), premium_gating (off). Admin routes are gated by role only (AdminDep; the role follows ODDVEX_ADMIN_EMAILS and a verified email address, in every environment, whatever email_flows says: sync_admin_role in deps.py); /v1/admin/community additionally needs the community flag. The stake reminder and /v1/me/entitlements need only a signed-in user, no flag or plan. Plan checks: none enforced. require_entitlement is used on no route, premium_gating is off, and the catalog gives free and premium identical entitlements (alerts.max_active, value_screen, tracker_analytics, odds_history_hours 48), so /v1/me/entitlements reports preview=true. A plan changes only through PUT /v1/admin/users/{id}/plan.
 
 **Backlog items that will touch it**
 
@@ -1416,7 +1425,7 @@ Known flags (flags/catalog.py): community (off), community_leaderboard (off), va
 
 **What a builder would get wrong by assuming**
 
-1) "Staking limit" is misleading: it is a reminder only (stake_reminders, "A reminder, never a limit"); nothing blocks a bet, and it is unrelated to F25's per-book limit log. 2) staked_this_week and exceeded are computed on request from bets.placed_at in a Monday-to-Sunday UTC week, void bets excluded; only the threshold and last_reminded_week are stored. The reminder fires only on an upward crossing during a bet create or sync import (not on bet edits or threshold changes), once per week. 3) Entitlements are not stored and gate nothing: require_entitlement is on no route, both plans are identical, and with premium_gating off everyone gets the premium entry. Plans are a two-value Literal declared separately in api/admin.py, entitlements/catalog.py and entitlements/router.py, and validated again in web admin-actions.ts. 4) The entitlement keys value_screen and tracker_analytics share names with feature flags but are separate mechanisms. 5) Flags are global, not per user or per plan; a feature_flags row is only an override and rows for keys missing from KNOWN_FLAGS are ignored. There is no flags cache: each check is a query. 6) Adding a flag means touching several lists by hand: flags/catalog.py, web lib/site.ts (APP_NAV, FLAGGED_PATHS), web lib/admin.ts flagWarning, and the mobile FlagKey union (which omits premium_gating). The web reads /v1/flags in two places (lib/flags.ts and proxy.ts). Web and mobile both treat unknown or unloaded flags as off. 7) There is no admin UI on mobile and no apps/admin; the web browser bridge /api/ov deliberately excludes /v1/admin, so admin calls must be server components or server actions. 8) The admin role is not stored authority: it is re-derived from ODDVEX_ADMIN_EMAILS on every token use, so setting users.role in the database does not last. 9) GET /v1/admin/flags and GET /v1/admin/audit are not audited as admin.read, unlike overview, users, outbox and community reports. 10) audit_log.user_id is not a foreign key and write_audit does not commit; the caller commits. 11) StakeReminderForm and StakeReminderNotice are implemented twice (web and mobile) with separate copy; the web form takes server-fetched data while the mobile one fetches by userId.
+1) "Staking limit" is misleading: it is a reminder only (stake_reminders, "A reminder, never a limit"); nothing blocks a bet, and it is unrelated to F25's per-book limit log. 2) staked_this_week and exceeded are computed on request from bets.placed_at in a Monday-to-Sunday UTC week, void bets excluded; only the threshold and last_reminded_week are stored. The reminder fires only on an upward crossing during a bet create or sync import (not on bet edits or threshold changes), once per week. 3) Entitlements are not stored and gate nothing: require_entitlement is on no route, both plans are identical, and with premium_gating off everyone gets the premium entry. Plans are a two-value Literal declared separately in api/admin.py, entitlements/catalog.py and entitlements/router.py, and validated again in web admin-actions.ts. 4) The entitlement keys value_screen and tracker_analytics share names with feature flags but are separate mechanisms. 5) Flags are global, not per user or per plan; a feature_flags row is only an override and rows for keys missing from KNOWN_FLAGS are ignored. There is no flags cache: each check is a query. 6) Adding a flag means touching several lists by hand: flags/catalog.py, web lib/site.ts (APP_NAV, FLAGGED_PATHS), web lib/admin.ts flagWarning, and the mobile FlagKey union (which omits premium_gating). The web reads /v1/flags in two places (lib/flags.ts and proxy.ts). Web and mobile both treat unknown or unloaded flags as off. 7) There is no admin UI on mobile and no apps/admin; the web browser bridge /api/ov deliberately excludes /v1/admin, so admin calls must be server components or server actions. 8) The admin role is not stored authority: it is re-derived on every token use from ODDVEX_ADMIN_EMAILS and a verified address (corrected 2026-11-21: the list alone no longer grants it; scripts/bootstrap_admin.py verifies the first administrator), so setting users.role in the database does not last. 9) GET /v1/admin/flags and GET /v1/admin/audit are not audited as admin.read, unlike overview, users, outbox and community reports. 10) audit_log.user_id is not a foreign key and write_audit does not commit; the caller commits. 11) StakeReminderForm and StakeReminderNotice are implemented twice (web and mobile) with separate copy; the web form takes server-fetched data while the mobile one fetches by userId.
 
 ## 11. Shared foundation: accounts, sessions and per-user settings
 
@@ -1429,7 +1438,9 @@ Accounts are email + password (argon2id) with a 21+ attestation; the API issues 
 - `services/api/src/oddvex_api/auth/security.py`: argon2 hashing with concurrency limiter, JWT create/decode
 - `services/api/src/oddvex_api/auth/schemas.py`: RegisterRequest, UserOut (plan, email_verified), TokenResponse
 - `services/api/src/oddvex_api/db/models.py`: User, NotificationPreference, StakeReminder, EmailToken, EmailOutbox, FeatureFlag, AuditLog
-- `services/api/src/oddvex_api/account/router.py`: GET /v1/me/export, assembles every user-owned table
+- `services/api/src/oddvex_api/account/router.py`: GET /v1/me/export and DELETE /v1/me routes
+- `services/api/src/oddvex_api/account/export.py`: the export as a stream; assembles every user-owned table
+- `services/api/src/oddvex_api/account/service.py`: account deletion, shared by DELETE /v1/me and the admin deletion
 - `services/api/src/oddvex_api/account/schemas.py`: AccountExportOut (format_version 1)
 - `services/api/src/oddvex_api/notifications/router.py`: /me/notification-preferences and /me/stake-reminder GET/PUT
 - `services/api/src/oddvex_api/notifications/service.py`: preferences_out, update_preferences, stake reminder logic
@@ -1454,12 +1465,15 @@ Accounts are email + password (argon2id) with a 21+ attestation; the API issues 
 
 **Web (`apps/web`)**
 
-- `apps/web/src/lib/session.ts`: currentUser, requireUser, setSession/clearSession, oddsFormat() cookie reader, safeNext
+- `apps/web/src/lib/session.ts`: currentUser, requireUser, setSession/clearSession, oddsFormat() cookie reader
+- `apps/web/src/lib/safe-next.ts`: safePath, safeNext: redirect targets after sign-in parsed to a same-site path
 - `apps/web/src/lib/auth-actions.ts`: server actions: login, signup, logout, reset, verify, delete, change password
-- `apps/web/src/lib/api.ts`: server-side api() attaching the cookie token; ApiError
+- `apps/web/src/lib/api.ts`: server-side api() attaching the cookie token; ApiError, ApiUnavailableError
+- `apps/web/src/lib/app-error.ts`: the error digest `api_unavailable:<request id>` and how the /app error screen reads it
 - `apps/web/src/lib/config.ts`: SESSION_COOKIE = ov_session, API_URL, servedOverHttps
 - `apps/web/src/lib/client-api.ts`: browser calls via /api/ov bridge
-- `apps/web/src/app/api/ov/[...path]/route.ts`: same-origin bridge, path allowlist, clears cookie on suspension
+- `apps/web/src/app/api/ov/[...path]/route.ts`: same-origin bridge, clears cookie on suspension
+- `apps/web/src/lib/bridge-path.ts`: the bridge's path allow-list, decided on the decoded path
 - `apps/web/src/app/api/session/ended/route.ts`: clears cookie when API rejects token
 - `apps/web/src/proxy.ts`: CSP, request id, 404 for non-admin and flagged-off pages
 - `apps/web/src/lib/flags.ts`: getFlags, flagOn, requireFlag (server)
@@ -1562,7 +1576,7 @@ users (email, password_hash, display_name, role, is_active, age_confirmed_at, cr
 
 **Flags and plan checks today**
 
-Flag email_flows (on outside production, off in production) gates the four verify-email and password-reset routes with 404 feature_disabled, and decides whether an ODDVEX_ADMIN_EMAILS address needs a confirmed email before getting the admin role. Flag premium_gating (off) switches entitlement enforcement; while off GET /v1/me/entitlements returns preview=true and everyone gets the premium entitlement. The catalog has four keys (alerts.max_active, value_screen, tracker_analytics, odds_history_hours) with identical free and premium values, and require_entitlement is attached to no route, so nothing is plan-gated today. Plans are only free|premium, set only by PUT /v1/admin/users/{id}/plan; no billing or purchase route (a test asserts this). Admin role comes solely from the ODDVEX_ADMIN_EMAILS allowlist, re-synced on every token use. Suspended accounts are rejected everywhere except GET /v1/me/export and DELETE /v1/me. Turning premium_gating on, pricing and billing are Founder approval gates.
+Flag email_flows (on outside production, off in production) gates the four verify-email and password-reset routes with 404 feature_disabled and decides whether registration queues a verification email (auth/router.py); it no longer affects the admin role. Flag premium_gating (off) switches entitlement enforcement; while off GET /v1/me/entitlements returns preview=true and everyone gets the premium entitlement. The catalog has four keys (alerts.max_active, value_screen, tracker_analytics, odds_history_hours) with identical free and premium values, and require_entitlement is attached to no route, so nothing is plan-gated today. Plans are only free|premium, set only by PUT /v1/admin/users/{id}/plan; no billing or purchase route (a test asserts this). The admin role needs an address that is both listed in ODDVEX_ADMIN_EMAILS and verified, re-synced at login, at email confirmation and on every token use (sync_admin_role in deps.py); with email_flows off in production, services/api/scripts/bootstrap_admin.py (run on the server by ops.sh ACTION=admin) verifies the first administrator and sets a new password. Suspended accounts are rejected everywhere except GET /v1/me/export and DELETE /v1/me. Turning premium_gating on, pricing and billing are Founder approval gates.
 
 **Backlog items that will touch it**
 
@@ -1589,7 +1603,7 @@ Flag email_flows (on outside production, off in production) gates the four verif
 
 ## 12. Shared foundation: data providers, fixtures and the data model
 
-All sports data (leagues, books, teams, players, events, odds, line history, game logs, prop offers) comes from one in-process SportsDataProvider (synthetic by default, or a time-shifted NFL 2024 replay) chosen at startup by ODDVEX_DATA_PROVIDER, held on app.state.provider, wrapped per request by Board (best price, consensus, staleness, value rows) with a process-local TTL cache, and served under /v1. Nothing from the provider is persisted: the database (21 tables, Alembic 0001-0005) holds only user-side data, with provider ids stored as plain strings. data/fixtures holds synthetic vendor-wire-format JSON that only tests/test_provider_contract.py reads, to pin providers/normalize.py, an adapter seam no runtime code calls yet.
+All sports data (leagues, books, teams, players, events, odds, line history, game logs, prop offers) comes from one in-process SportsDataProvider (synthetic by default, or a time-shifted NFL 2024 replay) chosen at startup by ODDVEX_DATA_PROVIDER, held on app.state.provider, wrapped per request by Board (best price, consensus, staleness, value rows) with a process-local TTL cache, and served under /v1. Nothing from the provider is persisted: the database (22 tables, Alembic 0001-0007) holds only user-side data, with provider ids stored as plain strings. data/fixtures holds synthetic vendor-wire-format JSON that only tests/test_provider_contract.py reads, to pin providers/normalize.py, an adapter seam no runtime code calls yet.
 
 **API (`services/api`)**
 
@@ -1613,6 +1627,8 @@ All sports data (leagues, books, teams, players, events, odds, line history, gam
 - `services/api/alembic/versions/0003_alerts_notifications_stake_reminder.py`: alert_rules, notifications, notification_preferences, stake_reminders
 - `services/api/alembic/versions/0004_flags_plans_admin_email.py`: feature_flags, email_tokens, email_outbox, users.plan/status
 - `services/api/alembic/versions/0005_community_and_search_keys.py`: community_* tables, users.search_key, bets.sportsbook_key
+- `services/api/alembic/versions/0006_bet_client_request_id.py`: bets.client_request_id and its unique index
+- `services/api/alembic/versions/0007_community_report_snapshots_reserved_handles.py`: community_reports snapshots, community_reserved_handles
 - `services/api/src/oddvex_api/seed.py`: seed_demo: demo user, 40 bets, gradeable bets and alert rules from provider events
 - `services/api/src/oddvex_api/community/seed.py`: seed_demo_community; reads provider.get_line_history for pick prices
 - `services/api/src/oddvex_api/config.py`: data_provider, replay_data_path, replay_shift_days, synthetic_seed, stale_*_seconds; replay refused in production
@@ -1703,7 +1719,7 @@ All sports data (leagues, books, teams, players, events, odds, line history, gam
 
 **Data model**
 
-Stored (21 tables, migrations 0001-0005): users, bets, bet_legs, sync_connections, sync_import_runs, watchlist_items, alert_rules, notifications, notification_preferences, stake_reminders, feature_flags, email_tokens, email_outbox, audit_log, community_profiles, community_picks, community_comments, community_follows, community_likes, community_blocks, community_reports. Computed on request and never stored: leagues, sportsbooks, teams, players, events, scores, odds, line history, game logs, prop offers, consensus, best price, value rows. No price or line history is persisted: get_line_history regenerates about 48 hourly points from seed and clock on each call. The only stored prices are point-in-time copies on user rows: bet_legs.odds_decimal, closing_odds_decimal and closing_opposite_odds_decimal (typed by the user or supplied by the sync import, never captured from the provider), community_picks.price_decimal with sportsbook_key (best price at posting), alert_rules.baseline_line and threshold_decimal. Provider ids (event_id, team_id, ref_id) are plain strings, deliberately not foreign keys. Conventions for new tables: String(32) uuid hex ids via new_id, UTCDateTime columns, MONEY Numeric(14,2), ODDS Numeric(16,6), JSON columns, export from db/__init__.py, next migration is 0006 with a matching upgrade/downgrade test.
+Stored (22 tables, migrations 0001-0007): users, bets, bet_legs, sync_connections, sync_import_runs, watchlist_items, alert_rules, notifications, notification_preferences, stake_reminders, feature_flags, email_tokens, email_outbox, audit_log, community_profiles, community_picks, community_comments, community_follows, community_likes, community_blocks, community_reports, community_reserved_handles. Computed on request and never stored: leagues, sportsbooks, teams, players, events, scores, odds, line history, game logs, prop offers, consensus, best price, value rows. No price or line history is persisted: get_line_history regenerates about 48 hourly points from seed and clock on each call. The only stored prices are point-in-time copies on user rows: bet_legs.odds_decimal, closing_odds_decimal and closing_opposite_odds_decimal (typed by the user or supplied by the sync import, never captured from the provider), community_picks.price_decimal with sportsbook_key (best price at posting), alert_rules.baseline_line and threshold_decimal. Provider ids (event_id, team_id, ref_id) are plain strings, deliberately not foreign keys. Conventions for new tables: String(32) uuid hex ids via new_id, UTCDateTime columns, MONEY Numeric(14,2), ODDS Numeric(16,6), JSON columns, export from db/__init__.py, next migration is 0008 with a matching upgrade/downgrade test.
 
 **Flags and plan checks today**
 
@@ -1711,7 +1727,7 @@ Provider choice is configuration, not a flag: ODDVEX_DATA_PROVIDER (replay refus
 
 **Backlog items that will touch it**
 
-- **P0.1**: Adds the first persisted market data: an append-only odds_snapshots table (models.py docstring already names the key and provenance columns), migration 0006 and a capture job that reads provider.get_odds, plus an as-of read path.
+- **P0.1**: Adds the first persisted market data: an append-only odds_snapshots table (models.py docstring already names the key and provenance columns), a new migration (the next number is 0008 at release `2b0c7c1`) and a capture job that reads provider.get_odds, plus an as-of read path.
 - **P0.2**: Reuses the ProviderRecord provenance fields (provider, provider_id, fetched_at) and Board's consensus and best-price code as the inputs to record with each method id and version.
 - **P0.4**: Adds a profile settings table and migration in db/models.py; books held must reference provider sportsbook keys from list_sportsbooks as plain strings.
 - **P0.5**: Adds new Protocols and synthetic implementations beside providers/base.py and synthetic.py, new data/fixtures files, normalize functions and contract tests in the test_provider_contract.py pattern, wired through main.py and deps.py.
@@ -1748,7 +1764,7 @@ Provider choice is configuration, not a flag: ODDVEX_DATA_PROVIDER (replay refus
 4. To match the existing pattern for a new provider: a runtime_checkable Protocol with name, data_mode, now() and health(); frozen ProviderRecord subclasses; a seeded, clock-injected synthetic implementation; a build_* function in main.py that stores it on app.state and accepts an override in create_app; a Dep alias in deps.py; fixture JSON whose top-level _note contains "SYNTHETIC" (the test globs every *.json in data/fixtures and fails otherwise); strict normalize functions that raise ProviderContractError; and a protocol isinstance test. sync/base.py plus sync/registry.py is the alternative keyed-registry pattern.
 5. replay.py imports private names (_BOOKS, _Book, _american_from_implied, _half_line) from synthetic.py, so the fictional book list lives in one private tuple; seed.py has its own separate _BOOKS tuple of display names.
 6. The application clock is provider.now() (NowDep), not wall time. Tests freeze it at 2026-03-14 19:30 UTC; any capture job must take its timestamps from the provider.
-7. Cache is process-local and per worker; Board caches value and props rows there. There is no background worker: alerts and pick grading run lazily on read or through the two scripts.
+7. Cache is process-local and per worker; Board caches value and props rows there. Locally there is no background worker: alerts and pick grading run lazily on read or through the two scripts. On the Hostinger preview the worker container runs both scripts every 120 s (infrastructure/hostinger/compose.yaml).
 8. bet_legs.closing_odds_decimal is user or sync supplied, never captured from the provider, so CLV today rests on self-reported closing prices.
 9. The odds_history_hours entitlement exists in the catalog but is read by nothing.
 10. Market keys are closed Literal sets (moneyline, spread, total) in base.py and in API schemas; props are a separate PropOffer shape with one over/under line per book. First-half, alternate-line and same-game markets need contract changes, not only new data.
@@ -1871,7 +1887,7 @@ CI is one workflow (/home/user/OddVex/.github/workflows/ci.yml) with nine jobs: 
 
 **Data model**
 
-CI and tests own no tables. Flag tests use feature_flags (key, description, enabled, updated_at; migration services/api/alembic/versions/0004_flags_plans_admin_email.py); notification copy tests exercise notifications and notification_preferences; email tests use email_outbox and email_tokens. Migrations 0001 to 0005 exist, each with its own upgrade/downgrade test. API tests create a SQLite file per test (tmp_path) or wipe the database named by ODDVEX_TEST_DATABASE_URL before every test; e2e uses a throwaway SQLite file migrated with alembic and seeded.
+CI and tests own no tables. Flag tests use feature_flags (key, description, enabled, updated_at; migration services/api/alembic/versions/0004_flags_plans_admin_email.py); notification copy tests exercise notifications and notification_preferences; email tests use email_outbox and email_tokens. Migrations 0001 to 0007 exist, each with its own upgrade/downgrade test. API tests create a SQLite file per test (tmp_path) or wipe the database named by ODDVEX_TEST_DATABASE_URL before every test; e2e uses a throwaway SQLite file migrated with alembic and seeded.
 
 **Flags and plan checks today**
 

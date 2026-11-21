@@ -21,6 +21,7 @@ export const HELPLINE = {
   /** The text line, as letters and as the digits they stand for. */
   textTo: '800GAM',
   textDigits: '800426',
+  sms: 'sms:800426',
   council: 'National Council on Problem Gambling',
   site: 'https://www.ncpgambling.org',
   /** The address as shown on the link. */
@@ -28,6 +29,9 @@ export const HELPLINE = {
   crisisName: 'Suicide and Crisis Lifeline',
   crisisNumber: '988',
   crisisTel: 'tel:988',
+  crisisSms: 'sms:988',
+  emergencyNumber: '911',
+  emergencyTel: 'tel:911',
 } as const;
 
 /** "1-800-MY-RESET (1-800-697-3738)": the number is always written both ways. */

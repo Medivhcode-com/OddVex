@@ -28,8 +28,10 @@ export default function Page() {
         <h2>Freshness</h2>
         <p>
           Each price records when it was last updated. A price older than 2 minutes for a live game, or 15 minutes
-          before a game starts, is labelled stale. Stale and suspended prices are excluded from best-price marks and
-          from the consensus.
+          before a game starts, is labelled stale. During a game, a price last updated before the latest score change
+          the data provider reported is also stale, however recent it is, because the score has moved the market since.
+          A price with no update time, or with one more than a minute in the future, is stale too. Stale and suspended prices are excluded from best-price marks
+          and from the consensus.
         </p>
         <h2>Odds conversion</h2>
         <Formula>{`decimal = 1 + american / 100        (american > 0)
@@ -59,7 +61,9 @@ no_vig_i  = implied_i / sum(implied_i)`}</Formula>
           The value screen takes one outcome at a time. It finds the best price among books that are open, not stale
           and on the same line, then averages the no-vig probability of that outcome across the <em>other</em> books.
           The book with the best price is left out, because its own long price would pull the average towards the
-          price being tested. At least two other books are required, or nothing is shown for that outcome.
+          price being tested. At least two other books are required, or nothing is shown for that outcome. Only games
+          that have not started are listed: games in progress and finished games never appear, because in play prices
+          move with the score and quotes taken moments apart are not comparable.
         </p>
         <Formula>{`consensus  = mean of no_vig(outcome) over the other books
 edge       = consensus × decimal_best − 1

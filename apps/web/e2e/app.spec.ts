@@ -168,8 +168,49 @@ test.describe("research screens (signed out)", () => {
     await select.selectOption(sameGame);
     await page.getByRole("button", { name: "Add leg", exact: true }).click();
     await page.getByRole("button", { name: "Calculate parlay" }).click();
-    await expect(page.getByText("These legs are correlated")).toBeVisible();
-    await expect(page.getByText("Not shown")).toBeVisible();
+    const result = page.getByRole("region", { name: "Result" });
+    await expect(result.getByText("Legs from the same game")).toBeVisible();
+    await expect(result.getByText("their results are linked", { exact: false })).toBeVisible();
+    await expect(result.getByText("Combined odds", { exact: true })).toBeVisible();
+    await expect(result.getByText("Combined probability")).toHaveCount(0);
+    await expect(result.getByText("Not shown")).toHaveCount(0);
+    await expect(result.getByText(/not computed|event_id|same event \(/)).toHaveCount(0);
+  });
+
+  test("parlay with legs from different games shows price, payout and break-even, and asks for nothing it can't take", async ({ page }) => {
+    await page.goto("/app/parlay");
+    const select = page.getByLabel("From tonight's board");
+    const values = await select.locator("option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+    const first = values[0];
+    const otherGame = values.find((v) => v.split(":")[0] !== first.split(":")[0])!;
+    await select.selectOption(first);
+    await page.getByRole("button", { name: "Add leg", exact: true }).click();
+    await select.selectOption(otherGame);
+    await page.getByRole("button", { name: "Add leg", exact: true }).click();
+    await page.getByRole("button", { name: "Calculate parlay" }).click();
+    const result = page.getByRole("region", { name: "Result" });
+    await expect(result.getByText("Combined odds", { exact: true })).toBeVisible();
+    await expect(result.getByText("Payout", { exact: true })).toBeVisible();
+    await expect(result.getByText("Break-even", { exact: true })).toBeVisible();
+    // No dead stat, no API note asking for a win probability the form has no field for, no warning.
+    await expect(result.getByText("Combined probability")).toHaveCount(0);
+    await expect(result.getByText("Not shown")).toHaveCount(0);
+    await expect(result.getByText(/win probability is required|not computed/)).toHaveCount(0);
+    await expect(result.getByRole("note")).toHaveCount(0);
+  });
+
+  test("parlay with a custom leg says custom legs can't be checked for independence", async ({ page }) => {
+    await page.goto("/app/parlay");
+    await page.getByRole("button", { name: "Add leg", exact: true }).click();
+    await page.getByLabel("Custom leg").fill("Player over 22.5 points");
+    await page.getByLabel("American odds").fill("-115");
+    await page.getByRole("button", { name: "Add custom leg" }).click();
+    await page.getByRole("button", { name: "Calculate parlay" }).click();
+    const result = page.getByRole("region", { name: "Result" });
+    await expect(result.getByText("Custom legs can't be checked for independence", { exact: false })).toBeVisible();
+    await expect(result.getByText("These legs are correlated")).toHaveCount(0);
+    await expect(result.getByText(/event_id/)).toHaveCount(0);
+    await expect(result.getByText("Combined probability")).toHaveCount(0);
   });
 
   test("assistant answers from data, cites sources and declines what it can't know", async ({ page }) => {
@@ -180,6 +221,21 @@ test.describe("research screens (signed out)", () => {
     await page.getByLabel("Ask OddVex AI").fill("Who will win the championship next year?");
     await page.getByRole("button", { name: "Ask", exact: true }).click();
     await expect(page.getByText(/No data was used for this answer|can't|cannot|don't/i).last()).toBeVisible();
+  });
+
+  test("a message in crisis gets a calm support card with tappable numbers and no data", async ({ page }) => {
+    await page.goto("/app/assistant");
+    await page.getByLabel("Ask OddVex AI").fill("I want to kill myself after losing my bankroll, best odds on the Harbor City Tides?");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    const card = page.getByRole("group", { name: "Help is available now" });
+    await expect(card).toBeVisible();
+    await expect(card.getByRole("link", { name: "988", exact: true }).first()).toHaveAttribute("href", "tel:988");
+    await expect(card.getByRole("link", { name: "911", exact: true })).toHaveAttribute("href", "tel:911");
+    await expect(card.getByRole("link", { name: "1-800-697-3738", exact: true })).toHaveAttribute("href", "tel:+18006973738");
+    await expect(card.getByText("Sources:")).toHaveCount(0);
+    await expect(card.getByText("No data was used for this answer.")).toHaveCount(0);
+    // No betting data: no price for the team the message named.
+    await expect(card.getByText(/moneyline|Harbor City Tides/i)).toHaveCount(0);
   });
 
   test("tracker asks signed-out visitors to log in", async ({ page }) => {
@@ -321,6 +377,60 @@ test.describe("accounts and tracking", () => {
     await settled.getByRole("button", { name: /^Delete Harbor/ }).click();
     await settled.getByRole("button", { name: "Delete bet" }).click();
     await expect(page.getByText("Nothing settled yet")).toBeVisible();
+  });
+
+  test("a bet whose answer was lost is saved once when the same form is sent again; an edited form is a new bet", async ({ page }) => {
+    await signUp(page, "retry");
+    const sent: (string | undefined)[] = [];
+    let loseNext = false;
+    await page.route(
+      (url) => url.pathname === "/api/ov/v1/bets",
+      async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        sent.push(JSON.parse(route.request().postData() ?? "{}").client_request_id);
+        if (!loseNext) return route.continue();
+        // The API stores the bet, and its answer never reaches the browser.
+        loseNext = false;
+        await route.fetch();
+        return route.abort("failed");
+      },
+    );
+    const myBets = async () => ((await (await page.request.get("/api/ov/v1/bets?status=pending")).json()) as { legs: { selection: string }[]; stake: number }[]).filter((bet) => bet.legs[0].selection.startsWith("Retry"));
+
+    // A stake under a cent is refused in the form, before anything is sent.
+    await page.getByLabel("Pick").fill("Retry Tides ML");
+    await page.getByLabel("Odds", { exact: true }).fill("+150");
+    await page.getByLabel("Stake ($)").fill("0.004");
+    await page.getByRole("button", { name: "Save bet" }).click();
+    await expect(page.getByText("Enter a stake of at least $0.01.")).toBeVisible();
+    expect(sent).toHaveLength(0);
+
+    // The first answer is lost; the same form sent again carries the same id and is saved once.
+    await page.getByLabel("Stake ($)").fill("20");
+    loseNext = true;
+    await page.getByRole("button", { name: "Save bet" }).click();
+    await expect(page.getByText("the bet may already be saved", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "Save bet" }).click();
+    await expect(page.getByText("Bet saved.")).toBeVisible();
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(sent[1]).toBe(sent[0]);
+    expect(await myBets()).toHaveLength(1);
+
+    // A lost answer, then an edit: the edited form is another bet with a new id.
+    await page.getByLabel("Pick").fill("Retry Rams ML");
+    await page.getByLabel("Odds", { exact: true }).fill("+120");
+    await page.getByLabel("Stake ($)").fill("10");
+    loseNext = true;
+    await page.getByRole("button", { name: "Save bet" }).click();
+    await expect(page.getByText("the bet may already be saved", { exact: false })).toBeVisible();
+    await page.getByLabel("Stake ($)").fill("12");
+    await page.getByRole("button", { name: "Save bet" }).click();
+    await expect(page.getByText("Bet saved.")).toBeVisible();
+    expect(sent).toHaveLength(4);
+    expect(new Set(sent).size).toBe(3);
+    expect(sent[3]).not.toBe(sent[2]);
+    expect((await myBets()).map((bet) => bet.stake).sort((a, b) => a - b)).toEqual([10, 12, 20]);
   });
 
   test("edit an open bet and record closing odds for CLV", async ({ page }) => {
@@ -510,6 +620,42 @@ test.describe("accounts and tracking", () => {
     // The game has not been played, so nothing can be settled yet.
     await open.getByRole("button", { name: "Settle from final scores" }).click();
     await expect(open.getByText(/0 bets settled from final scores\. Left open: 1 game not finished\./)).toBeVisible();
+  });
+
+  test("a quick bet whose answer was lost is saved once when sent again unchanged", async ({ page, request }) => {
+    await signUp(page, "quickretry");
+    const events = await (await request.get(`${API}/v1/events?status=upcoming`)).json();
+    const sent: (string | undefined)[] = [];
+    let loseNext = true;
+    await page.route(
+      (url) => url.pathname === "/api/ov/v1/bets",
+      async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        sent.push(JSON.parse(route.request().postData() ?? "{}").client_request_id);
+        if (!loseNext) return route.continue();
+        // The API stores the bet, and its answer never reaches the browser.
+        loseNext = false;
+        await route.fetch();
+        return route.abort("failed");
+      },
+    );
+    await page.goto(`/app/games/${events[0].id}`);
+    const panel = page.getByRole("region", { name: "Track a bet on this game" });
+    await panel.getByLabel("Stake ($)").fill("0.004");
+    await panel.getByRole("button", { name: "Add to tracker" }).click();
+    await expect(panel.getByText("Enter a stake of at least $0.01.")).toBeVisible();
+    expect(sent).toHaveLength(0);
+
+    await panel.getByLabel("Stake ($)").fill("17");
+    await panel.getByRole("button", { name: "Add to tracker" }).click();
+    await expect(panel.getByText("the bet may already be saved", { exact: false })).toBeVisible();
+    await panel.getByRole("button", { name: "Add to tracker" }).click();
+    await expect(panel.getByText(/Bet saved\./)).toBeVisible();
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(sent[1]).toBe(sent[0]);
+    const mine = ((await (await page.request.get("/api/ov/v1/bets?status=pending")).json()) as { legs: { event_id: string | null }[]; stake: number }[]).filter((bet) => bet.legs[0].event_id === events[0].id);
+    expect(mine.map((bet) => bet.stake)).toEqual([17]);
   });
 
   test("a bet on a finished game settles itself from the final score", async ({ page, request }) => {

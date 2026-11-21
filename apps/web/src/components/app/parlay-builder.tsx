@@ -5,11 +5,12 @@ import { Button, Field, Notice, Panel, PanelHeader, SelectField, Stat } from "@/
 import { Price } from "@/components/app/odds-format";
 import { clientApi, ClientApiError } from "@/lib/client-api";
 import { formatAmerican, formatMoney, formatPercent } from "@/lib/format";
+import type { Schemas } from "@oddvex/types";
 import type { PriceT } from "@/lib/types";
 
 export type LegOption = { id: string; eventId: string; eventLabel: string; label: string; price: PriceT; book: string };
 type Leg = { key: string; label: string; odds: string; eventId: string | null; detail: string };
-type ParlayResult = {
+export type ParlayResult = {
   legs: { label: string; price: PriceT; counted: boolean }[];
   combined_price: PriceT | null;
   combined_decimal: number;
@@ -18,6 +19,8 @@ type ParlayResult = {
   payout?: number | null;
   profit?: number | null;
   combined_probability?: number | null;
+  /** Missing only from an older API; read as "no combined probability". */
+  probability_status?: Schemas["ParlayResponse"]["probability_status"];
   probability_note: string;
   correlation_warnings: string[];
   steps: string[];
@@ -123,35 +126,61 @@ export function ParlayBuilder({ options }: { options: LegOption[] }) {
           {!result ? (
             <p className="py-6 text-center text-sm text-muted">The combined price and payout appear here.</p>
           ) : (
-            <>
-              <dl className="grid grid-cols-2 gap-4">
-                <Stat label="Combined odds" value={result.combined_price ? <Price price={result.combined_price} /> : result.combined_decimal.toFixed(2)} hint={`${result.active_legs} legs`} />
-                <Stat label="Payout" value={result.payout === null || result.payout === undefined ? "n/a" : formatMoney(result.payout)} hint={result.profit === null || result.profit === undefined ? undefined : `${formatMoney(result.profit)} profit on ${formatMoney(result.stake ?? 0)}`} />
-                <Stat label="Break-even" value={result.combined_price ? formatPercent(result.combined_price.implied_probability, 2) : "n/a"} hint="How often it must win" />
-                <Stat label="Combined probability" value={result.combined_probability === null || result.combined_probability === undefined ? "Not shown" : formatPercent(result.combined_probability, 2)} />
-              </dl>
-              {result.correlation_warnings.length ? (
-                <Notice tone="warn" title="These legs are correlated">
-                  <ul className="list-disc space-y-1 pl-4">
-                    {result.correlation_warnings.map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
-                </Notice>
-              ) : null}
-              <Notice>{result.probability_note}</Notice>
-              <details className="rounded-cell border border-line">
-                <summary className="min-h-11 cursor-pointer px-3 py-2.5 text-sm font-medium">Show the working</summary>
-                <ol className="num list-decimal space-y-1 border-t border-line px-3 py-3 pl-8 text-sm text-muted">
-                  {result.steps.map((step, i) => (
-                    <li key={i}>{step}</li>
-                  ))}
-                </ol>
-              </details>
-            </>
+            <ParlayResultView result={result} />
           )}
         </div>
       </Panel>
     </div>
+  );
+}
+
+type ProbabilityStatus = Schemas["ParlayResponse"]["probability_status"];
+
+/**
+ * What the result says about a combined probability, chosen from the API's
+ * `probability_status`. The API's `probability_note` and `correlation_warnings` are not shown:
+ * they are written for developers (event ids, field names) and the note can ask for input this
+ * form does not take. The form sends no win probabilities, so from this page the status is
+ * normally `needs_leg_probabilities` (different games), `same_event_legs` or `unverified_legs`.
+ */
+const PROBABILITY_NOTICE: Partial<Record<ProbabilityStatus, { title?: string; tone?: "warn"; text: string }>> = {
+  same_event_legs: {
+    title: "Legs from the same game",
+    tone: "warn",
+    text: "Two or more legs are from the same game, so their results are linked. OddVex gives no combined chance for these legs.",
+  },
+  unverified_legs: {
+    title: "Custom legs",
+    tone: "warn",
+    text: "Custom legs can't be checked for independence, because OddVex does not know which game they are from. No combined chance is given.",
+  },
+  no_active_legs: { text: "Every leg pushed or was voided, so no legs are left to combine." },
+};
+
+export function ParlayResultView({ result }: { result: ParlayResult }) {
+  const computed = result.probability_status === "computed" && typeof result.combined_probability === "number";
+  const notice = result.probability_status ? PROBABILITY_NOTICE[result.probability_status] : undefined;
+  return (
+    <>
+      <dl className="grid grid-cols-2 gap-4">
+        <Stat label="Combined odds" value={result.combined_price ? <Price price={result.combined_price} /> : result.combined_decimal.toFixed(2)} hint={`${result.active_legs} legs`} />
+        <Stat label="Payout" value={result.payout === null || result.payout === undefined ? "n/a" : formatMoney(result.payout)} hint={result.profit === null || result.profit === undefined ? undefined : `${formatMoney(result.profit)} profit on ${formatMoney(result.stake ?? 0)}`} />
+        <Stat label="Break-even" value={result.combined_price ? formatPercent(result.combined_price.implied_probability, 2) : "n/a"} hint="How often it must win" />
+        {computed ? <Stat label="Combined probability" value={formatPercent(result.combined_probability, 2)} hint="Assumes the legs are independent" /> : null}
+      </dl>
+      {notice ? (
+        <Notice tone={notice.tone} title={notice.title}>
+          {notice.text}
+        </Notice>
+      ) : null}
+      <details className="rounded-cell border border-line">
+        <summary className="min-h-11 cursor-pointer px-3 py-2.5 text-sm font-medium">Show the working</summary>
+        <ol className="num list-decimal space-y-1 border-t border-line px-3 py-3 pl-8 text-sm text-muted">
+          {result.steps.map((step, i) => (
+            <li key={i}>{step}</li>
+          ))}
+        </ol>
+      </details>
+    </>
   );
 }

@@ -719,7 +719,8 @@ test.describe("community", () => {
     const resolved = queue.getByRole("listitem").filter({ hasText: `End-to-end moderation ${handleA}` });
     await expect(resolved).toContainText("Content hidden");
     await expect(resolved.getByText("Now hidden", { exact: true })).toBeVisible();
-    await expect(resolved.getByRole("button")).toHaveCount(0);
+    // A decided report has no decision buttons left; hidden content can still be restored from here.
+    await expect(resolved.getByRole("button")).toHaveText([/^Restore pick/]);
     expect(await audit(page), "moderation tab, resolved").toEqual([]);
     await page.goto("/app/admin/audit?action=community.report_resolved");
     await expect(page.getByRole("table", { name: "Audit log entries" }).getByRole("row").nth(1)).toContainText("community.report_resolved");
@@ -842,14 +843,21 @@ test.describe("community", () => {
       await expect(table.or(empty)).toBeVisible();
       if (board.items.length > 0) {
         // Rows are shown in the API's order, with the sample size and the interval.
-        await expect(table.getByRole("columnheader")).toHaveText(["Rank", "Profile", "Graded picks", "Win rate", "95% interval"]);
+        // The average price and the flat-stake return sit next to the win rate, so a record built on short prices reads for what it is.
+        await expect(table.getByRole("columnheader")).toHaveText(["Rank", "Profile", "Graded picks", "Win rate", "95% interval", "Average price", "Flat-stake return"]);
+        await expect(ranking.getByText("Neither changes the order.", { exact: false })).toBeVisible();
         const rows = table.locator("tbody tr");
         await expect(rows).toHaveCount(board.items.length);
-        for (const [index, row] of (board.items as { rank: number; handle: string; record: { picks: number } }[]).entries()) {
+        type Row = { rank: number; handle: string; record: { picks: number; average_price: { american: number } | null; flat_stake_roi: number | null } };
+        for (const [index, row] of (board.items as Row[]).entries()) {
           await expect(rows.nth(index).locator("td").first()).toHaveText(String(row.rank));
           await expect(rows.nth(index).getByRole("link", { name: `@${row.handle}` })).toHaveAttribute("href", `/app/community/profiles/${row.handle}`);
           await expect(rows.nth(index).locator("td").nth(1)).toHaveText(String(row.record.picks));
           await expect(rows.nth(index).locator("td").nth(3)).toHaveText(/^\d+\.\d% to \d+\.\d%$/);
+          const american = row.record.average_price ? Math.round(row.record.average_price.american) : null;
+          await expect(rows.nth(index).locator("td").nth(4)).toHaveText(american === null ? "n/a" : american > 0 ? `+${american}` : `−${Math.abs(american)}`);
+          const roi = row.record.flat_stake_roi;
+          await expect(rows.nth(index).locator("td").nth(5)).toHaveText(roi === null ? "n/a" : /^([+−]\d+\.\d|0\.0)%$/);
         }
       } else {
         await expect(empty).toBeVisible();

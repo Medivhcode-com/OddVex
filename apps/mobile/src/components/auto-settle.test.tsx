@@ -28,8 +28,21 @@ describe('autoSettleMessage', () => {
       ],
     };
     expect(autoSettleMessage(out)).toBe(
-      '2 bets settled from final scores. Left open: 2 game not finished, 1 not tied to a game and side, 1 game no longer available, 1 manual_result_required.',
+      '2 bets settled from final scores. Left open: 2 game not finished, 1 not tied to a game and side, 1 game no longer available, 1 needs its result entered by hand.',
     );
+  });
+});
+
+describe('autoSettleMessage when one call did not reach every open bet', () => {
+  it('says more open bets are left to check', () => {
+    const out: AutoSettle = { checked: 200, has_more: true, settled: [wonBet], skipped: [skip('a', 'event_not_final')] };
+    expect(autoSettleMessage(out)).toBe(
+      '1 bet settled from final scores. Left open: 1 game not finished. More open bets are left to check: run it again to continue.',
+    );
+  });
+
+  it('reads a missing has_more as false', () => {
+    expect(autoSettleMessage({ checked: 1, settled: [wonBet], skipped: [] } as unknown as AutoSettle)).toBe('1 bet settled from final scores.');
   });
 });
 
@@ -48,6 +61,24 @@ describe('AutoSettleButton', () => {
     expect(await screen.findByText('1 bet settled from final scores. Left open: 1 game not finished.')).toBeOnTheScreen();
     expect(sent()[0]).toMatchObject({ method: 'POST', path: '/v1/bets/auto-settle', body: {} });
     expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers to run again while more open bets are left, and stops offering once they are done', async () => {
+    const { fetchMock, sent } = installFetch();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ checked: 200, has_more: true, settled: [wonBet], skipped: [] }))
+      .mockResolvedValueOnce(jsonResponse({ checked: 3, has_more: false, settled: [wonBet], skipped: [] }));
+    const onSettled = jest.fn();
+    await render(<AutoSettleButton onSettled={onSettled} />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Settle from final scores' }));
+    expect(await screen.findByText(/More open bets are left to check/)).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: 'Check the rest' }));
+
+    expect(await screen.findByText('1 bet settled from final scores.')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Check the rest' })).toBeNull();
+    expect(sent().filter((request) => request.path === '/v1/bets/auto-settle')).toHaveLength(2);
+    expect(onSettled).toHaveBeenCalledTimes(2);
   });
 
   it('announces a failure and settles nothing', async () => {

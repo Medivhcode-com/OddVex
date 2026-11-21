@@ -7,6 +7,8 @@ import type { Href } from 'expo-router';
  * tabs. The odds board on the web is the Games tab here. `/app/community/picks/{id}` and
  * `/app/community/profiles/{handle}` open the pick and the profile; those screens check the `community` flag
  * themselves, so a link that arrives while the flag is off lands on the "not available" state.
+ * `/responsible-gambling`, the web page the assistant's support replies link to, opens Settings, whose
+ * "Responsible gambling" panel carries the same helpline, crisis line and links.
  */
 export function appRoute(href: string): Href | null {
   const [path, query = ''] = href.split('#')[0].split('?');
@@ -16,6 +18,7 @@ export function appRoute(href: string): Href | null {
     .find(([key]) => key === 'market')?.[1];
   const market = rawMarket ? decodeURIComponent(rawMarket) : undefined;
   const parts = path.replace(/\/+$/, '').split('/').filter(Boolean);
+  if (parts.length === 1 && parts[0] === 'responsible-gambling') return '/settings';
   if (parts[0] !== 'app') return null;
   const [, section, rawId] = parts;
   const id = rawId ? decodeURIComponent(rawId) : undefined;

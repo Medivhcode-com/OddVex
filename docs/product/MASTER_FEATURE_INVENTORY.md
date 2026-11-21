@@ -1,6 +1,6 @@
 # OddVex — Master Feature Inventory
 
-Last updated: 2026-11-15 · IDs match [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md) · Milestones defined in [ROADMAP.md](./ROADMAP.md)
+Last updated: 2026-11-21 (PRLY-02 and AI-04 corrected to the code at commit `2b0c7c1`) · IDs match [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md) · Milestones defined in [ROADMAP.md](./ROADMAP.md)
 
 ## How to read this table
 
@@ -69,7 +69,7 @@ Important caveats:
 | PROP-06 | Model projections | Projection + uncertainty + methodology | Premium | M4 | Planned | Real historical data; model validation; backtesting (INTL-10); claims review |
 | PROP-07 | Prop watchlist | Saved players/props | Free+limits | M2 | Built (players; not individual props) | Persistence |
 | PROP-08 | Prop alerts | Line/price change alerts | Premium | M3 | Planned | INTL-11, NOTF-01 |
-| PROP-09 | Mobile prop analyzer | Props in Expo app | Free | M3 | Built in code, never run on a device (prop board and analyzer) | MOB-01 |
+| PROP-09 | Mobile prop analyzer | Props in Expo app | Free | M3 | Built in code, not reported as run on a device (prop board and analyzer) | MOB-01 |
 | PROP-10 | Matchup context | Opponent/positional context | Premium | M3 | Planned | Provider stats depth |
 
 ## E. Betting Intelligence
@@ -86,8 +86,8 @@ Important caveats:
 | INTL-08 | Bankroll / staking calculator | e.g. fractional staking | Free | M3 | Planned | RG review of framing before build |
 | INTL-09 | Market discrepancy / +EV screen | Market-wide scan vs. reference price | Premium | M4 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | Licensed provider; reference-price methodology; claims review |
 | INTL-10 | Backtesting | Test projections/strategies on history | Premium | M4 | Planned | Historical data licence; DATA-05 |
-| INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated on app open or by script; no background worker) | Real-time provider; NOTF-01 |
-| INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Built in code, never run on a device (converter, no-vig, EV, CLV) | MOB-01 |
+| INTL-11 | Alerts engine | Rules, evaluation, delivery | Free+limits | M3 | Built (evaluated when notifications are read, by "Check now", by script, and on the preview by a worker that waits two minutes between passes; in-app delivery only) | Real-time provider; NOTF-01 |
+| INTL-12 | Mobile calculators | Tools in Expo app | Free | M3 | Built in code, not reported as run on a device (converter, no-vig, EV, CLV) | MOB-01 |
 
 ## F. Bet Tracker
 
@@ -103,7 +103,7 @@ Important caveats:
 | TRKR-08 | Results-over-time chart | Cumulative net result | Free | M1 | Built in M1 | TRKR-03 |
 | TRKR-09 | Tags & notes | User annotations | Free | M2 | Planned | — |
 | TRKR-10 | Spending-awareness insights | Neutral summaries; optional reminders | Free (never paywalled) | M3 | Planned | RG policy review |
-| TRKR-11 | Mobile tracker | Tracker in Expo app | Free | M3 | Built in code, never run on a device (log, settle, edit, delete, settle from final scores, mock sync; profit chart and breakdowns are web-only) | MOB-02 |
+| TRKR-11 | Mobile tracker | Tracker in Expo app | Free | M3 | Built in code, not reported as run on a device (log, settle, edit, delete, settle from final scores, mock sync; profit chart and breakdowns are web-only) | MOB-02 |
 | TRKR-12 | Multi-leg bets | Parlays with legs in tracker | Free | M1 | Built in M1 | TRKR-01 |
 | TRKR-13 | Advanced analytics | Deeper breakdowns, custom date ranges | Premium | M4 | Built in code (see BUILD_STATUS; community and leaderboard flags off by default; no billing, no real email) | PREM-01 |
 
@@ -128,7 +128,7 @@ Important caveats:
 | AI-01 | Assistant UI | Chat at `/app/assistant` | Free | M1 | Built in M1 | AUTH-01 |
 | AI-02 | Rule-based router | Intent → internal tools | Free | M1 | Built in M1 | Internal data tools |
 | AI-03 | Grounded answers | Numbers only from tools; source + "as of" | Free | M1 | Built in M1 | DATA-04 |
-| AI-04 | Refusal behaviour | No guarantees/picks; honest "no data" | Free | M1 | Built in M1 | — |
+| AI-04 | Refusal behaviour | No guarantees/picks; honest "no data"; support replies for crisis, under-21 and distress messages | Free | M1 | Built. Support detection is a fixed rule list with known misses; every answer that is not a support reply ends with the helpline and 988 (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5). The AG-03 under-21 flag is not built | — |
 | AI-05 | AI disclosure + RG footer | Automated-assistant label | Free | M1 | Built in M1 | — |
 | AI-06 | Suggested prompts | Starter questions | Free | M1 | Built in M1 | — |
 | AI-07 | LLM-backed assistant | Tool calling under same grounding contract | Free+limits / Premium | M4 | Planned | **Founder gate** (paid API); provider data-processing terms; AI-08 |
@@ -143,12 +143,12 @@ Important caveats:
 | ID | Feature | Description | Tier (proposal) | MS | Status | Dependencies |
 |---|---|---|---|---|---|---|
 | PRLY-01 | Parlay builder | Add legs; combined odds/payout | Free | M1 | Built in M1 | INTL-05 |
-| PRLY-02 | Combined probability | Implied probability + per-leg breakdown | Free | M1 | Built in M1 | INTL-01 |
+| PRLY-02 | Break-even rate | Break-even rate (implied probability of the combined price) + per-leg breakdown | Free | M1 | Built: the parlay tool shows the combined price, payout and break-even rate. It does not show a chance that every leg wins; the API computes one only when the caller supplies a win probability per leg and the legs are from different games (`probability_status`), and the web and mobile forms send none. At `2b0c7c1` the screens read "Combined probability: Not shown"; pull request 20 replaces that line | INTL-01 |
 | PRLY-03 | Correlation warning | Rule-based same-game/related-leg warning | Free | M1 | Built in M1 (same-event rule only) | Leg metadata (game/player IDs) |
 | PRLY-04 | Parlay price comparison | Across sportsbooks | Premium | M3 | Planned | Provider coverage of parlay/SGP pricing (may not be available) |
 | PRLY-05 | Send to tracker / save drafts | Tracker hand-off (M1?), drafts (M2) | Free | M1/M2 | Planned | TRKR-12 |
 | PRLY-06 | Quantified correlation | Model-based estimates | Premium | M4 | Planned | Historical data; model validation |
-| PRLY-07 | Mobile parlay research | In Expo app | Free | M3 | Built in code, never run on a device (with the correlation warning) | MOB-01 |
+| PRLY-07 | Mobile parlay research | In Expo app | Free | M3 | Built in code, not reported as run on a device (with the correlation warning) | MOB-01 |
 
 ## J. Community
 
@@ -217,7 +217,7 @@ Important caveats:
 | MKT-05 | Programmatic SEO pages | Game/market/tool landing pages | Free | M2+ | Planned | Licensed provider with display/SEO rights |
 | MKT-06 | Blog | Educational content | Free | M1 shell / M2 content | Built in M1 (shell) | Editorial review per BRAND_VOICE |
 | MOB-01 | Mobile app shell | Expo app, nav, tokens | Free | M1 | Built in M1 | — |
-| MOB-02 | Mobile auth & account | Login, settings, deletion in-app | Free | M2 | Built in code, never run on a device (log in, create account with 21+ confirmation, change password, in-app deletion; SecureStore on real hardware unverified) | AUTH-06 |
+| MOB-02 | Mobile auth & account | Login, settings, deletion in-app | Free | M2 | Built in code, not reported as run on a device (log in, create account with 21+ confirmation, change password, in-app deletion; SecureStore on real hardware unverified) | AUTH-06 |
 | MOB-03 | Store submission | App Store / Google Play | n/a | M6 | Planned | **Founder gate**; LAUNCH_READINESS_CHECKLIST |
 | PLAT-01 | CI pipeline | Lint, types, tests, scans | n/a | M1 | Built in M1 | — |
 | PLAT-02 | Design system | Shared tokens/components | n/a | M1 | Built in M1 | — |

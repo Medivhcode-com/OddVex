@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef } from "react";
+import { SuspendedNotice } from "@/components/app/suspended-notice";
 import { Button, ButtonLink, Field, Notice } from "@/components/ui/primitives";
 import {
   confirmEmailAction,
@@ -17,16 +18,6 @@ import {
 } from "@/lib/auth-actions";
 
 const initial: AuthState = {};
-
-/** Shown after a login attempt on a suspended account, and when a suspended session was just ended. */
-function SuspendedNotice({ role }: { role: "alert" | "status" }) {
-  return (
-    <Notice tone="warn" role={role} title="This account is suspended">
-      You can&rsquo;t log in to it right now. You can still ask for a copy of your data, or ask us to delete it.{" "}
-      <Link href="/contact">Contact us</Link>
-    </Notice>
-  );
-}
 
 export function LoginForm({ next, notice, suspended = false }: { next: string; notice?: string; suspended?: boolean }) {
   const [state, action, pending] = useActionState(loginAction, initial);

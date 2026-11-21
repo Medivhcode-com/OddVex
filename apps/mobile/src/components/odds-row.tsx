@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import type { BookRow, ConsensusOutcome, Outcome } from '@/api/types';
+import { Mark } from '@/components/badge';
 import { Freshness } from '@/components/freshness';
 import { Price } from '@/components/price';
 import { Num, Txt } from '@/components/text';
@@ -122,9 +123,14 @@ export function OddsRow({
           ) : book.last_updated ? (
             <Freshness at={book.last_updated} stale={book.is_stale} now={now} />
           ) : book.is_stale ? (
-            <Txt variant="caption" tone="warn">
-              Stale
-            </Txt>
+            // Stale with no update time (the API marks a quote without a timestamp stale): the word and the
+            // diamond, without an age.
+            <View style={styles.stale}>
+              <Mark shape="diamond" color={theme.warn} />
+              <Txt variant="caption" tone="warn">
+                Stale
+              </Txt>
+            </View>
           ) : null}
         </View>
         {open && hold !== undefined ? (
@@ -193,6 +199,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: space[3] },
   book: { flex: 1, gap: 2 },
   hold: { alignItems: 'flex-end', gap: 2 },
+  stale: { flexDirection: 'row', alignItems: 'center', gap: space[1] + 2 },
   cells: { flexDirection: 'row', gap: space[2] },
   cell: {
     flex: 1,

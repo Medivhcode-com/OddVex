@@ -7,7 +7,7 @@
 | Tagline | "Every Line. A Smarter Perspective." |
 | Market | United States, adults 21+ |
 | Doc owner | Product + Compliance documentation |
-| Last updated | 2026-11-15 |
+| Last updated | 2026-11-21 (NFR-43, AC-PRLY-4 and PRLY-02 corrected to the code at commit `2b0c7c1`) |
 | Status | Living document. M1 is in build; everything after M1 is planned, not built. |
 
 Related: [MASTER_FEATURE_INVENTORY.md](./MASTER_FEATURE_INVENTORY.md) · [SCREEN_MAP.md](./SCREEN_MAP.md) · [USER_JOURNEYS.md](./USER_JOURNEYS.md) · [ROADMAP.md](./ROADMAP.md) · [../compliance/COMPLIANCE_OVERVIEW.md](../compliance/COMPLIANCE_OVERVIEW.md) · competitor research in `docs/research/` (owned by another workstream).
@@ -245,7 +245,7 @@ Contract: the assistant **answers only from verified internal data tools and det
 | AI-01 | Assistant chat UI at `/app/assistant` | M1 | M1 |
 | AI-02 | Rule-based intent router to internal tools (odds, props, calculators, tracker) | M1 | M1 |
 | AI-03 | Grounding: every numeric value originates from tool output; answer shows source and "as of" | M1 | M1 |
-| AI-04 | Refusals: no guarantees, no "locks", no advice to bet; "I don't have that data" when a tool returns nothing | M1 | M1 |
+| AI-04 | Refusals: no guarantees, no "locks", no advice to bet; "I don't have that data" when a tool returns nothing. Crisis, under-21 and distress messages get fixed support replies with no betting data (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5) | M1 | M1 |
 | AI-05 | AI disclosure label and responsible-gambling footer | M1 | M1 |
 | AI-06 | Suggested prompts | M1 | M1 |
 | AI-07 | LLM-backed assistant with tool calling under the same grounding contract | M4 | Later — paid API gate |
@@ -267,7 +267,7 @@ Acceptance criteria (M1):
 | ID | Requirement | MS | Status |
 |---|---|---|---|
 | PRLY-01 | Parlay builder at `/app/parlay`: add legs, see combined odds and payout | M1 | M1 |
-| PRLY-02 | Combined implied probability and per-leg breakdown | M1 | M1 |
+| PRLY-02 | Break-even rate (implied probability of the combined price) and per-leg breakdown. A combined probability that every leg wins only when the caller supplies leg win probabilities (API only) | M1 | M1 |
 | PRLY-03 | Correlation warning for same-game / related legs (rule-based) | M1 | M1? |
 | PRLY-04 | Parlay price comparison across sportsbooks | M3 | Later — depends on provider coverage |
 | PRLY-05 | Send parlay to tracker (M1?) and save parlay drafts (M2) | M1/M2 | M1? / Later |
@@ -278,7 +278,7 @@ Acceptance criteria (M1):
 - AC-PRLY-1: Combined decimal odds equal the product of leg decimal odds; shown with the statement that this assumes independent legs.
 - AC-PRLY-2: When two or more legs share a game (or the same player), a warning explains that legs may be correlated, that the independent-legs figure may be inaccurate, and that sportsbooks may price or restrict such combinations differently.
 - AC-PRLY-3: The page states that OddVex does not place bets; there is no "place bet" control.
-- AC-PRLY-4: Combined probability is shown alongside payout so long-odds parlays are not presented only as a large payout.
+- AC-PRLY-4: The break-even rate (how often the parlay must win to break even, the implied probability of the combined price) is shown alongside the payout, so long-odds parlays are not presented only as a large payout. Corrected on 2026-11-21: the earlier text asked for a combined probability, which the parlay tool does not show. The API computes a chance that every leg wins only when the caller supplies a win probability for each leg and the legs are from different games (`probability_status` on `POST /v1/quant/parlay`); the web and mobile forms send none.
 
 ### J. Community — `COMM` (M5, not built)
 
@@ -426,7 +426,7 @@ Acceptance criteria (M1): AC-ADMN-1: endpoint returns 401 unauthenticated and 40
 | NFR-40 | CI gates: lint, type-check, unit tests, a11y checks, dependency scan. |
 | NFR-41 | Calculators and odds maths: ≥ 1 reference-vector test per formula; shared implementation across surfaces. |
 | NFR-42 | All user-facing copy follows BRAND_VOICE (no banned claims). |
-| NFR-43 | Responsible-gambling footer (21+, helpline 1-800-GAMBLER) on marketing and app surfaces. |
+| NFR-43 | Responsible-gambling footer (21+, the National Problem Gambling Helpline 1-800-MY-RESET (1-800-697-3738)) on marketing and app surfaces. The line as built: "21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738)." Helpline facts checked on 2026-11-19; check again before each release. Never 1-800-GAMBLER, which is the New Jersey council's line. |
 | NFR-44 | Availability targets are defined at M2 with production infrastructure (none claimed in M1). |
 | NFR-45 | US English at launch; copy externalised to allow later localisation. |
 

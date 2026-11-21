@@ -71,6 +71,26 @@ describe('SyncPanel', () => {
     expect(sent()[0]).toMatchObject({ method: 'POST', path: '/v1/sync/connections/conn_1/sync' });
   });
 
+  it('says which bets a finished sync left out, and why', async () => {
+    const { fetchMock } = installFetch();
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        status: 'succeeded',
+        imported_count: 1,
+        duplicate_count: 0,
+        retryable: false,
+        error_message: '2 bets were not imported: 2 because an account holds at most 5000 bets.',
+      }),
+    );
+    await render(<SyncPanel providers={[provider]} connections={[connection]} now={now} onChanged={() => {}} />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Sync Mock Sportsbook now' }));
+
+    expect(
+      await screen.findByText('Sync finished. 1 new bet imported, 0 already here. 2 bets were not imported: 2 because an account holds at most 5000 bets.'),
+    ).toBeOnTheScreen();
+  });
+
   it('reports a failed sync as a caution', async () => {
     const { fetchMock } = installFetch();
     fetchMock.mockResolvedValue(jsonResponse({ status: 'failed', retryable: true, error_message: 'provider timed out', imported_count: 0, duplicate_count: 0 }));

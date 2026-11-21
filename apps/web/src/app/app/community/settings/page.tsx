@@ -25,7 +25,7 @@ export default async function CommunitySettingsPage() {
       <div className="max-w-3xl space-y-5">
         {me.moderation_status !== "visible" ? (
           <Notice tone="warn" title={me.moderation_note ?? "Removed by moderators."}>
-            Other people can&rsquo;t see your profile and you can&rsquo;t post. Changing the handle or the bio makes it visible again.
+            Other people can&rsquo;t see your profile and you can&rsquo;t post. If you change the handle or the bio, the profile stays hidden and goes back to a moderator for review. Only a moderator can make it visible again.
           </Notice>
         ) : null}
         <Panel aria-labelledby="settings-profile">

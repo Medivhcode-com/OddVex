@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 
 import { describeError, getEntitlements, requestEmailVerification } from '@/api/client';
 import { Field } from '@/components/form';
 import { Button, Notice } from '@/components/states';
 import { Txt } from '@/components/text';
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/contact';
 import { useResource } from '@/hooks/use-resource';
 import { useFlag } from '@/providers/flags';
 import { useSession } from '@/providers/session';
@@ -14,12 +15,31 @@ import { space } from '@/theme';
 export const PREVIEW_EMAIL_NOTE = 'In this preview no email is actually sent, so the link will not arrive in your inbox.';
 
 export const SUSPENDED_TITLE = "This account can't be used right now";
-export const SUSPENDED_BODY =
-  'You have been signed out on this device. Your bets and settings are kept. To ask for a copy of your data, or to have it deleted, contact OddVex support and give the email address on the account. The privacy policy on the OddVex website explains your options.';
+export const SUSPENDED_BODY = `You have been signed out on this device. Your bets and settings are kept. To ask for a copy of your data, or to have it deleted, write to ${SUPPORT_EMAIL} from the email address on the account. The privacy policy on the OddVex website explains your options.`;
 
-/** Shown on the log in screen after the API reports `account_suspended`. Text only: there is nothing to tap. */
+/**
+ * Shown on the log in screen after the API reports `account_suspended`. A suspended account cannot sign in, so
+ * the app cannot export or delete its data itself: the notice gives the support address, with a button that
+ * opens a new email to it. A device with no mail app rejects the link; the address is written out in the text.
+ */
 export function SuspendedNotice() {
-  return <Notice tone="warn" title={SUSPENDED_TITLE} text={SUSPENDED_BODY} />;
+  // The button sits under the notice, not inside it: the notice is one accessible element, so a button in it
+  // could not be reached on its own by a screen reader.
+  return (
+    <View style={styles.form}>
+      <Notice tone="warn" title={SUSPENDED_TITLE} text={SUSPENDED_BODY} />
+      <Button
+        label={`Email ${SUPPORT_EMAIL}`}
+        variant="secondary"
+        compact
+        accessibilityRole="link"
+        accessibilityHint="Opens a new email to OddVex support."
+        onPress={() => {
+          Linking.openURL(SUPPORT_MAILTO).catch(() => {});
+        }}
+      />
+    </View>
+  );
 }
 
 /**

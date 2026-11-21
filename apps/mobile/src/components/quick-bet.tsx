@@ -2,10 +2,12 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { createBet, describeError } from '@/api/client';
+import { BET_SAVE_UNCONFIRMED, createBet, describeBetSaveError, saveMayBeStored } from '@/api/client';
 import type { BetCreate, EventSummary, OddsComparison } from '@/api/types';
+import { stakeError } from '@/components/bet-form';
 import { Choice, Field } from '@/components/form';
 import { Button, Notice } from '@/components/states';
+import { DRAFT_KEPT_UNCONFIRMED, useClientRequestId } from '@/hooks/use-client-request-id';
 import { DRAFT_KEPT, useDraft, useDraftKept } from '@/session/drafts';
 import { space } from '@/theme';
 import { formatAmerican, formatLine } from '@/utils/format';
@@ -59,7 +61,11 @@ export function quickBetPayload(event: EventSummary, market: string, option: Qui
 
 /**
  * Logs a bet on this game at the best current price. OddVex records the bet. It does not place it.
- * The side and the stake are drafts: they come back if the session ends before the bet is saved.
+ * The side and the stake are drafts: they come back if the session ends before the bet is saved. Like the
+ * bet form, each save carries a `client_request_id` that is sent again when the same side and stake are saved
+ * again after a failure, even if a refresh has moved the best price or its book in between, so a retry does not
+ * store the bet twice. When a save got no answer, the tracker is offered so the person can check it before
+ * saving again.
  */
 export function QuickBet({
   event,
@@ -77,6 +83,7 @@ export function QuickBet({
   const [choice, setChoice] = useDraft<string>(`${draft}:side`, options[0]?.outcomeKey ?? '');
   const [stake, setStake] = useDraft(`${draft}:stake`, '');
   const [keptNotice, dismissKeptNotice, draftSaved] = useDraftKept(draft);
+  const request = useClientRequestId(draft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -85,19 +92,26 @@ export function QuickBet({
   async function submit() {
     setSaved(false);
     dismissKeptNotice();
-    const amount = Number(stake);
     if (!option) return setError('Pick a side.');
-    if (stake.trim() === '' || !Number.isFinite(amount) || amount <= 0) return setError('Enter a stake greater than zero.');
+    const badStake = stakeError(stake);
+    if (badStake) return setError(badStake);
     setBusy(true);
     setError(null);
     try {
-      await createBet(quickBetPayload(event, market, option, amount));
+      const body = quickBetPayload(event, market, option, Number(stake));
+      // The id follows what the person chose, not the board's price or book, which a refresh can move: a retry of
+      // the same side and stake reuses it. If the first save was stored, the API returns that bet at its price.
+      const id = request.idFor({ event: event.id, market, side: option.outcomeKey, stake: Number(stake) });
+      // 201 for a new bet, 200 for a repeat of this id: either way the bet is stored.
+      await createBet({ ...body, client_request_id: id });
       setStake('');
+      request.clear();
       draftSaved();
       setSaved(true);
       onSaved();
     } catch (caught) {
-      setError(describeError(caught, 'The bet was not saved. Try again.'));
+      if (saveMayBeStored(caught)) request.markUnconfirmed();
+      setError(describeBetSaveError(caught, 'The bet was not saved. Try again.'));
     } finally {
       setBusy(false);
     }
@@ -105,7 +119,7 @@ export function QuickBet({
 
   return (
     <View style={styles.form}>
-      {keptNotice ? <Notice tone="neutral" text={DRAFT_KEPT} /> : null}
+      {keptNotice ? <Notice tone="neutral" text={request.unconfirmed ? DRAFT_KEPT_UNCONFIRMED : DRAFT_KEPT} /> : null}
       <Choice
         label="Side, at the best current price"
         options={options.map((item): { value: string; label: string } => ({
@@ -122,7 +136,9 @@ export function QuickBet({
       ) : null}
       <View style={styles.actions}>
         <Button label={busy ? 'Saving bet' : 'Add to tracker'} onPress={submit} disabled={busy} />
-        {saved ? <Button label="Open the tracker" variant="secondary" onPress={() => router.navigate('/tracker')} /> : null}
+        {saved || error === BET_SAVE_UNCONFIRMED ? (
+          <Button label="Open the tracker" variant="secondary" onPress={() => router.navigate('/tracker')} />
+        ) : null}
       </View>
     </View>
   );

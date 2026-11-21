@@ -5,7 +5,9 @@ import {
   apiGet,
   apiRequest,
   askAssistant,
+  BET_SAVE_UNCONFIRMED,
   deleteBet,
+  describeBetSaveError,
   describeError,
   getBets,
   setAuthToken,
@@ -261,6 +263,44 @@ describe('describeError', () => {
       'American odds cannot be between -100 and 100.',
     );
     expect(describeError(new Error('boom'), 'The bet was not saved. Try again.')).toBe('The bet was not saved. Try again.');
+  });
+});
+
+describe('describeBetSaveError', () => {
+  it('says a save that got no answer may already be stored, and to check the tracker first', () => {
+    const text = describeBetSaveError(new ApiUnavailableError(), 'The bet was not saved. Try again.');
+    expect(text).toBe(BET_SAVE_UNCONFIRMED);
+    expect(text).toMatch(/may already be in your tracker/);
+    expect(text).toMatch(/Check the tracker before you save it again/);
+  });
+
+  it("shows the API's own words for the bet cap and the write limit", () => {
+    expect(
+      describeBetSaveError(new ApiError(409, 'bet_limit_reached', 'An account holds at most 5000 bets. Delete some to add another.'), 'fallback'),
+    ).toBe('An account holds at most 5000 bets. Delete some to add another.');
+    expect(describeBetSaveError(new ApiError(429, 'rate_limited', 'Too many requests. Try again in 12 seconds.'), 'fallback')).toBe(
+      'Too many requests. Try again in 12 seconds.',
+    );
+  });
+
+  it('says the same when a server error leaves the save unconfirmed', () => {
+    for (const status of [500, 502, 503, 504]) {
+      expect(describeBetSaveError(new ApiError(status, 'http_error', `Request failed (${status}).`), 'fallback')).toBe(BET_SAVE_UNCONFIRMED);
+    }
+  });
+
+  it("keeps the shared write-limit wording for a 429 that is not the API's own", () => {
+    expect(describeBetSaveError(new ApiError(429, 'http_error', 'Request failed (429).'), 'fallback')).toBe(
+      'Too many attempts. Wait a minute, then try again.',
+    );
+  });
+
+  it('falls back to the shared wording for everything else', () => {
+    expect(describeBetSaveError(new ApiError(422, 'invalid_odds', 'American odds cannot be between -100 and 100.'), 'fallback')).toBe(
+      'American odds cannot be between -100 and 100.',
+    );
+    expect(describeBetSaveError(new ApiError(429, 'rate_limited', ''), 'fallback')).toBe('Too many attempts. Wait a minute, then try again.');
+    expect(describeBetSaveError(new Error('boom'), 'The bet was not saved. Try again.')).toBe('The bet was not saved. Try again.');
   });
 });
 

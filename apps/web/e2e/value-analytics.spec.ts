@@ -234,7 +234,9 @@ test.describe("account status in settings", () => {
     await expect(page.getByText("This account is suspended")).toHaveCount(0);
     await page.goto("/login?suspended=1");
     await expect(page.getByText("This account is suspended")).toBeVisible();
-    await expect(page.getByRole("main").getByRole("link", { name: "Contact us" })).toHaveAttribute("href", "/contact");
+    // It says where to ask for a copy of the data or for deletion: the contact address, or the contact page while none is set.
+    await expect(page.getByText("To ask for a copy of your data, or for the account and its data to be deleted", { exact: false })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("link", { name: /^(contact page|\S+@\S+)$/ })).toHaveAttribute("href", /^(\/contact|mailto:\S+@\S+)$/);
     // The page that ends a session never signs out a working one.
     await signUp(page, "ended");
     await page.goto("/api/session/ended");

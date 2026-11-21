@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { router } from 'expo-router';
+import { Linking } from 'react-native';
 
 import type { AssistantReply } from '@/api/types';
 import { AssistantAnswer, AssistantScreen, examplePrompts, sourcesText, suggestionRoute } from '@/screens/assistant';
@@ -106,6 +107,76 @@ describe('AssistantAnswer', () => {
   });
 });
 
+// Word for word what the API sends for a distress message (services/api assistant/safeguards.py).
+const distress: AssistantReply = {
+  intent: 'support',
+  answer: [
+    "Thank you for telling me. I can't help size or pick a bet to win money back. Trying to win back losses is a recognised warning sign that betting may be causing harm, and it is worth talking to someone about. I'm leaving prices and other betting data out of this reply.",
+    'The National Problem Gambling Helpline is confidential and answers 24 hours a day, every day: call 1-800-MY-RESET (1-800-697-3738) or text 800GAM (800426).',
+    'OddVex has two tools you can use on your own. The weekly staking reminder in Settings tells you when your stakes for the week reach an amount you choose; it is a reminder, not a limit. The bet tracker shows what you have staked and how your bets settled.',
+    'The helpline is not an emergency service. In a crisis, call or text 988 (the Suicide and Crisis Lifeline) or call 911.',
+  ].join('\n\n'),
+  data: null,
+  disclaimer: 'OddVex gives information and math, not betting advice or predictions. All sports data shown is synthetic sample data.',
+  sources: [],
+  suggestions: [
+    { label: 'Help and support resources', href: '/responsible-gambling' },
+    { label: 'Weekly staking reminder', href: '/app/settings' },
+    { label: 'Bet tracker', href: '/app/tracker' },
+  ],
+  support: { case: 'distress' },
+};
+
+const crisis: AssistantReply = {
+  ...distress,
+  answer: [
+    "I'm sorry you are going through this. You don't have to face it alone, and help is available right now.",
+    'Call or text 988 (the Suicide and Crisis Lifeline). If you are in immediate danger, call 911.',
+    'If you can, tell someone you trust how you are feeling now.',
+  ].join('\n\n'),
+  suggestions: [{ label: 'Help and support resources', href: '/responsible-gambling' }],
+  support: { case: 'crisis' },
+};
+
+describe('AssistantAnswer for a support reply', () => {
+  beforeEach(() => jest.mocked(Linking.openURL).mockReset().mockResolvedValue(undefined));
+
+  it('shows the reply with tappable helpline numbers and no sources or data panel', async () => {
+    await render(<AssistantAnswer reply={distress} now={now} onOpen={() => {}} />);
+
+    expect(screen.getByText(distress.answer)).toBeOnTheScreen();
+    expect(screen.queryByText('No data was used for this answer.')).toBeNull();
+    expect(screen.queryByText(/^Sources:/)).toBeNull();
+    expect(screen.queryByText(distress.disclaimer)).toBeNull();
+
+    await fireEvent.press(screen.getByRole('link', { name: 'Call the National Problem Gambling Helpline, 1-800-697-3738' }));
+    await fireEvent.press(screen.getByRole('link', { name: 'Text the National Problem Gambling Helpline at 800GAM, 800426' }));
+    await fireEvent.press(screen.getByRole('link', { name: 'Call 988, the Suicide and Crisis Lifeline' }));
+    expect(jest.mocked(Linking.openURL).mock.calls).toEqual([['tel:+18006973738'], ['sms:800426'], ['tel:988']]);
+  });
+
+  it('opens the in-app help, the staking reminder and the tracker from the links in the reply', async () => {
+    const onOpen = jest.fn();
+    await render(<AssistantAnswer reply={distress} now={now} onOpen={onOpen} />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Help and support resources' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Weekly staking reminder' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Bet tracker' }));
+
+    expect(onOpen.mock.calls).toEqual([['/settings'], ['/settings'], ['/tracker']]);
+  });
+
+  it('puts 988, its text line and 911 first for a crisis reply', async () => {
+    await render(<AssistantAnswer reply={crisis} now={now} onOpen={() => {}} />);
+
+    const links = screen.getAllByRole('link').map((link) => link.props.accessibilityLabel);
+    expect(links.slice(0, 3)).toEqual(['Call 988, the Suicide and Crisis Lifeline', 'Text 988, the Suicide and Crisis Lifeline', 'Call 911']);
+    await fireEvent.press(screen.getByRole('link', { name: 'Text 988, the Suicide and Crisis Lifeline' }));
+    await fireEvent.press(screen.getByRole('link', { name: 'Call 911' }));
+    expect(jest.mocked(Linking.openURL).mock.calls).toEqual([['sms:988'], ['tel:911']]);
+  });
+});
+
 describe('AssistantScreen', () => {
   function respond(fetchMock: jest.Mock, answer: () => unknown) {
     fetchMock.mockImplementation(async (url: string) => {
@@ -132,6 +203,19 @@ describe('AssistantScreen', () => {
 
     await fireEvent.press(screen.getByRole('button', { name: 'Open this game' }));
     expect(router.push).toHaveBeenCalledWith({ pathname: '/event/[id]', params: { id: 'evt_1' } });
+  });
+
+  it('shows a support reply as a support card', async () => {
+    const { fetchMock } = installFetch();
+    respond(fetchMock, () => jsonResponse(distress));
+    await render(<AssistantScreen />);
+
+    await fireEvent.changeText(screen.getByLabelText('Ask OddVex AI'), 'I need to win it back tonight');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send question' }));
+
+    expect(await screen.findByText('Help is available')).toBeOnTheScreen();
+    expect(screen.getByText(distress.answer)).toBeOnTheScreen();
+    expect(screen.queryByText('No data was used for this answer.')).toBeNull();
   });
 
   it('sends a typed question and explains a rate limit', async () => {

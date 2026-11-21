@@ -1,5 +1,11 @@
 # Counsel-review addendum — 2026-11-16
 
+> **Superseded on 2026-11-21. Do not send.** `COUNSEL_REVIEW_PACKET.md` was reissued on 2026-11-21 from the code at
+> commit `2b0c7c1` and replaces both the packet pinned below and this addendum; its section 0 lists what changed.
+> In particular the hosting row below is out of date: the Vercel and Neon preference was replaced by the Hostinger
+> server (decision D-016 in `docs/product/DECISION_LOG.md`), and a private preview has run there since 2026-11-18
+> (D-021). The text below is kept unchanged as the record of what was written on 2026-11-16.
+
 Prepared by product/engineering; no legal opinion or sign-off. Read with COUNSEL_REVIEW_PACKET.md at commit c044583f9d1dd063311aff71d296fe62a04f04df. The original packet has not been sent. This addendum prevents stale implementation statements being presented as current facts.
 
 ## Corrections verified against the same build revision

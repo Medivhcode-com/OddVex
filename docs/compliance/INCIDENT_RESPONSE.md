@@ -1,6 +1,6 @@
 # OddVex — Incident Response Plan
 
-Last updated: 2026-11-15 · Status: draft plan. **No production environment or real users exist yet**; this plan becomes operational at M2 and must be exercised (tabletop) before any real-user beta. Legal notification duties are **to be confirmed by counsel** — nothing here states a legal deadline as fact.
+Last updated: 2026-11-21 (status line only) · Status: draft plan. **A private preview has run in production mode since 2026-11-18** (`docs/product/DECISION_LOG.md`, D-021); its API is open to the internet and accepts sign-ups, so it may hold real people's email addresses, password hashes and IP addresses. Whether anyone outside the team has signed up cannot be seen from the repository. This plan has not been exercised; it must be (tabletop) before any real-user beta, and it already applies to the preview. Legal notification duties are **to be confirmed by counsel** — nothing here states a legal deadline as fact.
 
 ## 1. Scope
 
@@ -153,3 +153,5 @@ Pre-work for M2: counsel to supply a breach-notification matrix (PR-10) so timel
 ## 9. M1 applicability
 
 During M1 (no production, no users): treat any committed secret, any real personal data appearing in fixtures, and any use of real brand/player/sportsbook names as SEV4 incidents — fix, record, and add a preventive check.
+
+Note of 2026-11-21: the paragraph above was written before the private preview existed. The preview runs in production mode with an open sign-up API (see the status line at the top), so the full plan, including the data-breach paths, applies to it now; the SEV4 rule above still applies to the repository.

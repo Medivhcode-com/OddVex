@@ -90,7 +90,8 @@ export async function parseError(response: Response, requestId?: string): Promis
 
 /**
  * Server-side API call. Data is live by nature, so nothing is cached here.
- * Pass `auth: true` to attach the session token.
+ * Pass `auth: true` to attach the session token. `timeoutMs` replaces the usual wait
+ * (`API_TIMEOUT_MS`) for a call known to take longer, such as a whole-account export.
  *
  * Every call forwards the visitor's address (`X-Forwarded-For`) and a request id
  * (`X-Request-ID`, set once per request by `src/proxy.ts`), so the API can rate-limit per
@@ -108,7 +109,7 @@ export async function parseError(response: Response, requestId?: string): Promis
  */
 export async function api<T>(
   path: string,
-  options: { query?: Query; method?: string; body?: unknown; auth?: boolean } = {},
+  options: { query?: Query; method?: string; body?: unknown; auth?: boolean; timeoutMs?: number } = {},
 ): Promise<T> {
   const meta = upstreamMetaHeaders(await incomingHeaders());
   const headers: Record<string, string> = { accept: "application/json", ...meta.headers };
@@ -126,7 +127,7 @@ export async function api<T>(
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: "no-store",
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      signal: AbortSignal.timeout(options.timeoutMs ?? API_TIMEOUT_MS),
     });
   } catch {
     throw new ApiUnavailableError(meta.requestId);

@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { ConsensusRow, OddsRow, lineText } from '@/components/odds-row';
 import { columns, moneyline, now, openBook, outcome, price, staleBook, suspendedBook, unavailableBook } from '@/test/fixtures';
@@ -17,6 +18,17 @@ describe('OddsRow', () => {
     expect(screen.getByText('42s ago')).toBeOnTheScreen();
     expect(screen.queryByText(/Stale/)).toBeNull();
     expect(screen.getByText('4.2%')).toBeOnTheScreen();
+  });
+
+  it('marks a book stale when the API says so, even with no update time', async () => {
+    await render(<OddsRow book={{ ...staleBook, last_updated: null }} market="moneyline" columns={columns} hold={0.0444} now={now} />);
+
+    expect(screen.getByText('Stale')).toBeOnTheScreen();
+    expect(screen.queryByText(/ago/)).toBeNull();
+    // The word comes with the diamond, as on a stale book that has an age.
+    const marks = screen.getByText('Stale').parent?.children ?? [];
+    const diamond = marks.find((child) => typeof child !== 'string' && StyleSheet.flatten(child.props.style)?.transform);
+    expect(diamond && typeof diamond !== 'string' && StyleSheet.flatten(diamond.props.style).transform).toEqual([{ rotate: '45deg' }]);
   });
 
   it('spells out a stale book and gives it no "Best" label', async () => {

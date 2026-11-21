@@ -41,13 +41,35 @@ export function parlayPayload(legs: readonly Leg[], stake: string): ParlayReques
   };
 }
 
-/** What the API returned for the parlay. When legs are correlated it sends no combined probability, and this says so. */
+type ProbabilityStatus = ParlayResult['probability_status'];
+
+/**
+ * The sentence shown for each reason the API gives (`probability_status`) for sending no combined probability.
+ * `needs_leg_probabilities` has none: this builder never sends a leg probability, so that is the normal answer
+ * for legs from different games, and there is nothing for the person to do about it. The API's
+ * `probability_note` is never shown: it is written for developers and can read as a request for input this
+ * form does not take. Each sentence is the web's sentence for the same status, word for word
+ * (`PROBABILITY_NOTICE` in `apps/web/src/components/app/parlay-builder.tsx`).
+ */
+export const PARLAY_PROBABILITY_SENTENCES: Record<Exclude<ProbabilityStatus, 'computed' | 'needs_leg_probabilities'>, string> = {
+  same_event_legs: 'Two or more legs are from the same game, so their results are linked. OddVex gives no combined chance for these legs.',
+  unverified_legs:
+    "Custom legs can't be checked for independence, because OddVex does not know which game they are from. No combined chance is given.",
+  no_active_legs: 'Every leg pushed or was voided, so no legs are left to combine.',
+};
+
+/**
+ * What the API returned for the parlay: combined odds, payout and break-even. The combined probability is shown
+ * only when the API computed one (`probability_status` is `computed`), marked as assuming the legs are
+ * independent. Otherwise there is no probability stat, and the reason gets a plain sentence where it helps.
+ */
 export function ParlayResultView({ result }: { result: ParlayResult }) {
   const { format } = useOddsFormat();
   const combined = result.combined_price ? formatPrice(result.combined_price, format) : result.combined_decimal.toFixed(2);
   const hasPayout = result.payout !== null && result.payout !== undefined;
   const hasProfit = result.profit !== null && result.profit !== undefined;
-  const hasProbability = result.combined_probability !== null && result.combined_probability !== undefined;
+  const status = result.probability_status;
+  const probability = status === 'computed' && typeof result.combined_probability === 'number' ? result.combined_probability : null;
   return (
     <View accessibilityLiveRegion="polite" style={styles.block}>
       <StatGrid>
@@ -62,12 +84,15 @@ export function ParlayResultView({ result }: { result: ParlayResult }) {
           value={result.combined_price ? formatPercent(result.combined_price.implied_probability, 2) : 'n/a'}
           hint="How often it must win"
         />
-        <Stat label="Combined probability" value={hasProbability ? formatPercent(result.combined_probability, 2) : 'Not shown'} />
+        {probability !== null ? (
+          <Stat label="Combined probability" value={formatPercent(probability, 2)} hint="Assumes the legs are independent" />
+        ) : null}
       </StatGrid>
-      {result.correlation_warnings.length ? (
-        <Notice title="These legs are correlated" text={result.correlation_warnings.join('\n')} />
+      {status === 'same_event_legs' ? (
+        <Notice title="These legs are correlated" text={PARLAY_PROBABILITY_SENTENCES.same_event_legs} />
+      ) : status === 'unverified_legs' || status === 'no_active_legs' ? (
+        <Notice tone="neutral" text={PARLAY_PROBABILITY_SENTENCES[status]} />
       ) : null}
-      <Notice tone="neutral" text={result.probability_note} />
       <Working steps={result.steps} />
     </View>
   );

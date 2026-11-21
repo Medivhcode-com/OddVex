@@ -4,16 +4,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
 import { Button, Field, Notice, SelectField } from "@/components/ui/primitives";
-import { clientApi, ClientApiError } from "@/lib/client-api";
+import { betSaveError, ClientRequestIds, stakeProblem } from "@/lib/bet-request";
+import { clientApi } from "@/lib/client-api";
 import { formatAmerican } from "@/lib/format";
+import { quickBetRequest, type QuickBetPick } from "@/lib/quick-bet";
 
-export type QuickBetOption = {
-  outcomeKey: string;
-  label: string;
-  line: number | null;
-  american: number;
-  sportsbook: string;
-};
+export type QuickBetOption = QuickBetPick;
 
 /**
  * Logs a bet on this game at the best current price, with a structured selection
@@ -26,49 +22,35 @@ export function QuickBet({ eventId, eventLabel, league, market, options }: { eve
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // One client_request_id per filled-in form (side and stake), so a retry after a lost answer is not saved twice.
+  const [requestIds] = useState(() => new ClientRequestIds());
   const option = options.find((o) => o.outcomeKey === choice);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaved(false);
-    const amount = Number(stake);
     if (!option) return setError("Pick a side.");
-    if (!Number.isFinite(amount) || amount <= 0) return setError("Enter a stake greater than zero.");
+    const stakeError = stakeProblem(stake);
+    if (stakeError) return setError(stakeError);
     setBusy(true);
     setError(null);
     try {
-      await clientApi("/v1/bets", {
-        body: {
-          bet_type: "straight",
-          stake: amount,
-          sportsbook: option.sportsbook,
-          legs: [
-            {
-              selection: option.label,
-              market,
-              league,
-              event_id: eventId,
-              event_label: eventLabel,
-              outcome_key: option.outcomeKey,
-              line: option.line,
-              odds: String(Math.round(option.american)),
-              odds_format: "american",
-            },
-          ],
-        },
-      });
+      // 201 for a new bet, 200 when the API had already stored this one: both mean saved.
+      // The id follows the side and stake only: an auto-refresh can move the price before a resend.
+      await clientApi("/v1/bets", { body: quickBetRequest(requestIds, { eventId, eventLabel, league, market }, option, stake) });
+      requestIds.saved();
       setStake("");
       setSaved(true);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof ClientApiError ? caught.message : "The bet was not saved. Try again.");
+      setError(betSaveError(caught));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 p-4 sm:p-5" noValidate>
+    <form onSubmit={submit} onChange={() => requestIds.edited()} className="space-y-3 p-4 sm:p-5" noValidate>
       <div className="flex flex-wrap items-end gap-3">
         <SelectField id="quick-bet-side" label="Side, at the best current price" className="min-w-0 flex-1" value={choice} onChange={(e) => setChoice(e.target.value)}>
           {options.map((o) => (

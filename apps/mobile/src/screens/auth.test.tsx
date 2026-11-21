@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { router } from 'expo-router';
+import { Linking } from 'react-native';
 
 import { ApiError, ApiUnavailableError } from '@/api/client';
 import { SUSPENDED_BODY, SUSPENDED_TITLE } from '@/components/account-forms';
@@ -107,9 +108,24 @@ describe('LoginScreen account states', () => {
 
     expect(await screen.findByText(SUSPENDED_TITLE)).toBeOnTheScreen();
     expect(screen.getByText(SUSPENDED_BODY)).toBeOnTheScreen();
-    expect(SUSPENDED_BODY).toMatch(/To ask for a copy of your data, or to have it deleted, contact OddVex support/);
+    expect(SUSPENDED_BODY).toMatch(/To ask for a copy of your data, or to have it deleted, write to support@oddvex\.com/);
+    expect(SUSPENDED_BODY).toMatch(/from the email address on the account/);
     expect(SUSPENDED_BODY).toMatch(/signed out on this device/);
     expect(router.back).not.toHaveBeenCalled();
+  });
+
+  it('offers to write to the support address from the notice', async () => {
+    const openURL = jest.mocked(Linking.openURL);
+    openURL.mockReset().mockResolvedValue(undefined);
+    await render(
+      <WithSession value={fakeSession({ user: null, suspended: true })}>
+        <LoginScreen />
+      </WithSession>,
+    );
+
+    await fireEvent.press(screen.getByRole('link', { name: 'Email support@oddvex.com' }));
+
+    expect(openURL).toHaveBeenCalledWith('mailto:support@oddvex.com');
   });
 
   it('shows the same message after a 401 elsewhere ended the session', async () => {

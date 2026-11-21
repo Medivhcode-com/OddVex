@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache";
 import type { Schemas } from "@oddvex/types";
 import { api, ApiError, ApiUnavailableError } from "@/lib/api";
+import { tryAgainText } from "@/lib/retry";
 import { currentUser } from "@/lib/session";
 
 /**
- * Admin changes. They run on the server only: the browser bridge (`/api/ov`) does not expose
+ * Admin changes, and the admin export of an account's data. They run on the server only: the browser bridge (`/api/ov`) does not expose
  * `/v1/admin`. The API checks the role on every call and writes the audit entry; the check
  * here just avoids a pointless round trip. Each action refreshes the views it changed.
  */
@@ -14,17 +15,32 @@ export type AdminActionState = { ok?: string; error?: string };
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** The API's own sentences for refusing to export or delete an administrator's account or the caller's own. */
+const DATA_RIGHTS_CONFLICTS = new Set(["cannot_export_self", "cannot_export_admin", "cannot_delete_self", "cannot_delete_admin"]);
+
 function describe(error: unknown, fallback: string): string {
   if (error instanceof ApiUnavailableError) return "OddVex can't reach its data service right now. Nothing was changed.";
   if (error instanceof ApiError) {
     if (error.status === 401 || error.status === 403) return "Your session no longer has admin access. Nothing was changed.";
     if (error.code === "cannot_suspend_self") return "You can't suspend your own account.";
     if (error.code === "cannot_suspend_admin") return "An administrator can't be suspended.";
+    if (DATA_RIGHTS_CONFLICTS.has(error.code)) return error.message || fallback;
+    if (error.code === "confirm_email_mismatch") return "The address you typed is not this account's email address. Nothing was deleted.";
+    if (error.code === "reason_contains_email") {
+      return "Leave the email address out of the reason: the reason stays in the audit log after the account is gone. Use the reference of the request instead.";
+    }
     if (error.status === 404) return "That item no longer exists. Nothing was changed.";
     if (error.status === 422) return "The API rejected the request. Check the fields and try again.";
     return error.message || fallback;
   }
   return fallback;
+}
+
+/** Null when the reason can be sent; the API stores it in the audit log. */
+function reasonProblem(reason: string, label = "reason"): string | null {
+  if (reason.length < 3) return `Enter a ${label} of at least 3 characters. It is saved in the audit log.`;
+  if (reason.length > 500) return `Keep the ${label} to 500 characters or fewer.`;
+  return null;
 }
 
 async function isAdmin(): Promise<boolean> {
@@ -43,10 +59,20 @@ export async function adminUserAction(_: AdminActionState, form: FormData): Prom
   try {
     if (intent === "suspend") {
       const reason = String(form.get("reason") ?? "").trim();
-      if (reason.length < 3) return { error: "Enter a reason of at least 3 characters. It is saved in the audit log." };
-      if (reason.length > 500) return { error: "Keep the reason to 500 characters or fewer." };
+      const problem = reasonProblem(reason);
+      if (problem) return { error: problem };
       await api<Schemas["AdminUserOut"]>(`${base}/suspend`, { method: "POST", auth: true, body: { reason } });
       result = { ok: "Account suspended. Its sessions stop working on their next request. The data is kept." };
+    } else if (intent === "delete") {
+      const reason = String(form.get("reason") ?? "").trim();
+      const confirmEmail = String(form.get("confirm_email") ?? "").trim();
+      const problem = reasonProblem(reason);
+      if (problem) return { error: problem };
+      if (!confirmEmail) return { error: "Type the account's email address to confirm. Nothing was deleted." };
+      await api<void>(`${base}/delete`, { method: "POST", auth: true, body: { reason, confirm_email: confirmEmail } });
+      result = {
+        ok: "Account deleted. Its bets, watchlist, alerts, notifications, sync connections and community data were deleted with it. This cannot be undone. The audit log keeps the account's entries and your reason, without the email address.",
+      };
     } else if (intent === "unsuspend") {
       await api<Schemas["AdminUserOut"]>(`${base}/unsuspend`, { method: "POST", auth: true });
       result = { ok: "Account unsuspended. The person can log in again." };
@@ -65,6 +91,62 @@ export async function adminUserAction(_: AdminActionState, form: FormData): Prom
   revalidatePath("/app/admin/audit");
   revalidatePath("/app/admin");
   return result;
+}
+
+export type AdminExportResult = { document?: string; filename?: string; error?: string };
+
+/**
+ * An account's data for its owner, who cannot sign in (suspended, closed, lost password). The
+ * API returns the same document as the owner's own export and records the reason in the audit
+ * log. The document comes back to the browser as text and is saved there as a file; nothing
+ * is kept on the web server.
+ */
+export async function adminExportUserAction(userId: string, rawReason: string): Promise<AdminExportResult> {
+  const reason = String(rawReason ?? "").trim();
+  if (!ID.test(String(userId ?? ""))) return { error: "Unknown account." };
+  const problem = reasonProblem(reason);
+  if (problem) return { error: problem };
+  if (!(await isAdmin())) return { error: NOT_ADMIN.error };
+  let document: unknown;
+  try {
+    // A whole account can take longer to stream than a page read.
+    document = await api<unknown>(`/v1/admin/users/${encodeURIComponent(userId)}/export`, { method: "POST", auth: true, body: { reason }, timeoutMs: 60_000 });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 429) return { error: `Another export is still running. ${tryAgainText(error.details)}` };
+    return { error: describe(error, "The export failed. Nothing was changed.") };
+  }
+  revalidatePath("/app/admin/audit");
+  return { document: JSON.stringify(document, null, 2), filename: `oddvex-export-${userId}-${new Date().toISOString().slice(0, 10)}.json` };
+}
+
+const TARGET_TYPES = new Set(["pick", "comment", "profile"]);
+
+/** Makes hidden or removed community content visible again, and closes the open reports on it. */
+export async function adminRestoreAction(_: AdminActionState, form: FormData): Promise<AdminActionState> {
+  const targetType = String(form.get("target_type") ?? "");
+  const targetId = String(form.get("target_id") ?? "");
+  const note = String(form.get("note") ?? "").trim();
+  if (!TARGET_TYPES.has(targetType) || !ID.test(targetId)) return { error: "Unknown content." };
+  const problem = reasonProblem(note, "note");
+  if (problem) return { error: problem };
+  if (!(await isAdmin())) return NOT_ADMIN;
+  let restored: Schemas["RestoredContentOut"];
+  try {
+    restored = await api<Schemas["RestoredContentOut"]>("/v1/admin/community/restore", { method: "POST", auth: true, body: { target_type: targetType, target_id: targetId, note } });
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "content_not_moderated") return { error: "This content is visible already. Nothing was changed." };
+    return { error: describe(error, "The content was not restored.") };
+  }
+  revalidatePath("/app/admin/community");
+  revalidatePath("/app/admin/audit");
+  revalidatePath("/app/admin");
+  revalidatePath("/app/community", "layout");
+  const closed = restored.reports_closed;
+  return {
+    ok:
+      "Content restored. It is visible again to everyone who could see it before." +
+      (closed > 0 ? ` ${closed} open ${closed === 1 ? "report on it was" : "reports on it were"} closed.` : ""),
+  };
 }
 
 export async function adminFlagAction(_: AdminActionState, form: FormData): Promise<AdminActionState> {
@@ -96,8 +178,8 @@ export async function adminReportAction(_: AdminActionState, form: FormData): Pr
   const note = String(form.get("note") ?? "").trim();
   if (!ID.test(reportId)) return { error: "Unknown report." };
   if (!(action in REPORT_ACTIONS)) return { error: "Unknown action." };
-  if (note.length < 3) return { error: "Enter a note of at least 3 characters. It is saved in the audit log." };
-  if (note.length > 500) return { error: "Keep the note to 500 characters or fewer." };
+  const problem = reasonProblem(note, "note");
+  if (problem) return { error: problem };
   if (!(await isAdmin())) return NOT_ADMIN;
   try {
     await api<Schemas["AdminReportOut"]>(`/v1/admin/community/reports/${encodeURIComponent(reportId)}/resolve`, { method: "POST", auth: true, body: { action, note } });
