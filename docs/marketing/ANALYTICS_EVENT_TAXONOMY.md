@@ -1,6 +1,6 @@
 # OddVex — Analytics Event Taxonomy
 
-Last updated: 2026-11-15 · Status: **specification / proposal.** No analytics vendor is selected and no analytics SDK is assumed to be active in M1. Implementation is planned for M2 (PLAT-04); vendor choice and any paid plan require Founder approval. No baselines or targets exist — none are stated here.
+Last updated: 2026-11-21 · Status: **specification / proposal.** No analytics vendor is selected and no analytics SDK is installed in the web or mobile app (code at commit `2b0c7c1`): **none of the events below is emitted today.** Implementation is planned for M2 (PLAT-04); vendor choice and any paid plan require Founder approval. No baselines or targets exist — none are stated here.
 
 ## 1. Principles
 
@@ -175,7 +175,7 @@ No sportsbook name for real vendors unless counsel approves (could reveal where 
 | `assistant_response_delivered` | Answer returned (server) | `engine` (rules_v0, llm), `intent` (odds_lookup, best_line, prop_stats, calculator, tracker_summary, concept_explainer, unsupported, refusal, rg_support), `tool_count`, `is_grounded`, `has_stale_source`, `latency_bucket` | M1 |
 | `assistant_unsupported` | No intent matched (server) | `nearest_intent` (enum or `none`) | M1 |
 | `assistant_refusal` | Guarantee/pick/under-age refusal (server) | `refusal_type` | M1 |
-| `assistant_rg_response_shown` | Distress pathway triggered (server) — **emitted without `user_id`** | — | M1 |
+| `assistant_rg_response_shown` | Crisis, under-21 or distress reply given (server) — **without `user_id`** | `case` (crisis, underage, distress) | M1 (proposed). **Not emitted.** What exists instead is a server log record, `assistant_support_reply`, written for each support reply with `case` and `signed_in` only (no message text, no user id; `services/api/src/oddvex_api/assistant/engine.py`) |
 | `assistant_link_clicked` | Deep link in answer clicked | `destination` | M1 |
 | `assistant_feedback_submitted` | Thumbs/report | `rating` (up, down), `reason` (enum) | M2 |
 
@@ -252,7 +252,7 @@ Until real data exists (`data_mode = synthetic`), WRU is tracked only as an inst
 | Guardrail | Rule |
 |---|---|
 | Betting volume | No KPI, experiment success metric, or notification strategy may target stake size, bet count or frequency |
-| RG signals | `rg_resource_clicked` and `assistant_rg_response_shown` are monitored in aggregate only; never used for targeting or marketing |
+| RG signals | `rg_resource_clicked` and `assistant_rg_response_shown` (neither is emitted today; the server log record `assistant_support_reply` is the only signal that exists) are monitored in aggregate only; never used for targeting or marketing |
 | Experiments | A/B tests may not vary RG messaging visibility downward, nor test urgency/pressure tactics |
 | Deletion / cancellation | Completion rates are tracked to ensure flows work, never to add friction |
 

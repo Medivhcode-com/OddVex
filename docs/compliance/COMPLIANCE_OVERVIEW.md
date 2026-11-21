@@ -1,6 +1,6 @@
 # OddVex — Compliance Overview (Issue-Spotting Checklist)
 
-Last updated: 2026-11-15
+Last updated: 2026-11-21 (product facts in section 1 and the current positions checked against the code at commit `2b0c7c1`)
 
 > **NOT LEGAL ADVICE.** This document is an internal issue-spotting checklist written by product staff, not lawyers. It lists topics that appear relevant and questions to put to counsel. It may be incomplete, out of date, or wrong. **Nothing here may be relied on as a statement of what the law requires. Qualified counsel (US gaming, privacy, consumer-protection/advertising, and IP) must review before any launch, beta with real users, marketing, or monetisation.** Laws and platform policies in this area change frequently and vary by state.
 
@@ -17,11 +17,13 @@ Last updated: 2026-11-15
 |---|---|
 | OddVex does not accept, place, route or settle wagers and holds no user funds | Core boundary; any feature that blurs this needs prior legal review |
 | Information/analytics: odds comparison, prop research, calculators, tracker, assistant | — |
-| US market, adults 21+ by policy | Self-attestation in M1 |
-| Current build uses synthetic data and fictional teams/players/sportsbooks | No licensed data, no real brands |
+| US market, adults 21+ by policy | Self-attestation at sign-up; the time is stored, nothing else |
+| Current build uses synthetic data and fictional teams/players/sportsbooks | No licensed data, no real brands. An internal-only replay with real NFL names exists and refuses to run in production mode (D-015) |
 | Sportsbook sync is a mock; real sync only via authorized third-party vendors (planned M3) | No credential storage by OddVex |
-| No affiliate links, no ads, no subscriptions, no UGC today | All planned later; each changes the analysis |
-| Assistant is rule-based today; LLM-backed planned (M4) | — |
+| No affiliate links, no ads, no subscriptions today | All planned later; each changes the analysis |
+| Community (user-generated content) is built and switched off | Profiles, picks, comments, follows, blocks, reports and moderation behind the `community` switch, off by default and on the preview. The screens are in the web and mobile code and appear when the switch is turned on |
+| A private preview is running | Since 2026-11-18 on a Hostinger server, in production mode on synthetic data. The web preview is behind a password; the API at `api-preview.oddvex.com` is open and accepts sign-ups from anyone (D-021) |
+| Assistant is rule-based today; LLM-backed planned (M4) | Fixed rules for crisis, under-21, distress and certainty messages, with known misses (RESPONSIBLE_GAMBLING section 5) |
 
 **Triggers for fresh legal review:** affiliate/referral revenue; outbound sportsbook links; real brand names/logos; picks or projections; community/UGC; paid subscriptions; push/email marketing; any geo-targeting; non-US users; identity or location data collection.
 
@@ -51,7 +53,7 @@ Background (general understanding, to be confirmed by counsel): since the US Sup
 | # | Issue | Current OddVex position | Question for counsel | Status |
 |---|---|---|---|---|
 | AD-01 | "Risk-free", "free bet", "guaranteed", "can't lose" language | **Banned in all OddVex copy** (see `docs/marketing/BRAND_VOICE.md`). We understand regulators in several states and industry codes have restricted "risk-free"-type claims | Confirm banned-terms list; which rules apply to a non-operator publisher/affiliate | Open |
-| AD-02 | Responsible-gaming messaging and helpline in ads | RG footer with 21+ and 1-800-GAMBLER on all surfaces | State-specific helpline or wording requirements for ads/affiliates? Required prominence? | Open |
+| AD-02 | Responsible-gaming messaging and helpline in ads | RG short line with 21+ and the National Problem Gambling Helpline, 1-800-MY-RESET (1-800-697-3738), on the web app, marketing site and mobile Settings, tracker and sync screens (verified 2026-11-19; 1-800-GAMBLER is the New Jersey council's line, not the national one) | State-specific helpline or wording requirements for ads/affiliates? Required prominence? | Open |
 | AD-03 | Age targeting: 21+ | No marketing aimed at minors; no youth-appealing creative; no college-campus targeting | Audience-composition thresholds or placement restrictions that apply to us? | Open |
 | AD-04 | Material-connection disclosures (FTC Endorsement Guides) | No affiliates/influencers today | Disclosure wording for affiliate links, sponsored placement, influencer content | Open |
 | AD-05 | Ranking/"best" claims | "Best line" = objectively best displayed price; must not be influenced by commercial relationships without disclosure | Confirm labelling if any paid placement ever exists | Open |
@@ -74,7 +76,7 @@ Platform policies change; **re-read the current official text before submission.
 | ST-05 | In-app account deletion | Both stores require apps that support account creation to offer account deletion (Apple in-app; Google also expects a web deletion path) — verify current wording | AUTH-06 + MOB-02 before submission | Open |
 | ST-06 | Privacy disclosures | Apple privacy "nutrition labels" and Google Data safety form must match actual data practices and SDKs | Derive from PRIVACY_AND_DATA inventory | Open |
 | ST-07 | Subscriptions / in-app purchase | Digital subscriptions sold in-app generally must use store billing, subject to evolving exceptions; subscription disclosure requirements apply | Counsel to confirm current rules at M4 | Open |
-| ST-08 | User-generated content (M5) | Stores expect filtering, reporting, blocking and timely action on objectionable content | Build COMM-05/06 before enabling UGC in apps | Open |
+| ST-08 | User-generated content (M5) | Stores expect filtering, reporting, blocking and timely action on objectionable content. The community screens, with report and block, are compiled into the mobile app and appear when the server switch is on; moderation is web-only | Decide with counsel whether a binary with these screens switched off must declare user content (STORE_SUBMISSION_PREP section 3) | Open |
 | ST-09 | AI features | Stores have requirements around AI-generated content/reporting and accurate metadata; check current policy | Review at M4 | Open |
 | ST-10 | Demo account and review notes | Reviewers need working credentials and an explanation of data sources | Prepare at M6 | Open |
 | ST-11 | Metadata accuracy | No misleading claims, no guaranteed-win language, screenshots reflect real app | BRAND_VOICE check | Open |
@@ -86,9 +88,9 @@ Platform policies change; **re-read the current official text before submission.
 
 | # | Issue | Current position | Question for counsel | Status |
 |---|---|---|---|---|
-| AG-01 | Method | 21+ self-attestation checkbox at signup, recorded with timestamp and terms version (AUTH-02) | Is attestation adequate for an information service? For an affiliate? Is a neutral date-of-birth screen expected? | Open |
+| AG-01 | Method | 21+ self-attestation checkbox at signup, recorded with a timestamp only; no terms version is stored (AUTH-02) | Is attestation adequate for an information service? For an affiliate? Is a neutral date-of-birth screen expected? | Open |
 | AG-02 | Marketing-site access | Public pages are not gated | Is an age interstitial advisable? | Open |
-| AG-03 | Handling suspected minors | Policy: close account and delete data on credible indication | Confirm process and any reporting duties | Open |
+| AG-03 | Handling suspected minors | Policy: close account and delete data on credible indication. An administrator can delete an account; no written procedure exists. The assistant gives no betting information to someone who says they are under 21 but records nothing | Confirm process and any reporting duties | Open |
 | AG-04 | Stronger verification | Not planned; would require new personal data (G-13) | When (if ever) would ID/age verification be required? | Open |
 | AG-05 | State age-verification / app-store age-assurance laws | Several states have enacted or proposed laws on age assurance for apps/online services | Applicability to OddVex | Open |
 
@@ -102,11 +104,11 @@ Platform policies change; **re-read the current official text before submission.
 | PR-04 | GDPR / UK GDPR | US-only product, but EU/UK visitors can reach the website | Do we fall in scope? Geo-block, or comply (lawful basis, cookie consent, representatives)? | Open |
 | PR-05 | Children (COPPA) | Service is not directed to children; 21+ only; no knowing collection from under-13s (or any minor) | Confirm "not directed to children" posture; wording in policy | Open |
 | PR-06 | Cookies/trackers and Global Privacy Control | No ad trackers planned in M1 | Consent banner needs; GPC handling | Open |
-| PR-07 | Sub-processors and DPAs | None engaged yet (no paid vendors) | DPA requirements for hosting, analytics, email, LLM, sync vendors | Open |
+| PR-07 | Sub-processors and DPAs | None engaged by contract. Hostinger hosts the preview server and its data, and the support mailbox | DPA requirements for hosting, analytics, email, LLM, sync vendors | Open |
 | PR-08 | LLM provider data use (M4) | User prompts could include personal/betting data | Contract terms: no training on our data, retention limits, location | Open |
 | PR-09 | Sync vendor data flows (M3) | Vendor handles sportsbook authentication | Controller/processor roles; consent; vendor security review | Open |
 | PR-10 | Data-breach notification | State breach laws vary | Notification matrix for INCIDENT_RESPONSE | Open |
-| PR-11 | Data subject request handling | Deletion/export self-serve planned M2 | Verification standards; response timelines | Open |
+| PR-11 | Data subject request handling | Deletion and export are self-serve (export on web only). Staff can export or delete for an owner who cannot sign in; no identity-check procedure is written | Verification standards; response timelines | Open |
 | PR-12 | Financial-privacy regimes (e.g. GLBA) | We are not a financial institution, but hold betting-transaction records | Confirm not applicable | Open |
 
 Details: [PRIVACY_AND_DATA.md](./PRIVACY_AND_DATA.md).
@@ -143,11 +145,11 @@ Details: [PRIVACY_AND_DATA.md](./PRIVACY_AND_DATA.md).
 |---|---|---|---|---|
 | AI-C1 | Disclosure that users are interacting with an automated system | Always disclosed in UI (AI-05). We understand some states have bot/AI-disclosure laws | Required wording/prominence; state-specific rules | Open |
 | AI-C2 | Accuracy / deception (FTC Act §5 and state UDAP laws) | Grounding contract: numbers only from verified tools; no invented numbers; "no data" responses | Disclaimers; liability for errors | Open |
-| AI-C3 | Advice characterisation | Assistant gives information, not betting or financial advice; refuses guarantees/picks | Is disclaimer sufficient? | Open |
+| AI-C3 | Advice characterisation | Assistant gives information, not betting or financial advice; a request for a certain winner gets a fixed refusal | Is disclaimer sufficient? | Open |
 | AI-C4 | Marketing claims about "AI" | M1 assistant is rule-based; marketing must not overstate capability | Substantiation for "AI" claims | Open |
 | AI-C5 | LLM provider terms (M4) | Usage policies may restrict gambling-related use cases | Check provider acceptable-use policy before selection | Open |
-| AI-C6 | Vulnerable users | Distress signals trigger RG resources (see RESPONSIBLE_GAMBLING) | Any duty-of-care expectations | Open |
-| AI-C7 | Retention of conversations | Not persisted in M1 (verify with engineering) | Retention/notice requirements when persisted | Open |
+| AI-C6 | Vulnerable users | Fixed rules route crisis, under-21 and distress messages to support replies with no betting data, in that order; every other answer ends with the helpline and 988. The rules miss some wordings (listed in the tests as `KNOWN_MISSES`). See RESPONSIBLE_GAMBLING section 5 | Any duty-of-care expectations | Open |
+| AI-C7 | Retention of conversations | Not stored. Each support reply writes one log record with the case and whether the person was signed in, no text | Retention/notice requirements when persisted | Open |
 | AI-C8 | Emerging state AI laws | Rapidly changing | Monitoring plan | Open |
 
 ## 10. User-generated content and moderation (M5)

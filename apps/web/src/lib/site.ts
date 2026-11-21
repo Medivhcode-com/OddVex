@@ -8,6 +8,13 @@ export const SITE = {
 } as const;
 
 /**
+ * The address for questions and data-rights requests (`NEXT_PUBLIC_CONTACT_EMAIL`, read when the
+ * web app is built). Empty until one is set: pages then point to the contact page, which says
+ * an address is being set up.
+ */
+export const CONTACT_EMAIL = (process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? "").trim();
+
+/**
  * Where to get help with problem gambling. The one place these facts are written: every page,
  * component, link and sentence that gives the helpline reads them from here.
  *

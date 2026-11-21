@@ -1,5 +1,15 @@
 import { expect, test } from "./fixtures";
-import { adminSignIn, API, logIn, openMoreOnPhone, PASSWORD, setFlag, sidewaysOverflow, signUp } from "./helpers";
+import type { APIRequestContext } from "@playwright/test";
+import { ADMIN_EMAIL, adminSignIn, API, logIn, openMoreOnPhone, PASSWORD, setFlag, sidewaysOverflow, signUp } from "./helpers";
+
+/** A fresh account made through the API, with a token for direct API calls. */
+async function member(request: APIRequestContext, tag: string) {
+  const email = `e2e-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@oddvex.test`;
+  const response = await request.post(`${API}/v1/auth/register`, { data: { email, password: PASSWORD, display_name: `Member ${tag}`, age_confirmed: true } });
+  expect(response.ok(), `register ${tag}`).toBe(true);
+  const token = ((await response.json()) as { access_token: string }).access_token;
+  return { email, headers: { authorization: `Bearer ${token}` } };
+}
 
 const ADMIN_PATHS = ["/app/admin", "/app/admin/users", "/app/admin/flags", "/app/admin/audit", "/app/admin/outbox", "/app/admin/users?q=a", "/app/admin/anything-else"];
 
@@ -91,7 +101,10 @@ test.describe("admin console", () => {
       await member.goto("/app/tracker");
       await expect(member).toHaveURL(/\/login\?suspended=1$/);
       await expect(member.getByText("This account is suspended")).toBeVisible();
-      await expect(member.getByRole("main").getByRole("link", { name: "Contact us" })).toHaveAttribute("href", "/contact");
+      // It says how to ask for a copy of the data or for deletion: the contact address, or the contact page while none is set.
+      const ended = member.getByRole("main").getByRole("status").filter({ hasText: "This account is suspended" });
+      await expect(ended).toContainText("To ask for a copy of your data, or for the account and its data to be deleted");
+      await expect(ended.getByRole("link", { name: /^(contact page|\S+@\S+)$/ })).toHaveAttribute("href", /^(\/contact|mailto:\S+@\S+)$/);
       expect((await context.cookies()).find((cookie) => cookie.name === "ov_session")).toBeUndefined();
       await member.goto("/app/tracker");
       await expect(member.getByText("Log in to track your bets")).toBeVisible();
@@ -103,7 +116,7 @@ test.describe("admin console", () => {
       const refused = member.getByRole("main").getByRole("alert");
       await expect(refused).toContainText("This account is suspended");
       await expect(refused).toContainText("ask for a copy of your data");
-      await expect(refused.getByRole("link", { name: "Contact us" })).toHaveAttribute("href", "/contact");
+      await expect(refused.getByRole("link", { name: /^(contact page|\S+@\S+)$/ })).toHaveAttribute("href", /^(\/contact|mailto:\S+@\S+)$/);
       await expect(member).toHaveURL(/\/login$/);
 
       // The audit tab lists the suspension with its reason, and no email address.
@@ -242,4 +255,174 @@ test.describe("admin console", () => {
       await context.close();
     }
   });
+
+  test("an admin exports a member's data with a reason and deletes the account behind a typed confirmation", async ({ page, request }) => {
+    const owner = await member(request, "datarights");
+    await adminSignIn(page, `/app/admin/users?q=${encodeURIComponent(owner.email)}`);
+    const accounts = page.getByRole("region", { name: "Accounts", exact: true });
+    const row = accounts.getByRole("listitem").filter({ hasText: owner.email });
+    await expect(row).toHaveCount(1);
+
+    // Export: a reason is required, must not name the account, and the API's document is downloaded.
+    await row.getByRole("button", { name: /^Export data/ }).click();
+    const exportForm = row.getByRole("form", { name: /^Export the data of/ });
+    await exportForm.getByLabel("Reason").fill("ab");
+    await exportForm.getByRole("button", { name: "Download export" }).click();
+    await expect(exportForm.getByText("Enter a reason of at least 3 characters", { exact: false })).toBeVisible();
+    await exportForm.getByLabel("Reason").fill(`Request from ${owner.email}`);
+    await exportForm.getByRole("button", { name: "Download export" }).click();
+    await expect(exportForm.getByText("Leave the email address out of the reason", { exact: false })).toBeVisible();
+    await exportForm.getByLabel("Reason").fill("Owner request REF-E2E-1");
+    const [download] = await Promise.all([page.waitForEvent("download"), exportForm.getByRole("button", { name: "Download export" }).click()]);
+    expect(download.suggestedFilename()).toMatch(/^oddvex-export-[A-Za-z0-9_-]+-\d{4}-\d{2}-\d{2}\.json$/);
+    const chunks: Buffer[] = [];
+    for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
+    const text = Buffer.concat(chunks).toString("utf8");
+    const data = JSON.parse(text);
+    expect(data.user.email).toBe(owner.email);
+    expect(Array.isArray(data.bets)).toBe(true);
+    expect(text.toLowerCase()).not.toContain("password_hash");
+    await expect(exportForm.getByText("Export downloaded as", { exact: false })).toBeVisible();
+    await exportForm.getByRole("button", { name: "Close" }).click();
+
+    // The API's 409 is shown for the administrator's own account, for export and for delete.
+    await page.goto(`/app/admin/users?q=${encodeURIComponent(ADMIN_EMAIL)}`);
+    const own = accounts.getByRole("listitem").filter({ hasText: ADMIN_EMAIL });
+    await own.getByRole("button", { name: /^Export data/ }).click();
+    await own.getByLabel("Reason").fill("Checking the refusal REF-E2E-2");
+    await own.getByRole("button", { name: "Download export" }).click();
+    await expect(own.getByText("You cannot export your own account here.", { exact: false })).toBeVisible();
+    await own.getByRole("button", { name: "Cancel" }).click();
+    await own.getByRole("button", { name: /^Delete account/ }).click();
+    await own.getByLabel("Reason").fill("Checking the refusal REF-E2E-2");
+    await own.getByLabel("Type the account's email address to confirm").fill(ADMIN_EMAIL);
+    await own.getByRole("button", { name: "Delete account permanently" }).click();
+    await expect(own.getByText("You cannot delete your own account here.", { exact: false })).toBeVisible();
+    await own.getByRole("button", { name: "Cancel" }).click();
+
+    // Delete: the button stays off until the account's address is typed; then the account is gone.
+    await page.goto(`/app/admin/users?q=${encodeURIComponent(owner.email)}`);
+    await row.getByRole("button", { name: /^Delete account/ }).click();
+    await expect(row.getByText("This cannot be undone.", { exact: false })).toBeVisible();
+    const confirm = row.getByRole("button", { name: "Delete account permanently" });
+    await row.getByLabel("Reason").fill("Owner request REF-E2E-3");
+    await expect(confirm).toBeDisabled();
+    await row.getByLabel("Type the account's email address to confirm").fill("someone-else@oddvex.test");
+    await expect(confirm).toBeDisabled();
+    await row.getByLabel("Type the account's email address to confirm").fill(` ${owner.email.toUpperCase()} `);
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(accounts.getByText("Account deleted.", { exact: false })).toBeVisible();
+    await expect(row).toHaveCount(0);
+    expect((await request.post(`${API}/v1/auth/login`, { data: { email: owner.email, password: PASSWORD } })).status()).toBe(401);
+
+    // Both are in the audit log with their reasons and without the address.
+    await page.goto("/app/admin/audit?action=admin.user_exported");
+    await expect(page.getByRole("table", { name: "Audit log entries" }).getByRole("row").filter({ hasText: "REF-E2E-1" }).first()).toContainText("admin.user_exported");
+    await page.goto("/app/admin/audit?action=admin.user_deleted");
+    await expect(page.getByRole("table", { name: "Audit log entries" }).getByRole("row").filter({ hasText: "REF-E2E-3" }).first()).toContainText("admin.user_deleted");
+    expect(await page.getByRole("main").innerText()).not.toContain(owner.email);
+  });
+
+  test("the moderation queue shows what was reported after an edit or a deletion, flags an author's edit and restores content", async ({ page, request, browser }) => {
+    const token = `${Date.now().toString(36).slice(-6)}${Math.floor(Math.random() * 1296).toString(36).padStart(2, "0")}`;
+    const a = await member(request, "moda");
+    const b = await member(request, "modb");
+    const handleA = `ma_${token}`;
+    const handleB = `mb_${token}`;
+    await setFlag(request, "community", true);
+    try {
+      expect((await request.put(`${API}/v1/community/profile`, { headers: a.headers, data: { handle: handleA, bio: `Original bio ${token}`, is_public: true } })).ok()).toBe(true);
+      expect((await request.put(`${API}/v1/community/profile`, { headers: b.headers, data: { handle: handleB, bio: null, is_public: true } })).ok()).toBe(true);
+
+      // A pick by A, a comment on it by B. A reports the comment, and B deletes it.
+      const upcoming = (await (await request.get(`${API}/v1/events?status=upcoming`)).json()) as { id: string; start_time: string }[];
+      upcoming.sort((x, y) => y.start_time.localeCompare(x.start_time));
+      let pickId = "";
+      for (const event of upcoming) {
+        const created = await request.post(`${API}/v1/community/picks`, { headers: a.headers, data: { event_id: event.id, market: "moneyline", outcome_key: "home", analysis: `Pick text ${token}` } });
+        if (created.ok()) {
+          pickId = (await created.json()).id;
+          break;
+        }
+      }
+      expect(pickId, "a pick on an upcoming game").not.toBe("");
+      const comment = await request.post(`${API}/v1/community/picks/${pickId}/comments`, { headers: b.headers, data: { body: `Comment text ${token}` } });
+      expect(comment.ok()).toBe(true);
+      const commentId = (await comment.json()).id as string;
+      expect((await request.post(`${API}/v1/community/reports`, { headers: a.headers, data: { target_type: "comment", target_id: commentId, reason: "harassment" } })).ok()).toBe(true);
+      expect((await request.delete(`${API}/v1/community/comments/${commentId}`, { headers: b.headers })).status()).toBe(204);
+
+      // B reports A's profile, and A then edits the bio.
+      expect((await request.post(`${API}/v1/community/reports`, { headers: b.headers, data: { target_type: "profile", target_id: handleA, reason: "personal_information" } })).ok()).toBe(true);
+      expect((await request.put(`${API}/v1/community/profile`, { headers: a.headers, data: { handle: handleA, bio: `Edited bio ${token}`, is_public: true } })).ok()).toBe(true);
+
+      await adminSignIn(page, "/app/admin/community");
+      const queue = page.getByRole("region", { name: "Report queue" });
+      const deleted = queue.getByRole("listitem").filter({ hasText: `Comment text ${token}` });
+      await expect(deleted).toHaveCount(1);
+      await expect(deleted.getByText("Target deleted", { exact: true })).toBeVisible();
+      await expect(deleted.getByText("As reported", { exact: true })).toBeVisible();
+      await expect(deleted.locator("blockquote")).toHaveText(`Comment text ${token}`);
+      await expect(deleted.getByText("The item no longer exists.")).toBeVisible();
+
+      const edited = queue.getByRole("listitem").filter({ hasText: `Original bio ${token}` });
+      await expect(edited).toHaveCount(1);
+      await expect(edited.getByText("Changed since the report", { exact: true })).toBeVisible();
+      await expect(edited.locator("blockquote")).toHaveText([`Original bio ${token}`, `Edited bio ${token}`]);
+      await expect(edited.getByText(/Earlier removals of this author.s content: 0/)).toBeVisible();
+
+      // Hide the profile. Editing it again does not bring it back: it returns to the queue, marked as the author's edit.
+      await edited.getByRole("button", { name: /^Hide content/ }).click();
+      await expect(edited.getByText("only Restore does", { exact: false })).toBeVisible();
+      await edited.getByLabel("Note").fill(`Hidden by the end-to-end test ${token}`);
+      await edited.getByRole("button", { name: "Confirm: hide content" }).click();
+      await expect(queue.getByText("Content hidden.", { exact: false })).toBeVisible();
+      expect((await request.get(`${API}/v1/community/profiles/${handleA}`, { headers: b.headers })).status()).toBe(404);
+      // A edits the hidden profile in the settings. Changing only the public setting queues no review, so none is promised;
+      // a changed bio goes back to review, and the form says so. Either way the profile stays hidden.
+      const ownerContext = await browser.newContext();
+      try {
+        const owner = await ownerContext.newPage();
+        await logIn(owner, a.email, PASSWORD, "/app/community/settings");
+        await expect(owner.getByText("If you change the handle or the bio, the profile stays hidden and goes back to a moderator for review.", { exact: false })).toBeVisible();
+        const form = owner.getByRole("region", { name: "Profile" });
+        await form.getByLabel("Make my profile public").uncheck();
+        await form.getByRole("button", { name: "Save profile" }).click();
+        await expect(form.getByText("Profile saved. It stays hidden: only a moderator can make it visible again.")).toBeVisible();
+        await form.getByLabel("Make my profile public").check();
+        await form.getByLabel("Bio (optional)").fill(`Second edit ${token}`);
+        await form.getByRole("button", { name: "Save profile" }).click();
+        await expect(form.getByText("Profile saved. It stays hidden, and the change goes to a moderator for review.")).toBeVisible();
+      } finally {
+        await ownerContext.close();
+      }
+      expect((await request.get(`${API}/v1/community/profiles/${handleA}`, { headers: b.headers })).status()).toBe(404);
+
+      await page.reload();
+      const authorEdit = queue.getByRole("listitem").filter({ hasText: `Second edit ${token}` }).filter({ hasText: "Edited by its author" });
+      await expect(authorEdit).toHaveCount(1);
+      await expect(authorEdit.getByRole("heading", { name: "Profile edited after moderation" })).toBeVisible();
+      await expect(authorEdit.getByText("It stays hidden or removed until an administrator restores it.", { exact: false })).toBeVisible();
+      await expect(authorEdit.getByText(/Earlier removals of this author.s content: 1/)).toBeVisible();
+      await expect(authorEdit.getByText("Now hidden", { exact: true })).toBeVisible();
+
+      // Restore needs a note and a second click; then the profile is visible again and the entry is closed.
+      await authorEdit.getByRole("button", { name: /^Restore profile/ }).click();
+      await authorEdit.getByLabel("Note").fill("ab");
+      await authorEdit.getByRole("button", { name: "Confirm: restore profile" }).click();
+      await expect(authorEdit.getByText("Enter a note of at least 3 characters", { exact: false })).toBeVisible();
+      await authorEdit.getByLabel("Note").fill(`Restored by the end-to-end test ${token}`);
+      await authorEdit.getByRole("button", { name: "Confirm: restore profile" }).click();
+      await expect(queue.getByText("Content restored.", { exact: false })).toBeVisible();
+      await expect(authorEdit).toHaveCount(0);
+      expect((await request.get(`${API}/v1/community/profiles/${handleA}`, { headers: b.headers })).status()).toBe(200);
+
+      await page.getByRole("navigation", { name: "Report status" }).getByRole("link", { name: "Resolved" }).click();
+      await expect(queue.getByRole("listitem").filter({ hasText: `Restored by the end-to-end test ${token}` }).first()).toContainText("Content restored");
+    } finally {
+      await setFlag(request, "community", false);
+    }
+  });
 });
+

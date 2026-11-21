@@ -92,7 +92,7 @@ export default async function ProfilePage({ params, searchParams }: Props) {
             {mine && !context.me.is_public ? <Notice tone="second">Your profile is private. Only you can see this page.</Notice> : null}
             {mine && context.me.moderation_status !== "visible" ? (
               <Notice tone="warn" title={context.me.moderation_note ?? "Removed by moderators."}>
-                Other people can&rsquo;t see your profile. Changing the handle or the bio makes it visible again.
+                Other people can&rsquo;t see your profile. If you change the handle or the bio, the profile stays hidden and goes back to a moderator for review.
               </Notice>
             ) : null}
             {profile.bio ? <p className="max-w-prose whitespace-pre-line break-words">{profile.bio}</p> : <p className="text-sm text-muted">No bio.</p>}

@@ -26,3 +26,16 @@ export function Freshness({ at, stale = false, prefix = "Updated", className }: 
     </span>
   );
 }
+
+/**
+ * For a quote the API sent without a time. The API counts such a quote as stale (`is_stale`),
+ * so the stale label and shape are shown without an age.
+ */
+export function UndatedFreshness({ stale, className }: { stale: boolean; className?: string }) {
+  return (
+    <span className={clsx("inline-flex items-center gap-1.5 text-xs", stale ? "text-warn" : "text-muted", className)}>
+      <span aria-hidden="true" className={clsx("size-1.5", stale ? "rotate-45 bg-warn" : "rounded-full bg-line-strong")} />
+      <span>{stale ? "Stale, no update time" : "No update time"}</span>
+    </span>
+  );
+}

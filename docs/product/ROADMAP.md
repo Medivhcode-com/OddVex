@@ -1,6 +1,6 @@
 # OddVex — Roadmap (M1–M6)
 
-Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](./MASTER_FEATURE_INVENTORY.md)
+Last updated: 2026-11-21 (status lines for M2 to M6 added from the code at commit `2b0c7c1` and the server records in `BUILD_STATUS.md`) · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](./MASTER_FEATURE_INVENTORY.md)
 
 - Milestones are **scope-and-exit-criteria based, not date based.** No dates are committed in this document.
 - **Only M1 is in build.** M2–M6 are planned; their order is a proposal for Founder confirmation.
@@ -47,13 +47,15 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 - [ ] Mock sync never requests real credentials (AC-SYNC-2).
 - [ ] Per-user authorization tests pass for tracker, sync, assistant.
 - [ ] All four states (loading/empty/stale/error) implemented for each screen in SCREEN_MAP marked M1.
-- [ ] Marketing and in-app copy passes BRAND_VOICE banned-claims check; RG footer with 1-800-GAMBLER present.
+- [ ] Marketing and in-app copy passes BRAND_VOICE banned-claims check; RG footer with the National Problem Gambling Helpline, 1-800-MY-RESET (1-800-697-3738), present.
 - [ ] No secrets in repo; no production deployment performed.
 - [ ] Founder demo and written M1 review completed.
 
 ## M2 — Real Data & Production Foundations (planned)
 
 **Status as of 2026-11-16:** built without crossing a gate, on synthetic data: watchlist persistence, auto-settlement, line movement, account deletion and export, audit log, mobile sign-in and account settings (mobile unverified on a device). In progress: email verification and password reset that write to an outbox table and send nothing. Not built: hedge and arbitrage calculators, waitlist, analytics. Gated and not started: licensed data provider and historical odds from a real feed (G-01; provider choice deferred), production infrastructure (G-02, G-03; Vercel, Neon and Resend are stated preferences, not approvals; plan in `infrastructure/DEPLOYMENT_PLAN.md`), real email (G-06), counsel review (G-10; packet in `docs/compliance/COUNSEL_REVIEW_PACKET.md`), closed beta. No exit criterion below is met. See `BUILD_STATUS.md`.
+
+**Status as of 2026-11-21:** email verification and password reset are built and switched off in production, where nothing is sent. A private preview runs in production mode on the Hostinger server (D-016, D-021 in `DECISION_LOG.md`): `preview.oddvex.com` behind a password and `api-preview.oddvex.com` open to the internet and accepting sign-ups, with daily database dumps kept 14 days on the same server. It replaced the Vercel and Neon preference. Public production on `oddvex.com`, real email, a data licence, counsel review (packet reissued 2026-11-21, not sent) and a closed beta are not started. No exit criterion below is met.
 
 **Scope:** licensed provider integration (DATA-03), historical odds store (DATA-05), line movement (ODDS-07), auto-settlement (TRKR-06), favorites/watchlists persistence (GAME-05, PROP-07, HOME-04), email verification/reset (AUTH-04), account deletion/export (AUTH-06), admin audit log + basic data health (ADMN-07/04), production infrastructure (PLAT-03), analytics (PLAT-04), waitlist (MKT-04), mobile auth (MOB-02), hedge/arb calculators (INTL-07), closed web beta.
 
@@ -71,6 +73,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 
 **Status as of 2026-11-16:** built without crossing a gate: alerts engine and in-app notifications with per-type preferences (evaluated when the app is opened or by script; no background worker), weekly staking reminder (a reminder, not a limit), mobile screens for props, calculators, parlay research and tracker (never run on a device). In progress: feature flags. Not built: MFA, alt lines, injuries and lineups, quiet hours. Gated and not started: push and email delivery (G-02, G-06), real sync vendor (G-01), outbound sportsbook links (G-10, G-11; no decision), VoiceOver and TalkBack pass (needs device testing).
 
+**Status as of 2026-11-21:** feature flags are built (`services/api/src/oddvex_api/flags/catalog.py`). On the preview a worker evaluates alerts and grades community picks every two minutes; delivery is still in-app only. The mobile app has one Android test build and has not been reported as run on a device.
+
 **Scope:** alerts engine and push/email notifications (INTL-11, NOTF-01/02, ODDS-12, PROP-08, GAME-08), mobile parity for props/tools/parlay/tracker (PROP-09, INTL-12, PRLY-07, TRKR-11), real sync vendor (SYNC-05/07), alt lines/markets (ODDS-10), injuries/lineups (GAME-07), feature flags (ADMN-06), MFA (AUTH-05), RG tools (SET-03, TRKR-10), outbound sportsbook links if approved (ODDS-09).
 
 **Exit criteria**
@@ -83,6 +87,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 ## M4 — Premium & Advanced Intelligence (planned)
 
 **Status as of 2026-11-16:** in progress without crossing a gate, on synthetic data: entitlements without billing (both plans identical, gating off), a market discrepancy (value) screen, advanced tracker analytics. Their wording has not had the claims review this milestone calls for (G-14). Gated and not started: pricing and billing (G-07, G-11), LLM-backed assistant (G-01), projections and backtesting, quantified correlation.
+
+**Status as of 2026-11-21:** entitlements without billing, the value screen (switched on by default) and tracker analytics are built. Their wording has still not had the claims review (G-14).
 
 **Scope:** entitlements and billing (PREM-01…07), LLM-backed assistant with eval suite (AI-07/08/09/11/12, ADMN-09), projections and backtesting (PROP-06, INTL-10), market discrepancy screen (INTL-09), quantified correlation (PRLY-06), advanced tracker analytics (TRKR-13).
 
@@ -97,6 +103,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 
 **Status as of 2026-11-16:** built: a read-only admin overview page. In progress: admin user management, and a community module behind a flag that is off by default. Gated: turning community on for anyone (G-10; no guidelines, moderation policy, reporting flow or staffing exist).
 
+**Status as of 2026-11-21:** built: the web admin console (users, suspension, plans, flags, audit log, outbox), staff export and delete routes in the API (no web screen at `2b0c7c1`), and the community module with draft guidelines, reports, blocks, a moderation queue on the web and a restore route in the API, all behind the `community` switch, which is off. Still missing before it can be switched on: counsel review, a written moderation policy, appeals, staffing, and a decision on the leaderboard order. No administrator exists on the preview.
+
 **Scope:** COMM-01…08, ADMN-02/03/05/08.
 
 **Exit criteria**
@@ -109,6 +117,8 @@ Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](
 ## M6 — Store Submission & Public Launch (planned)
 
 **Status as of 2026-11-16:** documentation prepared, nothing executed: `docs/marketing/STORE_SUBMISSION_PREP.md`, `docs/product/GO_NO_GO_TEMPLATE.md`, `docs/product/SUPPORT_READINESS.md`, `infrastructure/ROLLBACK_PLAN.md`, `infrastructure/RUNBOOK.md`, `docs/compliance/THREAT_MODEL.md`. Gated and not started: store accounts and submission (G-04), launch marketing (G-05), production (G-03), penetration test (G-02). The mobile app has never run on a device and no rollback has been rehearsed.
+
+**Status as of 2026-11-21:** a private production-mode preview is deployed (not a public launch) and deploys have run on it; a rollback has not been exercised on the server. A Google Play developer account and an Expo project exist; no Apple account is recorded and nothing is submitted. One Android test APK exists (debug-signed, not for a store).
 
 **Scope:** App Store and Google Play submission (MOB-03), launch marketing (LAUNCH_PLAN_DRAFT), production hardening, support readiness.
 

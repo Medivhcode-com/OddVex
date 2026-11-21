@@ -5,7 +5,7 @@ import { useState } from "react";
 import { TextArea } from "@/components/app/community/text-area";
 import { Button, Field, Notice } from "@/components/ui/primitives";
 import { clientApi, ClientApiError } from "@/lib/client-api";
-import { BIO_MAX, communityError, HANDLE_MAX, HANDLE_MIN, handleProblem, RULES_REMINDER, type MyProfile } from "@/lib/community-copy";
+import { BIO_MAX, communityError, HANDLE_MAX, HANDLE_MIN, handleProblem, profileSavedText, RULES_REMINDER, type MyProfile } from "@/lib/community-copy";
 
 const HANDLE_CODES = new Set(["invalid_handle", "handle_taken", "handle_reserved"]);
 
@@ -29,7 +29,9 @@ export function ProfileForm({ initial, mode }: { initial?: Pick<MyProfile, "hand
   const [handleError, setHandleError] = useState<string | null>(null);
   const [bioError, setBioError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [savedText, setSavedText] = useState<string | null>(null);
+  // The handle and bio as last saved, to tell whether a save changed them (only then does the API queue a review).
+  const [last, setLast] = useState(initial ? { handle: initial.handle, bio: initial.bio ?? null } : undefined);
 
   const local = touched || handle.length > 0 ? handleProblem(handle) : null;
   const shownHandleError = handleError ?? local;
@@ -37,15 +39,18 @@ export function ProfileForm({ initial, mode }: { initial?: Pick<MyProfile, "hand
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setTouched(true);
-    setSaved(false);
+    setSavedText(null);
     setError(null);
     setBioError(null);
     if (handleProblem(handle)) return;
     if (bio.length > BIO_MAX) return setBioError(`Keep the bio to ${BIO_MAX} characters or fewer.`);
     setBusy(true);
     try {
-      await clientApi<MyProfile>("/v1/community/profile", { method: "PUT", body: { handle, bio: bio.trim() || null, is_public: isPublic } });
-      setSaved(true);
+      const sent = { handle, bio: bio.trim() || null };
+      const profile = await clientApi<MyProfile>("/v1/community/profile", { method: "PUT", body: { ...sent, is_public: isPublic } });
+      // A profile moderators hid or removed stays that way when edited; a changed handle or bio goes to review.
+      setSavedText(profileSavedText(last, sent, profile?.moderation_status));
+      setLast(profile ? { handle: profile.handle, bio: profile.bio ?? null } : { handle: sent.handle.trim().toLowerCase(), bio: sent.bio });
       router.refresh();
     } catch (caught) {
       if (caught instanceof ClientApiError) {
@@ -98,7 +103,7 @@ export function ProfileForm({ initial, mode }: { initial?: Pick<MyProfile, "hand
       </div>
       <div aria-live="polite">
         {error ? <Notice tone="error">{error}</Notice> : null}
-        {saved && mode === "edit" ? <Notice tone="accent">Profile saved.</Notice> : null}
+        {savedText && mode === "edit" ? <Notice tone="accent">{savedText}</Notice> : null}
       </div>
     </form>
   );

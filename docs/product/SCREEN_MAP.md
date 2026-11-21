@@ -1,8 +1,8 @@
 # OddVex — Screen Map
 
-Last updated: 2026-11-15 · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](./MASTER_FEATURE_INVENTORY.md)
+Last updated: 2026-11-21 (status notes, the responsible-gambling line, sections 4 and 5 checked against the code at commit `2b0c7c1`) · Feature IDs reference [MASTER_FEATURE_INVENTORY.md](./MASTER_FEATURE_INVENTORY.md)
 
-Surfaces: **Web app** (Next.js, authenticated, `/app/*`), **Auth** (`/login`, `/signup`), **Marketing site** (Next.js, public), **Mobile app** (Expo React Native), **Admin** (endpoint only in M1; console planned M5).
+Surfaces: **Web app** (Next.js, authenticated, `/app/*`), **Auth** (`/login`, `/signup`), **Marketing site** (Next.js, public), **Mobile app** (Expo React Native), **Admin** (web console at `/app/admin`, administrators only; see section 5).
 
 ## Global conventions (apply to every data screen)
 
@@ -13,7 +13,7 @@ Surfaces: **Web app** (Next.js, authenticated, `/app/*`), **Auth** (`/login`, `/
 | **Stale** | Keep last known data, show "Stale — last updated {time}" badge; exclude stale prices from best-line logic. |
 | **Error** | Plain-language message, retry action, no stack traces; partial failures are scoped to the failing module. |
 | **Demo data** | While fixtures are in use: persistent "Demo data — synthetic fixtures; teams, players and sportsbooks are fictional". |
-| **RG footer** | "21+. OddVex does not accept wagers. Gambling problem? Call 1-800-GAMBLER." on app shell and marketing footer. |
+| **RG footer** | "21+. OddVex does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738)." (`RESPONSIBLE_GAMBLING_LINE` in `apps/web/src/lib/site.ts`) on the app shell at every width and in the marketing footer. The number is the National Problem Gambling Helpline, checked on 2026-11-19. |
 | **Auth guard** | `/app/*` requires a session; unauthenticated users go to `/login?next=…`. |
 
 MS column: milestone in which the screen first ships. Screens marked M1 are in build; others are planned.
@@ -33,12 +33,12 @@ App shell: left nav (desktop) / bottom or drawer nav (narrow), top bar with sear
 | W-05 | `/app/props` | Prop analyzer (list) | Find props to research | Filters (game, player search, market); prop rows (player, market, line, best over/under price, recent hit rate n/N) | Row skeletons / "No props match" / stale badge / error with retry | Nav "Props"; game detail | M1 |
 | W-06 | `/app/props/[playerId]` | Player prop detail | Research one player's props | Player header (fictional in M1); market selector; line-vs-results chart with table alternative; last-N game log; hit rate n/N; prices across books; "historical, not predictive" note; "Add to parlay" | Chart/table skeletons / "Limited sample" or "No game history" / stale badge / not-found and error variants | Prop row; game detail; assistant link | M1 |
 | W-07 | `/app/tools` | Calculators | Run betting maths | Tabs or cards: Implied probability, No-vig, EV, CLV, Parlay; inputs with validation; result panel; "How this is calculated" disclosure linking `/methodology` | Instant (client-side), no remote loading / initial state shows example placeholders, not results / n/a (no remote data) / inline input errors; never NaN | Nav "Tools"; odds grid "Open in calculator"; marketing | M1 |
-| W-08 | `/app/parlay` | Parlay research | Build and understand a parlay | Leg list; add-leg picker (from odds/props); combined odds, payout, implied probability; per-leg breakdown; **correlation warning**; "Send to tracker"; "OddVex does not place bets" note | Picker skeleton / "Add at least two legs to see combined odds" / stale leg flagged with "price may have changed" / error loading legs; invalid-leg message | Nav "Parlay"; "Add to parlay" on game/prop screens; tools | M1 |
+| W-08 | `/app/parlay` | Parlay research | Build and understand a parlay | Leg list; add-leg picker (from odds/props); combined odds, payout, break-even rate (no chance that every leg wins is shown); per-leg breakdown; **correlation warning**; "Send to tracker"; "OddVex does not place bets" note | Picker skeleton / "Add at least two legs to see combined odds" / stale leg flagged with "price may have changed" / error loading legs; invalid-leg message | Nav "Parlay"; "Add to parlay" on game/prop screens; tools | M1 |
 | W-09 | `/app/tracker` | Bet tracker | Log, settle, review bets | Summary tiles (net P/L, ROI, record, pending); results-over-time chart; breakdown by sport/book/market; bet table (filter/sort); add/edit bet dialog; settle action; sync connections panel (connect mock, status, last synced, disconnect) | Tiles/table skeletons / "No bets yet — Log your first bet or connect a demo sportsbook" / sync "Last synced {time}" + stale connection state / save-failed toast with retry; sync error banner | Nav "Tracker"; dashboard snapshot; parlay "Send to tracker" | M1 |
 | W-10 | `/app/assistant` | OddVex AI | Ask questions answered from verified data | Message list; composer; suggested prompts; per-answer source + "as of" chips; AI disclosure; "rule-based, demo data" note (M1); RG footer | Typing indicator / empty: intro + suggested prompts + capability list / answer shows stale chip when source data is stale / "I couldn't reach the data tools — try again"; unsupported-question message | Nav "Assistant"; dashboard quick action | M1 |
 | W-11 | `/app/settings` | Settings | Account and preferences | Profile (email); odds format; time zone; responsible-gambling resources; legal links; sign out. Later: notifications (M3), subscription (M4), delete account/export (M2), connected sportsbooks summary | Form skeleton / n/a / n/a / save error inline | Account menu; nav | M1 |
 
-Planned web-app additions (no routes committed yet): watchlists (M2), alerts centre (M3), subscription/billing (M4), community (M5).
+Routes built since this table was written (code at `2b0c7c1`; see `apps/web/src/app/app`): `/app/alerts`, `/app/value` (flag `value_screen`, on), `/app/tracker/analytics` (flag `tracker_analytics`, on), `/app/community` with guidelines, leaderboard, picks, profiles and settings (flag `community`, off; the leaderboard also needs `community_leaderboard`, off), and the admin console (section 5). Not built: subscription and billing.
 
 ## 2. Auth
 
@@ -51,7 +51,7 @@ Planned web-app additions (no routes committed yet): watchlists (M2), alerts cen
 
 ## 3. Marketing site (public)
 
-Shared: header (logo, Features, Pricing, Help, Log in, Get started), footer (legal links, RG statement with 1-800-GAMBLER, "OddVex does not accept or place wagers", © Medivh Code). Screenshots and examples must show **fictional** data and be labelled illustrative. Mostly static: loading/stale states are not applicable unless noted.
+Shared: header (logo, Features, Pricing, Help, Log in, Get started), footer (legal links, RG statement with the National Problem Gambling Helpline, 1-800-MY-RESET (1-800-697-3738), "OddVex does not accept or place wagers", © Medivh Code). Screenshots and examples must show **fictional** data and be labelled illustrative. Mostly static: loading/stale states are not applicable unless noted.
 
 | # | Route | Page | Purpose | Key components | States / notes | Entry points | MS |
 |---|---|---|---|---|---|---|---|
@@ -68,14 +68,14 @@ Shared: header (logo, Features, Pricing, Help, Log in, Get started), footer (leg
 | M-11 | `/help` | Help centre | Self-serve answers | FAQ groups: account, data, calculators, tracker, sync, AI, responsible gambling | Static; search later | Header/footer; app | M1 |
 | M-12 | `/privacy` | Privacy Policy | Legal | Draft policy, version/date, "draft pending legal review" until signed off | Static | Footer; signup | M1 (draft) |
 | M-13 | `/terms` | Terms of Service | Legal | Draft terms incl. 21+, informational-only, no wagering | Static | Footer; signup | M1 (draft) |
-| M-14 | `/responsible-gambling` | Responsible gambling | RG resources | Commitments; warning signs; 1-800-GAMBLER; links to support resources; how OddVex features support awareness | Static | Footer; app shell; settings | M1 |
+| M-14 | `/responsible-gambling` | Responsible gambling | RG resources | Get help now (1-800-MY-RESET (1-800-697-3738), text 800GAM, 988 and 911 for a crisis, the Council's site, the date the facts were checked; 1-800-GAMBLER named once as the New Jersey council's line); warning signs; practical limits; commitments (draft banner) | Static | Footer; app shell; settings | M1 |
 | M-15 | `/methodology` | Methodology | Transparency | Formulas (implied probability, no-vig, EV, CLV, parlay); data sourcing and freshness; current synthetic-data statement; assistant grounding rules | Static | Calculators; footer; assistant | M1 |
 | M-16 | `/download` | Download | Mobile app | "Mobile apps are in development"; store badges only after store approval (G-04) | Static | Header/footer | M1 (placeholder) |
 | M-17 | (system) | 404 / 500 | Recover | Friendly message, links home | — | Any bad URL | M1 |
 
 ## 4. Mobile app (Expo React Native)
 
-**Status: built in code, never run on a device or simulator.** The app covers the web app's signed-in loop, not
+**Status: built in code; one Android test build exists (`docs/product/BUILD_STATUS.md`); not reported as run on a device or simulator.** The app covers the web app's signed-in loop, not
 only games and odds. It passes the type checker, the linter, its Jest suite and a JS bundle export for both
 platforms; nobody has looked at these screens on a phone, in a simulator or in Expo Go. Layout, the native tab bar,
 modals, keyboard handling, safe areas, Dynamic Type, screen readers and SecureStore on real hardware are unverified.
@@ -96,6 +96,7 @@ planned for.
 | N-09 | `(tabs)/(games)/assistant` | OddVex AI | Ask questions | Chat, example questions, suggestion chips, sources line and disclaimer | As web | Games tab; Settings | M4 | Built, not run on a device |
 | N-10 | `(tabs)/(settings)/settings` | Settings | Preferences, RG line, **in-app account deletion** | Account, odds format, notification switches, weekly staking reminder, change password, delete account (typed DELETE) | — | Tab bar | M2 | Built, not run on a device. Data export and the legal pages are web-only |
 | N-11 | `(tabs)/(games)/notifications` | Notifications and alerts | Read notifications, manage alerts | Two segments: notifications (mark read, delete, load more) and alert rules (pause, resume, set again, delete, "Check now") | Signed out: invitation to log in | Bell on Games; Settings | M3 | Built, not run on a device. In-app only: no push, no email, no background checks |
+| N-13 | `(tabs)/(games)/community/*` | Community | Research discussion | Feed, pick with comments, profile form, other profiles (follow, block, report), guidelines, leaderboard | As web | Games tab link row; notifications | M5 | Built, behind the `community` switch (off); the leaderboard also needs `community_leaderboard`. Moderation is web-only |
 | N-12 | `paywall` | Premium | Upgrade | Plan details with renewal disclosure, restore purchases | — | Gated features | M4 | Planned. Not built; pricing and billing need Founder approval |
 
 Mobile-specific requirements, **all unverified until the app runs on a device**: safe areas; Dynamic Type / font
@@ -104,9 +105,17 @@ VoiceOver/TalkBack labels on prices (e.g. "Northgate −110 at Book A, best pric
 prompt because the app has no push notifications.
 
 Not built on mobile: push notifications, automatic refresh, offline cache, token refresh, tablet layouts, final icon
-and splash art, EAS project and store configuration. Nothing has been published.
+and splash art, store configuration. The EAS project and its `preview` and `production` build profiles exist
+(`apps/mobile/eas.json`) and the app identifier is `com.oddvex.app`. On an iPhone the App Store's Expo Go cannot open
+this SDK 58 project; see `docs/product/PHONE_TEST_GUIDE.md`. Nothing has been published.
 
 ## 5. Admin
+
+Built at `2b0c7c1`: a web console for administrators at `/app/admin` (overview), `/app/admin/users` (search, suspend,
+lift a suspension, set plan), `/app/admin/flags`, `/app/admin/audit`, `/app/admin/outbox` and `/app/admin/community`
+(report queue, behind the `community` switch). The API also has routes to export or delete an account on its owner's
+behalf (`POST /v1/admin/users/{user_id}/export` and `/delete`); their web screens are not in `2b0c7c1`. The table
+below is the original plan and is kept for its IDs.
 
 | # | Route / endpoint | Screen | Purpose | Key components | States | Entry points | MS |
 |---|---|---|---|---|---|---|---|

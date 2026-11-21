@@ -6,6 +6,7 @@ import type { Schemas } from "@oddvex/types";
 import { Badge, Button, Notice } from "@/components/ui/primitives";
 import { clientApi, ClientApiError } from "@/lib/client-api";
 import { formatAge } from "@/lib/format";
+import { syncRunMessage } from "@/lib/tracker-messages";
 
 type Connection = Schemas["SyncConnectionOut"];
 type Run = Schemas["SyncRunOut"];
@@ -38,11 +39,13 @@ export function SyncPanel({ providers, connections }: { providers: Provider[]; c
   const sync = (connection: Connection) =>
     run(`sync-${connection.id}`, async () => {
       const result = await clientApi<Run>(`/v1/sync/connections/${connection.id}/sync`, { method: "POST", body: {} });
-      if (result.status === "failed") {
-        setMessage({ tone: "warn", text: `Sync failed${result.retryable ? " and can be retried" : ""}: ${result.error_message ?? "no detail given"}.` });
+      const message = syncRunMessage(result);
+      // A failed run, or a finished run that left bets out, is a warning; the API says why.
+      if (message.tone === "warn") {
+        setMessage(message);
         return;
       }
-      return `Sync finished. ${result.imported_count} new ${result.imported_count === 1 ? "bet" : "bets"} imported, ${result.duplicate_count} already here.`;
+      return message.text;
     });
 
   return (

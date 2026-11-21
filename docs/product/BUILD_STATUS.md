@@ -15,7 +15,8 @@ mailboxes and physical-phone testing remain incomplete.
 See the dated counsel addendum and phone guide for corrections to the original founder checklist.
 
 What exists on the branch, and the evidence for it. Everything runs on synthetic data with fictional teams, players
-and sportsbooks. Nothing has been deployed, purchased or published.
+and sportsbooks. Since 2026-11-18 a private preview runs on the Hostinger VPS (see "Private preview on the Hostinger
+VPS" below). Nothing has been purchased or published.
 
 ## Verified by automated checks (run locally in the build session)
 
@@ -28,6 +29,10 @@ and sportsbooks. Nothing has been deployed, purchased or published.
 | Web | ESLint, `tsc --noEmit`, Vitest | Clean, 50 unit tests passed |
 | Mobile | `tsc --noEmit`, `expo lint`, Jest | Clean, 470 tests passed |
 | Mobile | `expo export` for iOS and Android (JS bundle only) | Bundled |
+
+The counts above are from 2026-11-16. The squash commit of pull request #19 (`2b0c7c1`, 2026-11-21) reports: API 4,627
+tests on SQLite and 4,636 on PostgreSQL, web end to end 387 of 387, mobile 528, infrastructure 168, CI 9 of 9 jobs.
+Those figures are quoted from the commit message and were not run again for this page.
 
 ## Built
 
@@ -65,13 +70,16 @@ and sportsbooks. Nothing has been deployed, purchased or published.
   Settled bets and sync results also notify.
 - **Weekly staking reminder:** a self-set amount. Reaching it produces one reminder a week with the helpline number.
   It is a reminder, not a limit: bets are still saved.
-- **Admin overview (web):** a read-only page with service counts, provider health and the recent audit log, visible
-  only to accounts the API marks as admin.
+- **Admin area (web):** an overview page with service counts, provider health and the recent audit log, plus pages
+  for users (suspend, unsuspend, plan), feature flags, the email outbox, the audit log and community moderation,
+  visible only to accounts the API marks as admin.
 
-Limits: alerts are evaluated when the user opens the app or when `scripts/evaluate_alerts.py` runs. There is no
-background worker, and nothing is delivered by push or email, both of which need Founder approval.
+Limits: alerts are evaluated when the user opens the app or when `scripts/evaluate_alerts.py` runs. On the Hostinger
+preview a `worker` container runs that script, and `scripts/grade_picks.py`, every two minutes
+(`infrastructure/hostinger/compose.yaml`); anywhere else nothing runs them on a schedule. Nothing is delivered by push
+or email, both of which need Founder approval.
 
-## Added from milestones 4 to 6 (code only; nothing deployed, purchased or published)
+## Added from milestones 4 to 6 (code; on the private preview since 2026-11-18; nothing purchased or published)
 
 - **Value screen:** where the best open price beats the no-vig consensus of the other books, with the method and a
   caveat that this is not proof of an edge. Web and mobile.
@@ -96,8 +104,9 @@ gambling review of the leaderboard, and staffed moderation. The content rules ar
 
 ## Milestone 2 items that need Founder approval and are not started
 
-Licensed data provider, production infrastructure, counsel review of legal pages and age gating, closed beta, real
-email (verification, password reset), historical odds storage against a real feed.
+Licensed data provider, public production infrastructure on `oddvex.com` (the private preview is the only deployment),
+counsel review of legal pages and age gating, closed beta, real email (verification, password reset), historical odds
+storage against a real feed.
 
 ## Not verified
 
@@ -109,28 +118,59 @@ email (verification, password reset), historical odds storage against a real fee
 
 ## Private preview on the Hostinger VPS (decision D-016)
 
-First deployed 2026-11-18 from commit `d5749e0`, redeployed 2026-11-19 from `main` at `855991c`, both with
-`infrastructure/hostinger/ops.sh`:
+Deployed with `infrastructure/hostinger/ops.sh`, run by the one-shot ops container (`ops.compose.yaml`). The decision
+log records the deploys in D-021. Every deploy so far:
 
-- Five containers run on the server (`db`, `api`, `web`, `worker`, `backup`), with `api` and `web` on the image tag
-  `855991c`. The database and API report healthy through the Hostinger API. The API runs in production mode on
-  synthetic data.
-- The worker's output shows completed passes at 05:23 and 05:25 UTC on 2026-11-19 (alert evaluation, then pick
-  grading; nothing to do yet). The backup's output shows the first dump written:
-  `/backups/oddvex-20261119T052302Z.dump`. A restore from a dump has not been rehearsed.
+| When (UTC) | Release | What happened |
+|---|---|---|
+| 2026-11-18 | `d5749e0` | First deploy, with the first version of the ops script. It generated the database password and JWT secret on the server; the `caddy` action run that day generated the preview password |
+| 2026-11-19 | `855991c` | Redeploy from `main` |
+| 2026-11-19 16:46 | `4092395` | First deploy with the current ops script: the services were renamed to `oddvex-api` and `oddvex-web`, the contact address `support@oddvex.com` was set in `/opt/oddvex/.env`, a pre-deploy dump was taken, no migration was pending |
+| 2026-11-21 05:29 | `2b0c7c1` | Database revision 0005 to 0007. Pre-deploy dump `predeploy-20261121T052923Z-4092395-to-2b0c7c1.dump`. Result `ok`. The images of `4092395` are kept on the server for a rollback |
+
+Checks after the `2b0c7c1` deploy, at 2026-11-21 05:33 UTC:
+
+- `preview.oddvex.com` answers 401 without the password.
+- `api-preview.oddvex.com/health` and `/v1/meta` answer 200.
+- `/v1/props?market=*` answers an empty list, and the full prop board still loads.
+- An extreme input to a quant calculator answers 422.
+- The other sites on the server answer 200 or 307 (their normal redirect).
+- The name `api` no longer resolves to an OddVex container on the shared proxy network.
+
+Earlier records, still true:
+
+- The worker's output showed completed passes at 05:23 and 05:25 UTC on 2026-11-19 (alert evaluation, then pick
+  grading; nothing to do). The backup container wrote its first daily dump that day:
+  `/backups/oddvex-20261119T052302Z.dump`.
 - DNS `A` records `preview` and `api-preview` for `oddvex.com` point at the server.
-- One marked block for `preview.oddvex.com` (password-protected) and `api-preview.oddvex.com` was appended to the
-  server's shared Caddyfile. Caddy validated the file and reloaded without error. The previous file is kept at
-  `/opt/oddvex/Caddyfile.before-oddvex-20261118T074444Z` on the server.
+- One marked block for `preview.oddvex.com` (password-protected) and `api-preview.oddvex.com` (no password) was
+  appended to the server's shared Caddyfile on 2026-11-18. Caddy validated the file and reloaded without error. The
+  previous file is kept at `/opt/oddvex/Caddyfile.before-oddvex-20261118T074444Z` on the server.
 - The Founder opened `https://preview.oddvex.com` on 2026-11-19 and confirmed it works.
-- A check run on the server itself at 2026-11-18 07:45 UTC, right after the reload, got: `preview.oddvex.com` 401
-  without the password and 200 with it (home page and `/app/games`), with the `X-Robots-Tag: noindex, nofollow`
-  header; `api-preview.oddvex.com/health` and `/v1/meta` 200; and every other site on the shared proxy answering
-  (tickettoss.io, fleetsort.com, medivhboost.com, replyhub.site, n8n, office and myoffice 200; app.fleetsort.com and
-  rentex.fleetsort.com 307, their normal redirect).
 - The mailbox `support@oddvex.com` exists (created by the Founder on 2026-11-19) and the domain has MX, SPF, DKIM and
-  DMARC records. The address is not on the contact page yet, and no test message was sent by the build session.
-- Not configured: real email from the product, off-server backups. `oddvex.com` itself is unchanged.
+  DMARC records. Since the `4092395` deploy the preview's web image is built with the address (`ODDVEX_CONTACT_EMAIL`,
+  passed to the build as `NEXT_PUBLIC_CONTACT_EMAIL`); the live contact page was not checked. That the mailbox receives
+  mail is not verified: no test message was sent by the build session.
+- `ODDVEX_ADMIN_EMAILS` is empty on the server, so the preview has no administrator.
+
+The API runs in production mode on synthetic data. Its hostname has no password, because the mobile app calls it
+directly, so anyone on the internet can create an account there.
+
+Android preview build: EAS build `e0686e6b-192e-460a-a60b-647ad97f7591`, from commit `9bb7677`, finished. It is an APK
+built with the `preview` profile of that commit (`withoutCredentials: true`, so it carries the public debug signature
+described in `apps/mobile/README.md`) and calls `https://api-preview.oddvex.com`. Its download link expires on
+2026-12-03.
+
+Not verified on the server:
+
+- That the build ceiling holds a real build. No build has been seen reaching the 2 GB limit of the build container.
+- A restore of a dump (`ACTION=restore`). It is rehearsed in tests against PostgreSQL 16 only.
+- That the mailbox `support@oddvex.com` receives mail.
+- A rollback (`ACTION=rollback`) and the automatic put-back of the previous release after a failed deploy.
+- Whether the Docker Manager page repeats the last action when the ops project is started again.
+
+Not configured: real email from the product, off-server backups, monitoring or alerting. `oddvex.com` itself is
+unchanged.
 
 ## Replay preview (internal only, decision D-015)
 
@@ -142,12 +182,17 @@ The dataset is not committed, so CI tests the provider on a fictional fixture.
 
 ## Not built
 
-Real data provider, push and email delivery, a background worker for alerts and pick grading, premium billing, LLM-backed assistant, model projections and backtesting, refresh tokens, multi-factor sign-in, production
-infrastructure, store submission, analytics instrumentation, error monitoring.
+Real data provider, push and email delivery, premium billing, a language-model assistant, model projections and
+backtesting, refresh tokens, multi-factor sign-in, public production infrastructure on `oddvex.com`, store
+submission, analytics instrumentation, error monitoring.
 
 ## Known gaps inside what is built
 
 - The assistant matches keywords. It handles a small set of question types and declines the rest.
 - Prices refresh on a timer, not by push.
-- Alerts only fire when the app is opened; a start-time alert nobody checks before the game begins expires silently.
-- Legal pages are unreviewed drafts and say so. The contact page has no address until one is configured.
+- Alerts fire when the app is opened or when `scripts/evaluate_alerts.py` runs: every two minutes on the preview, not
+  on a schedule anywhere else. Without that, a start-time alert nobody checks before the game begins expires
+  silently.
+- Legal pages are unreviewed drafts and say so. The contact page shows `NEXT_PUBLIC_CONTACT_EMAIL` when the web image
+  is built with it (the preview is built with `support@oddvex.com`, per the build setting; the live page was not
+  checked) and a placeholder otherwise.

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { PageIntro, Prose } from "@/components/marketing/chrome";
 import { HelplineLink } from "@/components/ui/helpline";
-import { HELPLINE } from "@/lib/site";
+import { CONTACT_EMAIL, HELPLINE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/contact" },
 };
 
-const email = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
+const email = CONTACT_EMAIL;
 
 export default function Page() {
   return (

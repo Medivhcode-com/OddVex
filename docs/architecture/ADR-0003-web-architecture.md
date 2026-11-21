@@ -25,8 +25,18 @@ Status: accepted (M1)
   address as a single-value `X-Forwarded-For`. The address is the first `X-Forwarded-For` hop the hosting platform
   reports, else `X-Real-IP` (`src/lib/request-meta.ts`). Without this every web user shared the web server's
   address, and so one per-IP rate-limit bucket.
-- An API error keeps the id (`ApiError.requestId`, also set as the error's `digest`), so the app's error screen
-  shows "Reference <id>" and the same id is in the API's log line and audit row.
+- In a production build the browser receives neither the name nor the message of an error thrown while a page
+  renders on the server, only its `digest`. The digest therefore carries what the error screen
+  (`src/app/app/error.tsx`) needs, and nothing else:
+  - An error answer from the API (`ApiError`, `src/lib/api.ts`) keeps the request id as `requestId` and as its
+    `digest`. The screen says "This screen failed to load" and shows "Reference <id>"; the same id is in the API's
+    log line and audit row.
+  - When the API cannot be reached at all (`ApiUnavailableError`), the digest is `api_unavailable:<request id>`: a
+    fixed marker followed by the request id (the id is left out when it is not well formed). `src/lib/app-error.ts`
+    builds and reads it. The screen then says "OddVex can't reach its data service" and shows the request id as the
+    reference. The `/api/ov` bridge answers the same case with `503 api_unavailable` and the request id in
+    `X-Request-ID`.
+  - Any other error shows the digest Next.js made for it.
 - **Proxy trust.** The API ignores `X-Forwarded-For` unless it runs with `ODDVEX_TRUST_PROXY=true`. Set that only
   when the API is reachable solely through the web server or another trusted proxy. If the API can also be reached
   directly, any caller can forge the header and choose its own rate-limit bucket and audit-log address.
@@ -34,6 +44,15 @@ Status: accepted (M1)
   client-supplied `X-Forwarded-For` rather than append to it, because the web server trusts the first hop;
   (2) mobile clients call the API directly, so "reachable solely through the web server" needs a trusted proxy in
   front of the API for them as well, or the flag stays off.
+- On the Hostinger preview (`infrastructure/hostinger/compose.yaml`) the API runs with `ODDVEX_TRUST_PROXY=true`.
+  Internet traffic reaches the web server and the API only through the server's shared Caddy, which is expected to
+  replace a client-supplied `X-Forwarded-For` (Caddy's default when the client is not a trusted proxy; the live
+  Caddyfile has not been inspected). But the API trusts the header from any peer, and the web and API containers
+  are on a network shared with the server's other projects, so any container on that network can reach
+  `http://oddvex-api:8000` (and `http://oddvex-web:3000`) directly and choose the address it is counted and audited
+  under. The residual risk and the two options (trust the header only from the proxy's address, or only with a
+  shared secret header the proxy and the web server add) are in `docs/compliance/THREAT_MODEL.md`, row S-6. Deferred
+  on 2026-11-21.
 - Reading request headers makes a route dynamic. `api()` is therefore only called from request-scoped code (the
   `/app` tree, the auth pages, server actions). Marketing pages never call it and stay static; `next build` shows
   them as `○`/`●`.

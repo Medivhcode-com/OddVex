@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/primitives";
+import { SUPPORT_TITLE, supportParts } from "@/lib/assistant-support";
 import { clientApi, ClientApiError } from "@/lib/client-api";
 import { formatAge } from "@/lib/format";
+import { tryAgainText } from "@/lib/retry";
 import type { AssistantReply } from "@/lib/types";
 
 type Turn = { id: number; question: string; reply?: AssistantReply; error?: string };
@@ -29,7 +31,7 @@ export function AssistantChat({ examples }: { examples: string[] }) {
     } catch (caught) {
       const error =
         caught instanceof ClientApiError && caught.status === 429
-          ? "You've asked a lot of questions quickly. Wait a minute, then ask again."
+          ? `You've asked a lot of questions quickly. ${tryAgainText(caught.details, "Wait a moment, then ask again.")}`
           : caught instanceof ClientApiError
             ? caught.message
             : "OddVex AI couldn't answer. Try again.";
@@ -68,32 +70,7 @@ export function AssistantChat({ examples }: { examples: string[] }) {
                 {turn.error}
               </p>
             ) : turn.reply ? (
-              <div className="max-w-[92%] rounded-panel rounded-bl-sm border border-line bg-bg px-4 py-3">
-                <span className="sr-only">OddVex AI answered: </span>
-                <p className="whitespace-pre-line leading-relaxed">{turn.reply.answer}</p>
-                {turn.reply.suggestions.length ? (
-                  <ul className="mt-3 flex flex-wrap gap-2">
-                    {turn.reply.suggestions.map((suggestion) => (
-                      <li key={suggestion.href + suggestion.label}>
-                        <Link href={suggestion.href} className="inline-flex min-h-9 items-center rounded-full border border-line-strong px-3 text-sm font-medium hover:bg-raised">
-                          {suggestion.label}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="mt-3 space-y-1 border-t border-line pt-2 text-xs text-muted">
-                  {turn.reply.sources.length ? (
-                    <p>
-                      Sources:{" "}
-                      {turn.reply.sources.map((source) => `${source.label} (${source.data_mode} data, updated ${formatAge(source.as_of)})`).join("; ")}
-                    </p>
-                  ) : (
-                    <p>No data was used for this answer.</p>
-                  )}
-                  <p>{turn.reply.disclaimer}</p>
-                </div>
-              </div>
+              <AssistantReplyView reply={turn.reply} />
             ) : (
               <p role="status" className="ov-skeleton w-fit rounded-panel px-4 py-3 text-sm text-muted">
                 Looking that up
@@ -126,6 +103,80 @@ export function AssistantChat({ examples }: { examples: string[] }) {
           Ask
         </Button>
       </form>
+    </div>
+  );
+}
+
+/** One paragraph of a support reply, with every helpline, crisis and emergency number as a link. */
+function SupportParagraph({ text }: { text: string }) {
+  return (
+    <p className="leading-relaxed">
+      {supportParts(text).map((part, index) =>
+        part.href ? (
+          <a key={index} href={part.href} className="whitespace-nowrap font-medium text-ink underline underline-offset-4">
+            {part.text}
+          </a>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+    </p>
+  );
+}
+
+function Suggestions({ reply }: { reply: AssistantReply }) {
+  if (!reply.suggestions.length) return null;
+  return (
+    <ul className="mt-3 flex flex-wrap gap-2">
+      {reply.suggestions.map((suggestion) => (
+        <li key={suggestion.href + suggestion.label}>
+          <Link href={suggestion.href} className="inline-flex min-h-9 items-center rounded-full border border-line-strong px-3 text-sm font-medium hover:bg-raised">
+            {suggestion.label}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * One answer. A support reply (`support` set: crisis, distress or underage) is shown as a calm
+ * card with the numbers as links and no data panel: such an answer has no data and no sources,
+ * and the betting disclaimer does not belong next to it.
+ */
+export function AssistantReplyView({ reply }: { reply: AssistantReply }) {
+  const headingId = useId();
+  if (reply.support) {
+    const kind = reply.support.case;
+    return (
+      <div data-support-case={kind} role="group" aria-labelledby={headingId} className="max-w-[92%] space-y-3 rounded-panel rounded-bl-sm border border-second/40 bg-second-soft px-4 py-3">
+        <span className="sr-only">OddVex AI answered: </span>
+        <p id={headingId} className="font-medium">
+          {SUPPORT_TITLE[kind]}
+        </p>
+        {reply.answer.split(/\n{2,}/).map((paragraph, index) => (
+          <SupportParagraph key={index} text={paragraph} />
+        ))}
+        <Suggestions reply={reply} />
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-[92%] rounded-panel rounded-bl-sm border border-line bg-bg px-4 py-3">
+      <span className="sr-only">OddVex AI answered: </span>
+      <p className="whitespace-pre-line leading-relaxed">{reply.answer}</p>
+      <Suggestions reply={reply} />
+      <div className="mt-3 space-y-1 border-t border-line pt-2 text-xs text-muted">
+        {reply.sources.length ? (
+          <p>
+            Sources:{" "}
+            {reply.sources.map((source) => `${source.label} (${source.data_mode} data, updated ${formatAge(source.as_of)})`).join("; ")}
+          </p>
+        ) : (
+          <p>No data was used for this answer.</p>
+        )}
+        <p>{reply.disclaimer}</p>
+      </div>
     </div>
   );
 }

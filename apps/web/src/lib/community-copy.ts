@@ -47,7 +47,7 @@ const RULE_LABEL: Record<string, string> = {
 const PROFILE_REQUIRED: Record<string, string> = {
   no_profile: "Create a community profile first.",
   profile_not_public: "Your profile is private. Make it public in the community settings to post, comment or follow.",
-  profile_moderated: "Your profile was hidden by moderators. Change the handle or the bio in the community settings to make it visible again.",
+  profile_moderated: "Your profile was hidden by moderators, so you can't post. Editing it does not make it visible again: a changed handle or bio goes back to a moderator for review.",
 };
 
 type ErrorLike = { status: number; code: string; message: string; details?: unknown };
@@ -149,4 +149,20 @@ export function formatJoined(joined: string): string {
 
 export function countLabel(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+type ProfileText = { handle: string; bio: string | null };
+
+/**
+ * What the edit form says after a save. A profile moderators hid or removed stays that way when
+ * edited. The API puts it back in the review queue only when the handle or the bio changed
+ * (handle compared trimmed and in lower case, a blank bio as none), so only then is a review
+ * mentioned.
+ */
+export function profileSavedText(before: ProfileText | undefined, sent: ProfileText, moderationStatus: string | undefined): string {
+  if (moderationStatus === undefined || moderationStatus === "visible") return "Profile saved.";
+  const handleChanged = before?.handle !== sent.handle.trim().toLowerCase();
+  const bioChanged = (before?.bio?.trim() ? before.bio : null) !== (sent.bio?.trim() ? sent.bio : null);
+  if (handleChanged || bioChanged) return "Profile saved. It stays hidden, and the change goes to a moderator for review.";
+  return "Profile saved. It stays hidden: only a moderator can make it visible again.";
 }

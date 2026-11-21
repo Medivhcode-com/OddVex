@@ -1,6 +1,6 @@
 # OddVex — Master Feature Inventory
 
-Last updated: 2026-11-15 · IDs match [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md) · Milestones defined in [ROADMAP.md](./ROADMAP.md)
+Last updated: 2026-11-21 (PRLY-02 and AI-04 corrected to the code at commit `2b0c7c1`) · IDs match [PRODUCT_REQUIREMENTS.md](./PRODUCT_REQUIREMENTS.md) · Milestones defined in [ROADMAP.md](./ROADMAP.md)
 
 ## How to read this table
 
@@ -128,7 +128,7 @@ Important caveats:
 | AI-01 | Assistant UI | Chat at `/app/assistant` | Free | M1 | Built in M1 | AUTH-01 |
 | AI-02 | Rule-based router | Intent → internal tools | Free | M1 | Built in M1 | Internal data tools |
 | AI-03 | Grounded answers | Numbers only from tools; source + "as of" | Free | M1 | Built in M1 | DATA-04 |
-| AI-04 | Refusal behaviour | No guarantees/picks; honest "no data" | Free | M1 | Built in M1 | — |
+| AI-04 | Refusal behaviour | No guarantees/picks; honest "no data"; support replies for crisis, under-21 and distress messages | Free | M1 | Built. Support detection is a fixed rule list with known misses; every other answer ends with the helpline and 988 (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5). The AG-03 under-21 flag is not built | — |
 | AI-05 | AI disclosure + RG footer | Automated-assistant label | Free | M1 | Built in M1 | — |
 | AI-06 | Suggested prompts | Starter questions | Free | M1 | Built in M1 | — |
 | AI-07 | LLM-backed assistant | Tool calling under same grounding contract | Free+limits / Premium | M4 | Planned | **Founder gate** (paid API); provider data-processing terms; AI-08 |
@@ -143,7 +143,7 @@ Important caveats:
 | ID | Feature | Description | Tier (proposal) | MS | Status | Dependencies |
 |---|---|---|---|---|---|---|
 | PRLY-01 | Parlay builder | Add legs; combined odds/payout | Free | M1 | Built in M1 | INTL-05 |
-| PRLY-02 | Combined probability | Implied probability + per-leg breakdown | Free | M1 | Built in M1 | INTL-01 |
+| PRLY-02 | Break-even rate | Break-even rate (implied probability of the combined price) + per-leg breakdown | Free | M1 | Built: the parlay tool shows the combined price, payout and break-even rate. It does not show a chance that every leg wins; the API computes one only when the caller supplies a win probability per leg and the legs are from different games (`probability_status`), and the web and mobile forms send none. At `2b0c7c1` the screens read "Combined probability: Not shown"; pull request 20 replaces that line | INTL-01 |
 | PRLY-03 | Correlation warning | Rule-based same-game/related-leg warning | Free | M1 | Built in M1 (same-event rule only) | Leg metadata (game/player IDs) |
 | PRLY-04 | Parlay price comparison | Across sportsbooks | Premium | M3 | Planned | Provider coverage of parlay/SGP pricing (may not be available) |
 | PRLY-05 | Send to tracker / save drafts | Tracker hand-off (M1?), drafts (M2) | Free | M1/M2 | Planned | TRKR-12 |

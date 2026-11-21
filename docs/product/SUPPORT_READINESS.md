@@ -1,23 +1,25 @@
 # OddVex — Support readiness
 
-Last updated: 2026-11-16 · Status: **playbook drafted. Support does not exist yet: no mailbox, no tool, no staff,
-no real users.**
+Last updated: 2026-11-21 · Status: **playbook drafted. Support does not exist yet: no staff, no tool, no written
+procedures.** The mailbox `support@oddvex.com` exists (`docs/product/DECISION_LOG.md`, D-022); that it receives mail
+is not verified and nobody is named to read it. A private preview with an open sign-up API is running (D-021), so a
+real person could write in.
 
-Answers here describe what the software does on `main` as of 2026-11-16 (`services/api/README.md`,
-`apps/mobile/README.md`, the web help page). Re-check every answer against the README before each release.
+Answers here describe what the software does at commit `2b0c7c1`, the release on the preview since 2026-11-21
+(`services/api/README.md`, `apps/mobile/README.md`, the web help page). Re-check every answer against the README before each release.
 Replies follow `docs/marketing/BRAND_VOICE.md`: plain, exact, no hype, no promises.
 
 ## 1. What does not exist
 
 | Missing | Effect on support | Gate or owner |
 |---|---|---|
-| **A support mailbox.** `/contact` shows "A contact address is being set up and will be published here before launch." The address appears only when `NEXT_PUBLIC_CONTACT_EMAIL` is set, and it is not | Users have no way to reach us | G-06; Founder to choose the address (open decision O-03 in `DECISION_LOG.md`) |
+| **A monitored support mailbox.** `support@oddvex.com` exists and the preview's web build is set to show it on `/contact` (the live page was not checked). That it receives mail is not verified and nobody is named to read it | A message may go unread | G-06; Founder to name who reads it (O-03 in `DECISION_LOG.md`) |
 | A privacy contact and a security contact | Data-rights requests and vulnerability reports have nowhere to go | G-06 |
 | A support tool, ticketing or shared inbox | No history, no assignment | G-02 if paid; G-13 (it would hold personal data) |
 | Support staff and hours | Section 6 is blank | Founder |
 | Outbound email from the product | We cannot email a user from the system. No verification, reset or notification email is sent | G-06 |
-| **Password recovery** | See section 3.6. On `main` a forgotten password cannot be recovered at all | G-06 to send real email |
-| An admin tool to look up or act on an account | The only admin screen is a read-only overview with counts and recent audit entries. User lookup, suspension and plan changes are in progress | Engineering; see `docs/compliance/THREAT_MODEL.md` |
+| **Password recovery** | See section 3.6. In production a forgotten password cannot be recovered: the reset flow is built but switched off, and no email is sent | G-06 to send real email |
+| A usable admin tool and a procedure for it | The web admin console (user search, suspension, plans, flags, audit log, outbox) and API routes to export or delete an account on its owner's behalf exist. But no administrator exists on the preview, the export and delete routes have no web screen at `2b0c7c1`, and **the staff export and delete procedure is a Founder decision still to be written** (section 6) | Founder (G-09, O-12); `docs/backlog/owner-questions.md` |
 | A status page or in-app incident banner | No way to tell users about an outage | G-02 |
 | Help content in the mobile app | The help, terms, privacy and methodology pages are web only | Mobile |
 | A procedure for suspected under-21 accounts | Policy exists as one line; no steps, no tool | Counsel (AG-03) |
@@ -98,25 +100,34 @@ Then consider section 5.1.
 - It takes effect immediately and cannot be undone. There is no grace period.
 - Removed: the account, bets and legs, watchlist, alert rules, notifications, notification preferences, the staking
   reminder, sync connections and import history.
-- **Kept:** security audit entries holding the account's internal id and the IP address of past actions, with no
-  email or name; and server logs until they expire. Retention periods are not decided. Do not tell a user that
-  "everything" is erased.
-- Support cannot delete an account for a user today. There is no tool for it.
+- Also removed: stored account messages and all community content.
+- **Kept:** security audit entries holding the account's internal id, the IP address and the detail of each past
+  action (for example a bet's result or a followed team), with no email or name and no end date; daily database
+  backups for about 14 days and the newest five pre-deploy backups, which still hold the account; server logs, which
+  have no retention rule; and, if the account was suspended when deleted, its community handle, which stays reserved.
+  Retention periods are not decided. Do not tell a user that "everything" is erased.
+- If the user cannot sign in: the API can export or delete an account on its owner's behalf
+  (`POST /v1/admin/users/{user_id}/export` and `/delete`, each needing a reason; delete also needs the account's email
+  typed). **Do not use them yet.** No administrator exists on the preview, and who may run them, how the requester's
+  identity is checked, how the export file is sent and destroyed, whether a deletion needs a second person and how
+  long the reason text is kept are Founder decisions not yet written (section 6, item 10). Escalate under 5.5.
 
 > You can delete your account in Settings > Delete account. It removes your account, bets, watchlist, alerts and
 > notifications straight away and can't be undone. A security record of past actions, without your email or name,
-> is kept for a limited time.
+> is kept, and backups still hold the account for about two weeks.
 
 Check the wording of the last sentence with counsel before first use (`COUNSEL_REVIEW_PACKET.md` question 15).
 
 ### 3.6 "I forgot my password"
 
-State on `main`: **there is no way to recover a forgotten password.** No reset email exists. The only password
-change is in Settings, and it needs the current password.
+State at `2b0c7c1`, in production: **there is no way to recover a forgotten password.** The reset and
+email-verification flows are built, but the `email_flows` switch is off in production, so "Forgot password?" is not
+shown and no email is sent. The only password change is in Settings, and it needs the current password. Outside
+production the flows write the email to an internal table and **send nothing**. Support must know which state is live
+before answering.
 
-In progress, not merged: reset and email-verification flows that write the email to an internal table and **send
-nothing**. If that ships while real sending is still unapproved, a user who asks for a reset will receive no email.
-Support must know which state is live before answering.
+After repeated failed sign-ins an email can also be refused for up to 15 minutes; with reset off, waiting is the only
+way back in for the user (the operator's options are in `infrastructure/RUNBOOK.md`).
 
 Today's honest answer:
 
@@ -162,8 +173,10 @@ pressing "Sync now" again is safe: it never duplicates bets.
 ### 3.12 "What does OddVex AI do? It didn't understand me."
 
 It is rule-based. It matches a small set of question types and answers from the app's own data with a sources
-line. No language model is connected. It declines picks and guarantees, and responds to distress language with
-help resources instead of betting data.
+line. No language model is connected. It declines picks and guarantees. Fixed rules give crisis, under-21 and distress
+messages a support reply with help resources instead of betting data, and every other answer ends with the helpline
+and 988. The rules miss some wordings (`docs/compliance/RESPONSIBLE_GAMBLING.md` section 5): if a user reports that the
+assistant answered a message about distress or self-harm with betting data, treat it as 5.1 and tell engineering.
 
 ### 3.13 "How much does it cost?" / "When is Premium?"
 
@@ -171,7 +184,7 @@ It is free. No price has been set and nothing can be bought. Do not speculate.
 
 ### 3.14 "Where is the mobile app?"
 
-Not in any store. The download page says the apps are in development. The app has not been tested on devices.
+Not in any store. The download page says the apps are in development. One Android test build exists for the Founder's own phone; it is signed with a public debug key and must not be shared (`apps/mobile/README.md`, "Builds"). The app has not been reported as tested on devices.
 
 ### 3.15 "Is this legal in my state?" / "Can I use it if I'm 19?"
 
@@ -187,7 +200,7 @@ result.
 
 Short forms for repeat use. Fill the brackets. Every macro ends with the standard footer.
 
-**Footer:** `OddVex is for adults 21+ and does not accept wagers. Gambling problem? Call 1-800-GAMBLER.`
+**Footer:** `OddVex is for adults 21+ and does not take wagers. Gambling problem? Call 1-800-MY-RESET (1-800-697-3738) or text 800GAM.`
 
 ### 4.1 Synthetic data
 
@@ -252,16 +265,17 @@ the trouble.
 ### 4.8 Responsible gambling
 
 ```
-Thank you for telling us. You don't have to handle this alone. Free, confidential
-help is available any time from the National Problem Gambling Helpline at
-1-800-GAMBLER. If you are in crisis or thinking about harming yourself, call or
-text 988 now.
+Thank you for telling us. You don't have to handle this alone. The National
+Problem Gambling Helpline is confidential and answers 24 hours a day, every day:
+call 1-800-MY-RESET (1-800-697-3738) or text 800GAM. It is not an emergency
+service. If you are in crisis or thinking about harming yourself, call or text
+988 now, or call 911 if you are in immediate danger.
 
 If it would help, you can delete your OddVex account in Settings > Delete account.
 We won't send you anything about betting.
 ```
 
-Helpline details must be re-verified before each release (`docs/compliance/RESPONSIBLE_GAMBLING.md`). Do not add
+Helpline details were last checked on 2026-11-19 against the National Council on Problem Gambling's pages and must be re-verified before each release (`docs/compliance/RESPONSIBLE_GAMBLING.md`). Never give 1-800-GAMBLER as the national helpline: it is the Council on Compulsive Gambling of New Jersey's line. Do not add
 betting information to this reply.
 
 ### 4.9 Feature or date request
@@ -286,8 +300,8 @@ and don't send passwords or other secrets by email.
 | 5.1 | **User in distress about gambling, or any mention of self-harm** | Reply first with macro 4.8. Then tell the Founder | Immediately | No betting data in the reply. Record it. Do not diagnose or counsel |
 | 5.2 | A user sees someone else's data, or an account was accessed without permission | Engineering and Founder: this is SEV1 (`docs/compliance/INCIDENT_RESPONSE.md` 5.1, 5.3) | Immediately | Do not ask the user to "try again". Preserve what they sent |
 | 5.3 | A number is wrong: price, best price, calculator result, profit, settlement | Engineering (INCIDENT_RESPONSE 5.4) | Same day | Collect the screen, time, game, values shown and expected |
-| 5.4 | A user says or shows they are under 21 | Founder | Same day | Policy is to close the account and delete its data. No procedure or tool exists; do nothing by hand without the Founder. Counsel question AG-03 |
-| 5.5 | Data-rights request: access, deletion, correction | Self-serve answers in 3.5 and 3.9. If the user cannot sign in, Founder | Deadline to be set by counsel (PD-Q6) | Never delete on an unverified request |
+| 5.4 | A user says or shows they are under 21 | Founder | Same day | Policy is to close the account and delete its data. A staff delete route exists, but no procedure is written and no administrator exists on the preview; do nothing by hand without the Founder. Counsel question AG-03 |
+| 5.5 | Data-rights request: access, deletion, correction | Self-serve answers in 3.5 and 3.9. If the user cannot sign in, Founder | Deadline to be set by counsel (PD-Q6) | Never delete or export on an unverified request. The privacy and contact pages promise staff export and delete for people who cannot sign in; until the procedure in section 6, item 10 is written, only the Founder decides |
 | 5.6 | Security vulnerability report | Engineering and Founder | Acknowledge within the target in `SECURITY_BASELINE.md` section 10 (a proposal) | Macro 4.10 |
 | 5.7 | Legal notice, regulator, law enforcement, lawyer's letter, subpoena | Founder only (G-10). Do not reply | Immediately | INCIDENT_RESPONSE 5.10 |
 | 5.8 | Press, partnership, affiliate, advertising or sportsbook enquiry | Founder (G-05) | Next business day | Do not confirm plans |
@@ -317,7 +331,8 @@ Contacts:
 | 5 | Identity verification standard for account requests | Counsel (PR-11) |
 | 6 | Under-21 procedure | Counsel (AG-03) |
 | 7 | The retained-data sentence for deletion replies | Counsel |
-| 8 | Who may use admin user management once it exists, and how its use is recorded | Founder (G-09) |
+| 8 | Who may use admin user management (it exists), and who the first administrator is. Use is recorded in the audit log | Founder (G-09, O-12) |
+| 10 | **The staff export and delete procedure** for someone who cannot sign in: who may run it, how identity is checked, how the file is sent and destroyed, whether a deletion needs a second approver, how long the free-text reason is kept in the audit log | Founder, counsel. Not yet written |
 | 9 | Whether a "forgot password" entry point may be shown before real email is approved | Founder (G-06) |
 
 ## 7. Readiness checklist
@@ -329,6 +344,6 @@ Contacts:
 - [ ] Helpline details re-verified
 - [ ] Contacts table filled in
 - [ ] Escalation tested once with a made-up case of each of 5.1, 5.2 and 5.4
-- [ ] Web help page (`/help`) agrees with this document. Today its deletion answer says "Your account, bets and any
-      sync connections are removed immediately" and does not mention the retained security record
+- [ ] Web help page (`/help`) agrees with this document. Since `2b0c7c1` its deletion answer mentions the retained
+      security log entries, backups and staff deletion; re-check before each release
 - [ ] Help content reachable from the mobile app

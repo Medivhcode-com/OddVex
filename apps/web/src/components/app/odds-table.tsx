@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Freshness } from "@/components/app/freshness";
+import { Freshness, UndatedFreshness } from "@/components/app/freshness";
 import { Price } from "@/components/app/odds-format";
 import { formatLine, formatPercent } from "@/lib/format";
 import type { OddsComparison, Outcome } from "@/lib/types";
@@ -12,7 +12,9 @@ function lineText(market: string, outcome: Outcome) {
 
 /**
  * Books as rows, outcomes as columns. On a phone the table scrolls sideways with the book column pinned.
- * Best price = mint notch + the word "Best". Stale and closed markets are spelled out.
+ * Best price = mint notch + the word "Best". Stale and closed markets are spelled out. The stale
+ * label follows the API's `is_stale`, which also covers a quote with no time and, for a game in
+ * progress, a quote last updated before the latest score change.
  */
 export function OddsTable({ odds }: { odds: OddsComparison }) {
   const columns = odds.consensus.outcomes.length
@@ -54,10 +56,12 @@ export function OddsTable({ odds }: { odds: OddsComparison }) {
                 <th scope="row" className="sticky left-0 z-10 bg-surface px-4 py-3 text-left font-medium sm:px-5">
                   {book.sportsbook.name}
                   <span className="mt-0.5 block font-normal">
-                    {book.status === "open" && book.last_updated ? (
+                    {book.status !== "open" ? (
+                      <span className="text-xs capitalize text-muted">{book.status}</span>
+                    ) : book.last_updated ? (
                       <Freshness at={book.last_updated} stale={book.is_stale} prefix="" />
                     ) : (
-                      <span className="text-xs capitalize text-muted">{book.status}</span>
+                      <UndatedFreshness stale={book.is_stale} />
                     )}
                   </span>
                 </th>

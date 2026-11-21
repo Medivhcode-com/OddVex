@@ -61,7 +61,7 @@ export default async function CommunityPage({ searchParams }: { searchParams: Pr
         {context.me.can_post ? null : (
           <Notice tone="second" title={context.me.is_public ? "Your profile is hidden" : "Your profile is private"}>
             {context.me.is_public
-              ? "Moderators hid your profile, so you can browse but can't post. Changing the handle or the bio makes it visible again. "
+              ? "Moderators hid your profile, so you can browse but can't post. If you change the handle or the bio, the profile stays hidden and goes back to a moderator for review. "
               : "You can browse, like and report. To post picks, comment or follow people, make your profile public. "}
             <Link href="/app/community/settings">Open community settings</Link>
           </Notice>

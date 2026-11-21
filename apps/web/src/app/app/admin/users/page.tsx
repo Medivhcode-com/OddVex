@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Schemas } from "@oddvex/types";
-import { UserActions } from "@/components/app/admin-controls";
+import { AccountList, UserActions } from "@/components/app/admin-controls";
 import { Badge, Button, EmptyState, Field, Panel, PanelHeader, SelectField } from "@/components/ui/primitives";
 import { adminGet, requireAdmin } from "@/lib/admin";
 import { withQuery } from "@/lib/api";
@@ -65,6 +65,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
           title="Accounts"
           description={list.total === 0 ? "No accounts match" : `Showing ${first} to ${last} of ${list.total}, newest first`}
         />
+        <AccountList>
         {list.items.length === 0 ? (
           <EmptyState title="No accounts match these filters">Try a shorter search, or clear the filters.</EmptyState>
         ) : (
@@ -106,11 +107,12 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                     </dd>
                   </div>
                 </dl>
-                <UserActions user={{ id: user.id, display_name: user.display_name, role: user.role, status: user.status, plan: user.plan }} />
+                <UserActions user={{ id: user.id, display_name: user.display_name, email: user.email, role: user.role, status: user.status, plan: user.plan }} />
               </li>
             ))}
           </ul>
         )}
+        </AccountList>
         {list.total > PAGE_SIZE ? (
           <nav aria-label="Pages of accounts" className="flex items-center justify-between gap-3 border-t border-line px-4 py-2 sm:px-5">
             {offset > 0 ? (

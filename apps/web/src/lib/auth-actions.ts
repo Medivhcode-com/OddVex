@@ -1,21 +1,15 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { api, ApiError, ApiUnavailableError, sessionToken } from "@/lib/api";
+import { api, ApiError, sessionToken } from "@/lib/api";
+import { describeAuthError } from "@/lib/auth-errors";
 import { safeNext } from "@/lib/safe-next";
 import { clearSession, setSession } from "@/lib/session";
 import type { AuthResponse } from "@/lib/types";
 
 export type AuthState = { error?: string; fields?: Record<string, string>; values?: Record<string, string>; suspended?: boolean };
 
-function describe(error: unknown, fallback: string): string {
-  if (error instanceof ApiUnavailableError) return "OddVex can't reach its data service right now. Try again in a moment.";
-  if (error instanceof ApiError) {
-    if (error.status === 429) return "Too many attempts. Wait a minute, then try again.";
-    return error.message || fallback;
-  }
-  return fallback;
-}
+const describe = describeAuthError;
 
 export async function loginAction(_: AuthState, form: FormData): Promise<AuthState> {
   const email = String(form.get("email") ?? "").trim();

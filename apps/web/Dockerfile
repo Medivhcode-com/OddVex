@@ -12,7 +12,7 @@ COPY packages/types packages/types
 COPY apps/web apps/web
 # Public values are compiled into the pages, so they are build arguments, not runtime variables:
 # changing one needs a new build. With an empty contact address the contact page says that an
-# address is being set up. On the Hostinger server the address comes from ODDVEX_CONTACT_EMAIL
+# address is being set up, and the suspended-account notice points to the contact page. On the Hostinger server the address comes from ODDVEX_CONTACT_EMAIL
 # in /opt/oddvex/.env (infrastructure/hostinger/compose.yaml passes it as the build argument).
 ARG NEXT_PUBLIC_SITE_URL=https://oddvex.com
 ARG NEXT_PUBLIC_CONTACT_EMAIL=

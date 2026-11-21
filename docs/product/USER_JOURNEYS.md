@@ -1,6 +1,6 @@
 # OddVex — User Journeys
 
-Last updated: 2026-11-15 · Screens reference [SCREEN_MAP.md](./SCREEN_MAP.md) · Events reference `docs/marketing/ANALYTICS_EVENT_TAXONOMY.md`
+Last updated: 2026-11-21 (assistant edge cases checked against the code at commit `2b0c7c1`) · Screens reference [SCREEN_MAP.md](./SCREEN_MAP.md) · Events reference `docs/marketing/ANALYTICS_EVENT_TAXONOMY.md`
 
 Notes:
 - Personas: P1 Curious Fan (Casey), P2 Recreational Bettor (Riley), P3 Serious Bettor (Sam).
@@ -188,8 +188,11 @@ Formula shown: `EV = p × profit_if_win − (1 − p) × stake`.
 | Tool returns no data | "I don't have data for that" |
 | Stale source data | Answer carries stale chip and time |
 | Ambiguous entity | Clarifying question with options |
-| Request for guaranteed pick / "lock" | Refusal with explanation; offers data instead |
-| User expresses distress or loss of control about gambling | Supportive response with 1-800-GAMBLER and link to `/responsible-gambling`; no betting data pushed |
+| Request for guaranteed pick / "lock" | Refusal with explanation; offers data instead. As built: a fixed reply saying no result is certain |
+| User expresses distress or loss of control about gambling | Supportive response with the National Problem Gambling Helpline, 1-800-MY-RESET (1-800-697-3738), and a link to `/responsible-gambling`; no betting data. As built: a fixed distress reply (helpline, staking reminder, tracker, 988 and 911) |
+| User mentions self-harm or crisis, or threatens someone | As built: a fixed crisis reply with 988 and 911 first, then the gambling helpline, and nothing else |
+| User says they are under 21 | As built: "OddVex is for adults 21 and over", no betting information, the helpline and the crisis line. Nothing is recorded (the AG-03 flag is not built) |
+| Any other answer | As built: ends with the helpline and 988, because the rules above are a fixed list and miss some wordings (`KNOWN_MISSES` in `services/api/tests/test_audit_assistant_detection.py`) |
 | Attempt to get other users' data or override rules | Refuse; only requesting user's data is ever read |
 
 **Success metrics:** share of questions answered from a tool (vs. unsupported); unsupported-intent log (drives roadmap); helpfulness rating (M2); grounding test pass rate in CI (must be 100 %).

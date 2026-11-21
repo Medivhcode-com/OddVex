@@ -1,20 +1,37 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Schemas } from "@oddvex/types";
-import { ReportActions, ReportQueue } from "@/components/app/admin-controls";
-import { Badge, EmptyState, Panel, PanelHeader, Segmented, Stat } from "@/components/ui/primitives";
+import { ReportActions, ReportQueue, RestoreAction } from "@/components/app/admin-controls";
+import { ReportSummary } from "@/components/app/admin-report";
+import { EmptyState, Panel, PanelHeader, Segmented, Stat } from "@/components/ui/primitives";
 import { adminGet, requireAdmin } from "@/lib/admin";
 import { withQuery } from "@/lib/api";
 import { reasonLabel } from "@/lib/community-copy";
 import { requireFlag } from "@/lib/flags";
-import { formatDateTime, titleCase } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { pick } from "@/lib/leagues";
 
 export const metadata: Metadata = { title: "Admin: community" };
 
 const PAGE_SIZE = 20;
-const TARGET: Record<string, string> = { pick: "Pick", comment: "Comment", profile: "Profile" };
-const ACTION: Record<string, string> = { dismiss: "Dismissed", hide_content: "Content hidden", remove_content: "Content removed", suspend_author: "Author suspended" };
+const ACTION: Record<string, string> = {
+  dismiss: "Dismissed",
+  hide_content: "Content hidden",
+  remove_content: "Content removed",
+  suspend_author: "Author suspended",
+  restore_content: "Content restored",
+};
+
+/**
+ * What `POST /v1/admin/community/restore` needs to name the reported content: the pick or
+ * comment id, or for a profile its current handle (the author's handle now, which may differ
+ * from the one reported).
+ */
+function restoreTarget(report: Schemas["AdminReportOut"]): string | null {
+  if (!report.target_exists || !report.target_moderation_status || report.target_moderation_status === "visible") return null;
+  if (report.target_type === "profile") return report.author.handle ?? null;
+  return report.target_id;
+}
 
 function Party({ label, party }: { label: string; party: Schemas["AdminReportPartyOut"] }) {
   return (
@@ -32,7 +49,10 @@ function Party({ label, party }: { label: string; party: Schemas["AdminReportPar
   );
 }
 
-/** Community moderation: counts and the report queue. Exists only while the `community` flag is on. */
+/**
+ * Community moderation: counts, the report queue and the restore action for hidden or removed
+ * content. Exists only while the `community` flag is on.
+ */
 export default async function AdminCommunityPage({ searchParams }: { searchParams: Promise<{ status?: string; offset?: string }> }) {
   await requireAdmin();
   await requireFlag("community");
@@ -82,28 +102,7 @@ export default async function AdminCommunityPage({ searchParams }: { searchParam
           <ul className="divide-y divide-line">
             {list.items.map((report) => (
               <li key={report.id} className="space-y-3 px-4 py-4 sm:px-5">
-                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                  <h3 className="font-medium">
-                    {TARGET[report.target_type] ?? titleCase(report.target_type)} reported for {reasonLabel(report.reason).toLowerCase()}
-                  </h3>
-                  <p className="flex flex-wrap items-center gap-1.5">
-                    <Badge tone={report.status === "open" ? "warn" : "neutral"}>{report.status === "open" ? "Open" : "Resolved"}</Badge>
-                    <Badge>Target: {TARGET[report.target_type] ?? report.target_type}</Badge>
-                    {report.target_exists ? null : <Badge>Target deleted</Badge>}
-                    {report.target_moderation_status && report.target_moderation_status !== "visible" ? <Badge tone="second">Now {report.target_moderation_status}</Badge> : null}
-                  </p>
-                </div>
-                {report.target_summary ? <p className="break-words text-sm text-muted">{report.target_summary}</p> : null}
-                <div>
-                  <p className="text-xs text-muted">Reported content</p>
-                  {report.target_text ? (
-                    <blockquote className="mt-1 max-w-prose whitespace-pre-line break-words rounded-cell border border-line bg-bg px-3 py-2 text-sm">
-                      {report.target_text}
-                    </blockquote>
-                  ) : (
-                    <p className="mt-1 text-sm text-muted">{report.target_exists ? "This item has no text." : "The item no longer exists."}</p>
-                  )}
-                </div>
+                <ReportSummary report={report} />
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
                   <div>
                     <dt className="text-xs text-muted">Reason</dt>
@@ -138,6 +137,12 @@ export default async function AdminCommunityPage({ searchParams }: { searchParam
                 ) : (
                   <ReportActions report={{ id: report.id, targetType: report.target_type, authorHandle: report.author.handle ?? null, targetExists: report.target_exists }} />
                 )}
+                {restoreTarget(report) ? (
+                  <RestoreAction
+                    target={{ type: report.target_type, id: restoreTarget(report)!, status: report.target_moderation_status ?? "hidden" }}
+                    label={`report ${report.id.slice(0, 8)}`}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>

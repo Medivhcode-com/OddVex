@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Field, Notice, SelectField } from "@/components/ui/primitives";
-import { clientApi, ClientApiError } from "@/lib/client-api";
+import { betSaveError, ClientRequestIds, stakeProblem } from "@/lib/bet-request";
+import { clientApi } from "@/lib/client-api";
 
 type Leg = { selection: string; market: string; odds: string; closing_odds: string; event_label: string };
 const emptyLeg = (): Leg => ({ selection: "", market: "moneyline", odds: "", closing_odds: "", event_label: "" });
@@ -31,6 +32,8 @@ export function BetForm({ leagues, sportsbooks }: { leagues: { key: string; name
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
+  // One client_request_id per filled-in form, so a retry after a lost answer is not saved twice.
+  const [requestIds] = useState(() => new ClientRequestIds());
   const multi = betType === "parlay" || betType === "sgp";
 
   const update = (index: number, patch: Partial<Leg>) => setLegs((current) => current.map((leg, i) => (i === index ? { ...leg, ...patch } : leg)));
@@ -41,34 +44,36 @@ export function BetForm({ leagues, sportsbooks }: { leagues: { key: string; name
     setSaved(false);
     const stakeValue = Number(stake);
     const used = multi ? legs : legs.slice(0, 1);
-    if (!Number.isFinite(stakeValue) || stakeValue <= 0) return setError("Enter a stake greater than zero.");
+    const stakeError = stakeProblem(stake);
+    if (stakeError) return setError(stakeError);
     if (!sportsbook.trim()) return setError("Enter the sportsbook.");
     if (multi && used.length < 2) return setError("A parlay needs at least two legs.");
     if (used.some((leg) => !leg.selection.trim() || !leg.odds.trim())) return setError("Each leg needs a selection and odds.");
     setPending(true);
+    const body = {
+      bet_type: betType,
+      stake: stakeValue,
+      sportsbook: sportsbook.trim(),
+      legs: used.map((leg) => ({
+        selection: leg.selection.trim(),
+        market: leg.market,
+        league: league || null,
+        event_label: leg.event_label.trim() || null,
+        odds: cleanOdds(leg.odds),
+        odds_format: format,
+        closing_odds: leg.closing_odds.trim() ? cleanOdds(leg.closing_odds) : null,
+      })),
+    };
     try {
-      await clientApi("/v1/bets", {
-        body: {
-          bet_type: betType,
-          stake: stakeValue,
-          sportsbook: sportsbook.trim(),
-          legs: used.map((leg) => ({
-            selection: leg.selection.trim(),
-            market: leg.market,
-            league: league || null,
-            event_label: leg.event_label.trim() || null,
-            odds: cleanOdds(leg.odds),
-            odds_format: format,
-            closing_odds: leg.closing_odds.trim() ? cleanOdds(leg.closing_odds) : null,
-          })),
-        },
-      });
+      // 201 for a new bet, 200 when the API had already stored this one: both mean saved.
+      await clientApi("/v1/bets", { body: { ...body, client_request_id: requestIds.forSend(body) } });
+      requestIds.saved();
       setLegs([emptyLeg()]);
       setStake("");
       setSaved(true);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof ClientApiError ? caught.message : "The bet was not saved. Try again.");
+      setError(betSaveError(caught));
     } finally {
       setPending(false);
     }
@@ -77,7 +82,7 @@ export function BetForm({ leagues, sportsbooks }: { leagues: { key: string; name
   const placeholder = format === "american" ? "-110" : format === "decimal" ? "1.91" : "10/11";
 
   return (
-    <form onSubmit={submit} className="space-y-4 p-4 sm:p-5" noValidate>
+    <form onSubmit={submit} onChange={() => requestIds.edited()} className="space-y-4 p-4 sm:p-5" noValidate>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SelectField id="bet-type" label="Bet type" value={betType} onChange={(e) => { setBetType(e.target.value); if (e.target.value === "parlay" || e.target.value === "sgp") setLegs((l) => (l.length < 2 ? [...l, emptyLeg()] : l)); }}>
           {TYPES.map((type) => (
@@ -118,7 +123,7 @@ export function BetForm({ leagues, sportsbooks }: { leagues: { key: string; name
             <Field id={`leg-${index}-closing`} label="Closing odds" inputMode="text" className="[&_input]:font-mono" placeholder="Optional" value={leg.closing_odds} onChange={(e) => update(index, { closing_odds: e.target.value })} />
           </div>
           {multi && legs.length > 2 ? (
-            <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setLegs((current) => current.filter((_, i) => i !== index))}>
+            <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => { requestIds.edited(); setLegs((current) => current.filter((_, i) => i !== index)); }}>
               Remove leg {index + 1}
             </Button>
           ) : null}
@@ -128,7 +133,7 @@ export function BetForm({ leagues, sportsbooks }: { leagues: { key: string; name
       <div className="flex flex-wrap items-end gap-3">
         <Field id="bet-stake" label="Stake ($)" inputMode="decimal" className="w-36" placeholder="25.00" value={stake} onChange={(e) => setStake(e.target.value)} />
         {multi ? (
-          <Button type="button" variant="secondary" onClick={() => setLegs((current) => [...current, emptyLeg()])}>
+          <Button type="button" variant="secondary" onClick={() => { requestIds.edited(); setLegs((current) => [...current, emptyLeg()]); }}>
             Add a leg
           </Button>
         ) : null}
