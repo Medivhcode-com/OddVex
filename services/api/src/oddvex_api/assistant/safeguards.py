@@ -171,12 +171,45 @@ _OUT_OF_SPORT = (
     r"parlay|bet|wager|ticket|slip|contract|deal|subscription|plan|slump|jam|inning|game|"
     r"league|trade)\b)"
 )
-#: A count in a game or a bet, in "how many <count> would end it": not a lethal-means question.
-_NOT_A_SPORTS_COUNT = (
-    r"(?!(?:more )?(?:points?|pts|runs?|goals?|games?|wins?|losses|outs?|strikes?|strikeouts?|"
-    r"ks|threes?|3s|baskets?|buckets?|shots?|touchdowns?|tds?|yards?|laps?|rounds?|sets?|"
-    r"innings?|legs?|units?|bets?|parlays?|picks?|minutes?|mins?|seconds?|turnovers?|fouls?)\b)"
+#: Counts in a game or a bet. "How many <count> would end it", with or without "more"
+#: before the count, is not a lethal-means question. One entry per line, like the "end it"
+#: lists below.
+_SPORTS_COUNTS = (
+    "points?",
+    "pts",
+    "runs?",
+    "goals?",
+    "games?",
+    "wins?",
+    "losses",
+    "outs?",
+    "strikes?",
+    "strikeouts?",
+    "ks",
+    "threes?",
+    "3s",
+    "baskets?",
+    "buckets?",
+    "shots?",
+    "touchdowns?",
+    "tds?",
+    "yards?",
+    "laps?",
+    "rounds?",
+    "sets?",
+    "innings?",
+    "legs?",
+    "units?",
+    "bets?",
+    "parlays?",
+    "picks?",
+    "minutes?",
+    "mins?",
+    "seconds?",
+    "turnovers?",
+    "fouls?",
 )
+_NOT_A_SPORTS_COUNT = rf"(?!(?:more )?(?:{'|'.join(_SPORTS_COUNTS)})\b)"
 #: The thing asked about in "how many <one or two words> would kill me".
 _ONE_OR_TWO_WORDS = rf"{_NOT_A_SPORTS_COUNT}(?:\w+(?: \w+)?)"
 #: What follows "end it" when a game or a series ends: "end it in four", "end it with a
@@ -575,16 +608,92 @@ _NO_SUBJECT_MODAL = (
 # lists below follows. Anything else after "with", "on", "in", "at" or "by" is a game that
 # ends ("gonna end it with a 3", "gonna end it in the bottom of the ninth"); so is any word
 # not on the lists ("gonna end it for the night").
-_END_IT_CLAUSE_END = r"(?=[.,!?;]|$| (?:and|but|so|or|because|cause|cuz|then)\b)"
-_END_IT_TIME = (
-    r"(?:tonight|today|tomorrow|soon|later|forever|for good|for real|this (?:weekend|week|"
-    r"morning|evening)|in the morning|before (?:the )?morning|at (?:midnight|home tonight|dawn)|"
-    r"at \d{1,2}(?::\d\d)? ?(?:am|pm|oclock|tonight|today|tomorrow)|in (?:a|an|one|two|three|"
-    r"a few|a couple(?: of)?|\d+) (?:minutes?|mins?|hours?|hrs?|days?)|after (?:tonight|today|"
-    r"this|the game|the loss|work))\b"
-)
 # The lists are tuples, one entry per line, so that the tests can remove each entry on its
 # own and check that a message changes (``MUTATIONS`` in tests/test_audit_assistant_detection.py).
+#: Words that end the clause after "end it", as a full stop does: "gonna end it and ...".
+_END_IT_CONJUNCTIONS = (
+    "and",
+    "but",
+    "so",
+    "or",
+    "because",
+    "cause",
+    "cuz",
+    "then",
+)
+_END_IT_CLAUSE_END = rf"(?=[.,!?;]|$| (?:{'|'.join(_END_IT_CONJUNCTIONS)})\b)"
+#: Words that may stand between "end it" and the end of the clause, a time or a means.
+_END_IT_FILLERS = (
+    "here",
+    "there",
+    "now",
+    "right now",
+    "early",
+    "just",
+)
+#: The times. Some entries are built from the shorter lists before them.
+_END_IT_TIME_THIS = (
+    "weekend",
+    "week",
+    "morning",
+    "evening",
+)
+_END_IT_TIME_AT = (
+    "midnight",
+    "home tonight",
+    "dawn",
+)
+_END_IT_TIME_CLOCK = (
+    "am",
+    "pm",
+    "oclock",
+    "tonight",
+    "today",
+    "tomorrow",
+)
+_END_IT_TIME_COUNTS = (
+    "a",
+    "an",
+    "one",
+    "two",
+    "three",
+    "a few",
+    "a couple(?: of)?",
+    r"\d+",
+)
+_END_IT_TIME_UNITS = (
+    "minutes?",
+    "mins?",
+    "hours?",
+    "hrs?",
+    "days?",
+)
+_END_IT_TIME_AFTER = (
+    "tonight",
+    "today",
+    "this",
+    "the game",
+    "the loss",
+    "work",
+)
+_END_IT_TIMES = (
+    "tonight",
+    "today",
+    "tomorrow",
+    "soon",
+    "later",
+    "forever",
+    "for good",
+    "for real",
+    rf"this (?:{'|'.join(_END_IT_TIME_THIS)})",
+    "in the morning",
+    "before (?:the )?morning",
+    rf"at (?:{'|'.join(_END_IT_TIME_AT)})",
+    rf"at \d{{1,2}}(?::\d\d)? ?(?:{'|'.join(_END_IT_TIME_CLOCK)})",
+    rf"in (?:{'|'.join(_END_IT_TIME_COUNTS)}) (?:{'|'.join(_END_IT_TIME_UNITS)})",
+    rf"after (?:{'|'.join(_END_IT_TIME_AFTER)})",
+)
+_END_IT_TIME = rf"(?:{'|'.join(_END_IT_TIMES)})\b"
 # "noose" is not on the means list: ``\bnooses?\b`` is a crisis wherever it stands.
 _END_IT_PREPOSITIONS = (
     "with",
@@ -667,7 +776,7 @@ _END_IT_MEANS = (
     rf"(?:{'|'.join(_END_IT_MEANS_WORDS)})\b"
 )
 _NO_SUBJECT_END_IT_TAIL = (
-    r"(?:(?: (?:here|there|now|right now|early|just))?"
+    rf"(?:(?: (?:{'|'.join(_END_IT_FILLERS)}))?"
     rf"(?:{_END_IT_CLAUSE_END}| {_END_IT_TIME}| {_END_IT_PREPOSITION}{_END_IT_MEANS}))"
 )
 _NO_SUBJECT_CRISIS_RE = _any(
