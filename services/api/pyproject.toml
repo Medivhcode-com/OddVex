@@ -29,7 +29,7 @@ dev = [
     "mypy>=1.13,<3.0",
 ]
 # Only for scripts/build_replay_data.py, which reads Parquet. Not needed to run the API.
-replay = ["pyarrow>=17,<25"]
+replay = ["pyarrow>=17,<27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
