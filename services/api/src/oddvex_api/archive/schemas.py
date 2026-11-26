@@ -48,7 +48,8 @@ class ArchivedOutcomeOut(BaseModel):
 
 
 class ArchivedQuoteOut(BaseModel):
-    """One book's quote as it was stored: the latest row at or before the coverage row."""
+    """One book's quote as it was stored: the latest row at or before the coverage row.
+    Quotes are returned only when the coverage status is `captured`."""
 
     sportsbook: SportsbookRef
     status: Literal["open", "suspended", "unavailable", "closed"] = Field(
@@ -66,7 +67,12 @@ class ArchivedOddsOut(BaseModel):
     requested_as_of: datetime
     coverage: CoverageOut
     data_mode: DataMode
-    quotes: list[ArchivedQuoteOut]
+    quotes: list[ArchivedQuoteOut] = Field(
+        description=(
+            "Each book's stored quote from the covering capture. Empty unless the coverage "
+            "status is `captured`: an older kept capture is not the market at that time."
+        )
+    )
     odds: EventOddsOut | None = Field(
         default=None,
         description=(
@@ -92,10 +98,35 @@ class ArchivedPropOut(BaseModel):
     provider_id: str
 
 
+class PropsCoverageOut(BaseModel):
+    status: CoverageStatusOut = Field(
+        description=(
+            "Read from the latest successful props capture at or before the requested time. "
+            "`captured`: it is at most two props intervals plus one worker turn before it "
+            "(7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before "
+            "the first props capture. `archive_pruned`: the time is past the keep horizon. "
+            "Offers are returned only when `captured`."
+        )
+    )
+    captured_at: datetime | None = Field(
+        default=None,
+        description="When the latest successful props capture at or before the time ran.",
+    )
+
+
 class ArchivedPropsOut(BaseModel):
     requested_as_of: datetime
     data_mode: DataMode
+    coverage: PropsCoverageOut
     offers: list[ArchivedPropOut]
+    pruned_event_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The player's games whose offers at the requested time cannot be read back "
+            "exactly, because the retention prune kept only their closing offers. Their "
+            "offers are left out of `offers`."
+        ),
+    )
 
 
 class ArchivedStatusEntryOut(BaseModel):
@@ -187,8 +218,16 @@ class ArchiveStatsOut(BaseModel):
     enabled: bool
     approx_bytes: int = Field(
         description=(
-            "PostgreSQL: the five tables with their indexes. SQLite: rows times 400 bytes."
+            "The data the archive holds, as the storage cap counts it: each table's row "
+            "count times its measured bytes per row. It falls when the prune deletes rows."
         )
+    )
+    disk_bytes: int | None = Field(
+        default=None,
+        description=(
+            "PostgreSQL only: the size of the five tables' files with their indexes. It does "
+            "not fall after the prune, whose freed space later rows reuse."
+        ),
     )
     max_bytes: int
     retention_days: int

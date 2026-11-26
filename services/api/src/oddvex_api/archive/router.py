@@ -65,8 +65,8 @@ def _as_of(value: datetime, provider: ProviderDep) -> datetime:
     summary="One event's archived odds as of a time",
     description=(
         "Every book's quote for one market as captured at or before `as_of`, the coverage "
-        "of the event then, and the odds comparison as of `as_of` when it is covered. "
-        "Behind the `snapshot_archive` flag."
+        "of the event then, and the odds comparison as of `as_of`; quotes and comparison "
+        "only when the event is covered. Behind the `snapshot_archive` flag."
     ),
     dependencies=_FLAG,
 )
@@ -89,9 +89,12 @@ def get_archived_event_odds(
     summary="One player's archived prop offers as of a time",
     description=(
         "The latest offer per game, market and book captured at or before `as_of`, for "
-        "each of the player's games with an offer in the 48 hours before it; a game whose "
-        "offers were all withdrawn or that had left scope is left out. Behind the "
-        "`snapshot_archive` flag."
+        "each of the player's games with an offer in the 48 hours before it, and the "
+        "props coverage then. A game whose offers were all withdrawn or that had left "
+        "scope is left out. A game the retention prune has reduced to its closing offers "
+        "is served only where those are still the answer; otherwise its offers are left "
+        "out and its id is listed in `pruned_event_ids`. Behind the `snapshot_archive` "
+        "flag."
     ),
     dependencies=_FLAG,
 )

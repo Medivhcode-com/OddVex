@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..board import Board
@@ -40,6 +40,8 @@ from ..providers import (
 CoverageStatus = Literal["captured", "not_captured", "archive_gap", "archive_pruned"]
 #: Hours a game lasts at most, for the props look-back (:func:`prop_lookback`).
 PROP_GAME_HOURS = 12
+#: The worker loop's period: the gap limits allow two missed intervals plus one turn.
+WORKER_TURN_SECONDS = 120
 
 
 @dataclass(frozen=True)
@@ -244,6 +246,179 @@ def latest_prop_rows(
     return [r for r in rows if r.event_id in offered]
 
 
+def props_max_gap_seconds(settings: Settings) -> int:
+    """Two props intervals plus one worker turn (7,320 s with hourly props), the props
+    counterpart of ``snapshot_max_gap_seconds``."""
+    return 2 * settings.snapshot_props_interval_seconds + WORKER_TURN_SECONDS
+
+
+@dataclass(frozen=True)
+class PropsRead:
+    """One player's props as of T.
+
+    ``status`` is read from P, the latest ``ok`` props capture at or before T:
+    ``captured`` when P is at most :func:`props_max_gap_seconds` before T,
+    ``archive_gap`` when it is older, ``not_captured`` before the first capture, and
+    ``archive_pruned`` when no run is left from before T and T is past the keep horizon.
+    ``rows`` is empty unless the status is ``captured``.
+
+    ``pruned_event_ids`` names the player's games whose offers at T cannot be read back
+    exactly because the retention prune removed rows of them; their rows are left out.
+    """
+
+    status: CoverageStatus
+    captured_at: datetime | None
+    rows: list[ArchivedProp]
+    pruned_event_ids: list[str]
+
+
+def _run_after(
+    session: Session, provider_name: str, kind: str, moment: datetime, *, inclusive: bool
+) -> datetime | None:
+    """The first ``ok`` run of ``kind`` at (``inclusive``) or after ``moment``."""
+    after = SnapshotRun.captured_at >= moment if inclusive else SnapshotRun.captured_at > moment
+    return session.scalar(
+        select(func.min(SnapshotRun.captured_at)).where(
+            SnapshotRun.kind == kind,
+            SnapshotRun.provider == provider_name,
+            SnapshotRun.status == "ok",
+            after,
+        )
+    )
+
+
+def _pruned_prop_events(
+    session: Session,
+    provider_name: str,
+    player_id: str,
+    team_id: str | None,
+    market: str | None,
+    as_of: datetime,
+    settings: Settings,
+    prune_cutoff: datetime,
+) -> tuple[set[str], list[str]]:
+    """(games whose rows are left out, games named as pruned) for one player at T.
+
+    The prune handles a game G once its last event row L is before the cutoff. It keeps,
+    per prop key, only the latest row at or before G's closing capture C, and deletes
+    every other prop row of G. So G's props at T are still exact only when T is before
+    P1, the first props capture after C, and no kept row of the player lies in (T, C]
+    (else an earlier row of that key was deleted). Otherwise G's rows are left out, and
+    G is named as pruned while T is inside its props activity: from the first props
+    capture after G entered scope (``snapshot_horizon_hours`` before its start) to the
+    look-back after the props capture that tombstoned its offers (the first one after
+    the odds capture that no longer had G).
+
+    Candidate games: those with a prop row of the player, or (by the player's team) an
+    event row in the pruned range, within a few look-backs of T.
+    """
+    lookback = prop_lookback(settings)
+    start, end = as_of - 3 * lookback, as_of + 2 * lookback
+    p, e = ArchivedProp, ArchivedEvent
+    prop_filter = [p.provider == provider_name, p.player_id == player_id]
+    if market is not None:
+        prop_filter.append(p.market == market)
+    candidates = set(
+        session.scalars(
+            select(p.event_id)
+            .where(*prop_filter, p.captured_at >= start, p.captured_at <= end)
+            .distinct()
+        )
+    )
+    if team_id is not None:
+        candidates |= set(
+            session.scalars(
+                select(e.event_id)
+                .where(
+                    e.provider == provider_name,
+                    e.captured_at >= start,
+                    e.captured_at < min(end, prune_cutoff),
+                    or_(e.home_team_id == team_id, e.away_team_id == team_id),
+                )
+                .distinct()
+            )
+        )
+    withheld: set[str] = set()
+    named: list[str] = []
+    horizon = timedelta(hours=settings.snapshot_horizon_hours)
+    for event_id in sorted(candidates):
+        last = session.execute(
+            select(e.captured_at, e.start_time)
+            .where(e.provider == provider_name, e.event_id == event_id)
+            .order_by(e.captured_at.desc())
+            .limit(1)
+        ).first()
+        if last is None or last.captured_at >= prune_cutoff:
+            continue  # not pruned: every row of it is still there
+        first = _run_after(
+            session, provider_name, "props", last.start_time - horizon, inclusive=True
+        )
+        if first is None or as_of < first:
+            continue  # nothing of it had been captured by T
+        closing = session.scalar(
+            select(func.max(e.captured_at)).where(
+                e.provider == provider_name, e.event_id == event_id, e.status == "upcoming"
+            )
+        )
+        if closing is not None:
+            next_props = _run_after(session, provider_name, "props", closing, inclusive=False)
+            later_kept = session.scalar(
+                select(func.count())
+                .select_from(p)
+                .where(
+                    *prop_filter,
+                    p.event_id == event_id,
+                    p.captured_at > as_of,
+                    p.captured_at <= closing,
+                )
+            )
+            if (next_props is None or as_of < next_props) and not later_kept:
+                continue  # exact: the kept closing rows are the answer
+        withheld.add(event_id)
+        left = _run_after(session, provider_name, "odds", last.captured_at, inclusive=False)
+        tombstoned = (
+            _run_after(session, provider_name, "props", left, inclusive=True)
+            if left is not None
+            else None
+        )
+        if tombstoned is None or as_of - lookback <= tombstoned:
+            named.append(event_id)
+    return withheld, named
+
+
+def props_at(
+    session: Session,
+    provider_name: str,
+    player_id: str,
+    market: str | None,
+    as_of: datetime,
+    settings: Settings,
+    team_id: str | None = None,
+) -> PropsRead:
+    """The player's props as of T with their coverage (:class:`PropsRead`)."""
+    run_at = session.scalar(
+        select(func.max(SnapshotRun.captured_at)).where(
+            SnapshotRun.kind == "props",
+            SnapshotRun.provider == provider_name,
+            SnapshotRun.status == "ok",
+            SnapshotRun.captured_at <= as_of,
+        )
+    )
+    if run_at is None:
+        pruned = _runs_pruned(session, as_of, settings)
+        return PropsRead("archive_pruned" if pruned else "not_captured", None, [], [])
+    if (as_of - run_at).total_seconds() > props_max_gap_seconds(settings):
+        return PropsRead("archive_gap", run_at, [], [])
+    rows = latest_prop_rows(session, provider_name, player_id, market, as_of, settings)
+    newest = _newest_prune(session)
+    if newest is None:
+        return PropsRead("captured", run_at, rows, [])
+    withheld, named = _pruned_prop_events(
+        session, provider_name, player_id, team_id, market, as_of, settings, newest[1]
+    )
+    return PropsRead("captured", run_at, [r for r in rows if r.event_id not in withheld], named)
+
+
 def event_from(snapshot: ArchivedEvent) -> Event:
     score = None
     if snapshot.score_home is not None and snapshot.score_away is not None:
@@ -412,12 +587,19 @@ class ArchiveView:
         return [odds_from(row) for row in rows]
 
     def get_prop_offers(self, player_id: str, market: str | None = None) -> list[PropOffer]:
-        return [
-            prop_from(r)
-            for r in latest_prop_rows(
-                self.session, self.name, player_id, market, self.as_of, self.settings
-            )
-        ]
+        """The covered offers as of T (:func:`props_at`): none in a gap, and none of a game
+        whose rows the prune removed."""
+        player = self.base.get_player(player_id)
+        read = props_at(
+            self.session,
+            self.name,
+            player_id,
+            market,
+            self.as_of,
+            self.settings,
+            team_id=player.team_id if player is not None else None,
+        )
+        return [prop_from(r) for r in read.rows]
 
     def get_line_history(self, event_id: str, market: str) -> list[LineSeries]:
         return []
@@ -460,14 +642,18 @@ def board_at(view: ArchiveView, coverage: Coverage) -> Board:
 
 __all__ = [
     "PROP_GAME_HOURS",
+    "WORKER_TURN_SECONDS",
     "ArchiveBoard",
     "ArchiveView",
     "Coverage",
     "CoverageStatus",
+    "PropsRead",
     "board_at",
     "coverage_at",
     "event_from",
     "latest_odds_rows",
     "latest_prop_rows",
     "prop_lookback",
+    "props_at",
+    "props_max_gap_seconds",
 ]

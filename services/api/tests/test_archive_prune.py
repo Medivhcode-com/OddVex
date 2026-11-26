@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 
 from oddvex_api.archive.capture import capture_pass
 from oddvex_api.archive.prune import MAX_ANCHORS_PER_EVENT, prune_archive
+from oddvex_api.archive.service import archived_odds, archived_props
 from oddvex_api.archive.view import coverage_at
 from oddvex_api.db import ARCHIVE_MODELS, ArchivedEvent, ArchivedOdds, ArchivedProp, SnapshotRun
 
@@ -179,7 +180,7 @@ def test_bets_keep_a_bounded_number_of_captures_per_game(archive_env: ArchiveEnv
     """However many bets one user (or many users) record, the prune keeps at most
     ``MAX_ANCHORS_PER_EVENT`` captures of a game for them, beyond its closing and last
     captures. Legs the archive cannot price anchor nothing. A flood of bets from one user
-    cannot crowd out the captures other users' bets point at."""
+    weighs one vote, split over the captures that user anchors."""
     env = archive_env
     times = [at(360 * i) for i in range(12)]  # 0 .. 3,960 s; PREGAME stays upcoming
     for moment in times:
@@ -305,3 +306,109 @@ def test_coverage_tells_pruned_from_never_in_scope(archive_env: ArchiveEnv) -> N
         # The last capture (1,800 s) is kept and is complete.
         last = coverage_at(db, name, PREGAME, at(1900), env.settings)
         assert last.status == "captured" and last.captured_at == at(1800)
+
+
+def test_a_game_whose_rows_straddle_the_cutoff_is_not_pruned_yet(archive_env: ArchiveEnv) -> None:
+    """The prune handles a game only once all of its rows are past the 7 days. A prune
+    whose cutoff falls between a game's captures leaves every row of it, so a read inside
+    the 7 days answers as before."""
+    env = archive_env
+    capture_schedule(env)
+    with env.session_factory() as db:
+        before = archived_odds(db, env.provider, env.settings, PREGAME, "moneyline", at(800))
+    assert before.coverage.status == "captured"
+    env.provider.current = T0 + timedelta(days=7, seconds=600)  # cutoff T0 + 600 s
+    report = prune_archive(env.engine, env.provider, env.settings, force=True)
+    assert report is not None and report.status == "ok"
+    assert at(720) in captured(env, ArchivedEvent, PREGAME)
+    with env.session_factory() as db:
+        after = archived_odds(db, env.provider, env.settings, PREGAME, "moneyline", at(800))
+    assert after.model_dump() == before.model_dump()
+
+
+def test_one_users_flood_does_not_outrank_other_users_captures(archive_env: ArchiveEnv) -> None:
+    """Each user's weight is split over the captures that user anchors on a game. One user
+    anchoring captures 0 to 3 weighs a quarter on each; six other users anchoring one
+    capture each among 5 to 10 weigh one each, so those six are the kept anchors."""
+    env = archive_env
+    times = [at(360 * i) for i in range(12)]
+    for moment in times:
+        env.capture(moment)
+    leg = {"event_id": PREGAME, "market": "moneyline", "outcome_key": "home"}
+    with env.session_factory() as db:
+        flooder = make_user(db, "flood@example.test")
+        for i in range(4):
+            make_bet(db, flooder, times[i] + timedelta(seconds=10), [leg])
+        for i in range(5, 11):
+            make_bet(
+                db, make_user(db, f"user{i}@example.test"), times[i] + timedelta(seconds=10), [leg]
+            )
+        db.commit()
+    env.provider.current = T0 + timedelta(days=8)
+    report = prune_archive(env.engine, env.provider, env.settings)
+    assert report is not None and report.status == "ok"
+    assert captured(env, ArchivedEvent, PREGAME) == sorted(
+        {times[i] for i in range(5, 11)} | {times[-1]}
+    )
+
+
+def test_a_game_that_entered_scope_after_a_capture_is_not_captured_then(
+    archive_env: ArchiveEnv,
+) -> None:
+    """A game three days out is not in the T0 capture. It enters scope 36 hours before its
+    start, is captured, and is pruned. A time covered by the T0 capture still answers
+    ``not_captured`` for it, not ``archive_pruned``."""
+    env = archive_env
+    far = env.provider.list_events(on_date=(T0 + timedelta(days=3)).date())[0]
+    env.capture(T0)
+    entered = far.start_time - timedelta(hours=35)
+    env.capture(entered)
+    env.capture(entered + timedelta(seconds=360))
+    assert captured(env, ArchivedEvent, far.id) == [entered, entered + timedelta(seconds=360)]
+    env.provider.current = entered + timedelta(days=8)
+    report = prune_archive(env.engine, env.provider, env.settings)
+    assert report is not None and report.status == "ok"
+    with env.session_factory() as db:
+        name = env.provider.name
+        assert coverage_at(db, name, far.id, at(100), env.settings).status == "not_captured"
+        # Its own pruned capture is archive_pruned; its kept last capture is captured.
+        first = coverage_at(db, name, far.id, entered + timedelta(seconds=60), env.settings)
+        assert first.status == "archive_pruned"
+
+
+def test_the_props_read_after_the_prune_never_shows_withdrawn_offers(
+    archive_env: ArchiveEnv,
+) -> None:
+    """The tombstone scenario, then the prune. The read inside the closing capture's
+    window answers exactly as before the prune; a read after the game's offers were
+    withdrawn still shows none of them, and names the game as pruned rather than serving
+    the closing offers as open."""
+    env = archive_env
+    p = env.provider
+    event = p.get_event(PREGAME)
+    assert event is not None
+    player_id = p.list_players(team_id=event.home_team_id)[0].id
+    env.capture(T0)
+    p.finish(PREGAME, 3, 2)
+    env.capture(at(360))  # the game left scope: every open offer of it is tombstoned
+    times = (at(-1), at(60), at(400), at(700))
+    with env.session_factory() as db:
+        before = {t: archived_props(db, p, env.settings, player_id, None, t) for t in times}
+    assert [o for o in before[at(400)].offers if o.event_id == PREGAME] == []
+    assert [o for o in before[at(60)].offers if o.event_id == PREGAME]
+    assert all(r.pruned_event_ids == [] for r in before.values())
+
+    p.current = T0 + timedelta(days=8)
+    report = prune_archive(env.engine, p, env.settings)
+    assert report is not None and report.status == "ok"
+    with env.session_factory() as db:
+        after = {t: archived_props(db, p, env.settings, player_id, None, t) for t in times}
+    # Before the first capture: nothing, and nothing was pruned.
+    assert after[at(-1)].model_dump() == before[at(-1)].model_dump()
+    # Between the closing capture and the next props capture: exactly as before.
+    assert after[at(60)].model_dump() == before[at(60)].model_dump()
+    # After the tombstones: still no offer of the finished game, and it is named.
+    for t in (at(400), at(700)):
+        assert [o for o in after[t].offers if o.event_id == PREGAME] == []
+        assert PREGAME in after[t].pruned_event_ids
+        assert after[t].coverage.status == "captured"

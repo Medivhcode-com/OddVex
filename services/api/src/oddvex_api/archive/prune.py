@@ -14,14 +14,20 @@ unchanged quote carried forward. It then keeps, for ``snapshot_keep_days`` (400)
   or total with an outcome and, for spread and total, a line), the capture that covered
   the bet's ``placed_at`` (``view.coverage_at``) and, per (market, book), the latest odds
   row at or before it. At most ``MAX_ANCHORS_PER_EVENT`` captures per event are kept,
-  ranked by how many users anchor them, each user's weight split evenly over the
-  captures that user anchors on the event, ties to the earlier capture. So one user's
-  bets, however many, never keep more than ``MAX_ANCHORS_PER_EVENT`` captures of a game,
-  and cannot crowd out captures that other users' bets point at.
+  ranked by weight: every user with a bet on the event has one vote, split evenly over
+  the captures that user anchors there; ties go to the earlier capture. So one user's
+  bets, however many, never keep more than ``MAX_ANCHORS_PER_EVENT`` captures of a game
+  and weigh no more than one other user's single bet. (With ties to the earlier capture,
+  one user's single earlier capture can still take the last slot from another user's
+  later one.)
 
 Every other row of the event is deleted, in batches of ``DELETE_BATCH`` ids with a commit
-each, so no long lock is held and the write-ahead log stays small. Then everything older
-than ``snapshot_keep_days`` goes: rows first, then the capture runs, which share the rows'
+each, so no long lock is held and the write-ahead log stays small. That includes prop rows
+captured after the event's last event row (the tombstones written when it left scope),
+which therefore go up to about an hour before they are 7 days old; the props read
+(``view.props_at``) serves the kept closing offers only for times at which they are still
+the answer, and names the game as pruned otherwise. Then everything older than
+``snapshot_keep_days`` goes: rows first, then the capture runs, which share the rows'
 ``captured_at`` and so the same cutoff.
 """
 

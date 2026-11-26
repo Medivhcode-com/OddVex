@@ -16,13 +16,16 @@ from sqlalchemy.exc import IntegrityError
 
 from oddvex_api.archive.capture import (
     ADVISORY_LOCK_KEY,
+    PROP_REFRESH_HOURS,
     UPCOMING_GRACE_HOURS,
     StatusRecord,
+    archive_bytes,
     capture_pass,
     capture_status,
     in_scope,
 )
 from oddvex_api.archive.guard import ArchiveIsAppendOnly
+from oddvex_api.archive.prune import prune_archive
 from oddvex_api.archive.service import archived_odds, archived_props
 from oddvex_api.db import (
     ARCHIVE_MODELS,
@@ -41,6 +44,7 @@ from .archive_support import (
     ArchiveEnv,
     archive_env,
     enable_archive,
+    set_quotes,
 )
 from .conftest import EXTERNAL_DATABASE_URL
 from .fakes import ControlledProvider, moneyline
@@ -203,6 +207,39 @@ def test_capture_stops_at_the_storage_cap_and_the_prune_goes_on(archive_env: Arc
     assert report.props is not None and report.props.status == "skipped_full"
     assert report.prune is not None and report.prune.status == "ok"
     assert count(env, ArchivedOdds) == rows
+
+
+def test_capture_resumes_once_the_prune_brings_the_archive_under_the_cap(
+    archive_env: ArchiveEnv,
+) -> None:
+    """The cap counts the rows the archive holds, not the size of its files. On PostgreSQL
+    a delete followed by a plain VACUUM (what autovacuum does) leaves the files as large as
+    before, so a cap measured on file size would never release after the prune."""
+    env = archive_env
+    for offset in (0, 360, 720):
+        set_quotes(env.provider, offset)
+        report = env.capture(T0 + timedelta(seconds=offset))
+        assert report.odds is not None and report.odds.status == "ok"
+    with env.session_factory() as db:
+        full_at = archive_bytes(db)
+    env.settings = env.settings.model_copy(update={"snapshot_max_bytes": full_at})
+    report = env.capture(T0 + timedelta(seconds=1080))
+    assert report.full is True
+    assert report.odds is not None and report.odds.status == "skipped_full"
+    # Eight days on, the prune removes the full-resolution rows of every game.
+    env.provider.current = T0 + timedelta(days=8)
+    pruned = prune_archive(env.engine, env.provider, env.settings, force=True)
+    assert pruned is not None and pruned.status == "ok" and pruned.rows_deleted > 0
+    if env.engine.dialect.name == "postgresql":
+        with env.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            for model in ARCHIVE_MODELS:
+                c.execute(text(f"VACUUM {model.__tablename__}"))
+    with env.session_factory() as db:
+        assert archive_bytes(db) < full_at
+    report = env.capture(T0 + timedelta(days=8, seconds=360))
+    assert report.full is False
+    assert report.odds is not None and report.odds.status == "ok"
+    assert report.odds.rows_written > 0
 
 
 class BrokenProvider(ControlledProvider):
@@ -508,3 +545,64 @@ def test_a_game_still_upcoming_long_after_its_start_leaves_scope(
     )
     found = in_scope(_Schedule([event, inside, outside]), now, env.settings)  # type: ignore[arg-type]
     assert [e.id for e in found] == [PREGAME, "delayed"]
+
+
+class DelayedGameProvider(ControlledProvider):
+    """PREGAME keeps being pushed back: always upcoming, ten hours ahead of the clock, and
+    the only game on the schedule. One player is offered on it, with the offers fixed as
+    they were at T0."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        event = super().get_event(PREGAME)
+        assert event is not None
+        self.event = event
+        self.player_id = self.list_players(team_id=event.home_team_id)[0].id
+        self.fixed = [o for o in super().get_prop_offers(self.player_id) if o.event_id == PREGAME]
+
+    def _delayed(self) -> Event:
+        return self.event.model_copy(
+            update={"status": "upcoming", "start_time": self.current + timedelta(hours=10)}
+        )
+
+    def list_events(
+        self, league: str | None = None, status: str | None = None, on_date: Any = None
+    ) -> list[Event]:
+        return [self._delayed()]
+
+    def get_event(self, event_id: str) -> Event | None:
+        return self._delayed() if event_id == PREGAME else None
+
+    def get_prop_offers(self, player_id: str, market: str | None = None) -> list[PropOffer]:
+        if player_id != self.player_id:
+            return []
+        return [o for o in self.fixed if market is None or o.market == market]
+
+
+def test_an_unchanged_offer_is_stored_again_once_a_day_so_the_props_read_keeps_it(
+    archive_env: ArchiveEnv,
+) -> None:
+    """The props read looks back 48 hours. A game that keeps being pushed back stays in
+    scope longer than that with the same offers; each unchanged offer is stored again
+    once its latest row is ``PROP_REFRESH_HOURS`` old, so the read still finds it."""
+    env = archive_env
+    p = DelayedGameProvider()
+    env.provider = p
+    env.settings = env.settings.model_copy(update={"snapshot_props_interval_seconds": 3600})
+    keys = len(p.fixed)
+    assert keys > 0
+    where = (ArchivedProp.player_id == p.player_id, ArchivedProp.event_id == PREGAME)
+    for hour in range(51):
+        report = env.capture(T0 + timedelta(hours=hour))
+        assert report.props is not None and report.props.status == "ok"
+    with env.session_factory() as db:
+        written = sorted(db.scalars(select(ArchivedProp.captured_at).where(*where).distinct()))
+    assert written == [T0 + timedelta(hours=h) for h in range(0, 51, PROP_REFRESH_HOURS)]
+    assert count(env, ArchivedProp, *where) == keys * len(written)
+    with env.session_factory() as db:
+        read = archived_props(
+            db, p, env.settings, p.player_id, None, T0 + timedelta(hours=50, minutes=30)
+        )
+    assert read.coverage.status == "captured"
+    assert len(read.offers) == keys
+    assert {o.captured_at for o in read.offers} == {T0 + timedelta(hours=48)}

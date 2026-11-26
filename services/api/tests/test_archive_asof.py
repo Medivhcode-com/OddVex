@@ -127,8 +127,14 @@ def assert_as_of(
         offers = archived_props(db, env.provider, env.settings, player_id, None, as_of)
         status = archived_status(db, env.provider, env.settings, PREGAME, as_of)
     check_odds(odds.model_dump(mode="python"), as_of, capture)
+    dumped = offers.model_dump(mode="python")
     check_props(
-        [o.model_dump(mode="python") for o in offers.offers], offers.offers, as_of, capture, props
+        dumped["offers"],
+        offers.offers,
+        as_of,
+        capture,
+        props,
+        {**dumped["coverage"], "pruned_event_ids": dumped["pruned_event_ids"]},
     )
     check_status([e.model_dump(mode="python") for e in status.entries], as_of, capture)
 
@@ -139,20 +145,20 @@ def check_odds(odds: dict[str, Any], as_of: datetime, capture: datetime | None) 
         assert odds["coverage"]["status"] == "not_captured"
         assert odds["quotes"] == [] and odds["odds"] is None
         return
-    for quote in odds["quotes"]:
-        assert quote["captured_at"] <= as_of
-        assert quote["last_updated"] is None or quote["last_updated"] <= quote["captured_at"]
-    offset = int((capture - T0).total_seconds())
-    expected = {
-        book: [price for _, _, price in outcomes]
-        for book, _, _, outcomes in PREGAME_QUOTES[offset]["moneyline"]
-    }
-    found = {
-        q["sportsbook"]["key"]: [o["price"]["american"] for o in q["outcomes"]]
-        for q in odds["quotes"]
-    }
-    assert found == expected
     if as_of - capture <= timedelta(seconds=840):
+        for quote in odds["quotes"]:
+            assert quote["captured_at"] <= as_of
+            assert quote["last_updated"] is None or quote["last_updated"] <= quote["captured_at"]
+        offset = int((capture - T0).total_seconds())
+        expected = {
+            book: [price for _, _, price in outcomes]
+            for book, _, _, outcomes in PREGAME_QUOTES[offset]["moneyline"]
+        }
+        found = {
+            q["sportsbook"]["key"]: [o["price"]["american"] for o in q["outcomes"]]
+            for q in odds["quotes"]
+        }
+        assert found == expected
         assert odds["coverage"] == {
             "status": "captured",
             "captured_at": capture,
@@ -166,7 +172,9 @@ def check_odds(odds: dict[str, Any], as_of: datetime, capture: datetime | None) 
         (best,) = [b for b in board["best"] if b["outcome_key"] == "home"]
         assert (best["sportsbook_key"], best["price"]["american"]) == BEST_HOME[capture]
     else:
+        # Quotes are served only for a covered time: older rows are not the market at T.
         assert odds["coverage"]["status"] == "archive_gap" and odds["odds"] is None
+        assert odds["quotes"] == []
 
 
 def check_props(
@@ -175,12 +183,26 @@ def check_props(
     as_of: datetime,
     capture: datetime | None,
     props: dict[datetime, set[tuple[Any, ...]]],
+    coverage: dict[str, Any],
 ) -> None:
+    """Props are captured on the odds cadence in these tests, so the props gap limit is
+    the same 840 s (two intervals and one worker turn)."""
+    assert pruned_ids(coverage) == []
     if capture is None:
+        assert coverage["status"] == "not_captured" and coverage["captured_at"] is None
         assert offers == []
         return
+    if as_of - capture > timedelta(seconds=840):
+        assert coverage["status"] == "archive_gap" and coverage["captured_at"] == capture
+        assert offers == []
+        return
+    assert coverage["status"] == "captured" and coverage["captured_at"] == capture
     assert all(o["captured_at"] <= as_of for o in dumped)
     assert {prop_key(o) for o in offers} == props[capture]
+
+
+def pruned_ids(coverage: dict[str, Any]) -> list[str]:
+    return list(coverage["pruned_event_ids"])
 
 
 def check_status(entries: list[dict[str, Any]], as_of: datetime, capture: datetime | None) -> None:
@@ -247,8 +269,16 @@ def test_a_query_for_T_returns_only_rows_captured_at_or_before_T(
                 f"/v1/archive/players/{player_id}/props", params=params, headers=headers
             )
             assert offers.status_code == 200, offers.text
-            parsed = _parse_times(offers.json())["offers"]
-            check_props(parsed, [_PropView(o) for o in parsed], as_of, capture, props)
+            body = _parse_times(offers.json())
+            parsed = body["offers"]
+            check_props(
+                parsed,
+                [_PropView(o) for o in parsed],
+                as_of,
+                capture,
+                props,
+                {**body["coverage"], "pruned_event_ids": body["pruned_event_ids"]},
+            )
             status = client.get(
                 f"/v1/archive/events/{PREGAME}/status", params=params, headers=headers
             )

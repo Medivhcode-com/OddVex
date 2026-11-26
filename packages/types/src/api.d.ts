@@ -415,7 +415,7 @@ export interface paths {
         };
         /**
          * One event's archived odds as of a time
-         * @description Every book's quote for one market as captured at or before `as_of`, the coverage of the event then, and the odds comparison as of `as_of` when it is covered. Behind the `snapshot_archive` flag.
+         * @description Every book's quote for one market as captured at or before `as_of`, the coverage of the event then, and the odds comparison as of `as_of`; quotes and comparison only when the event is covered. Behind the `snapshot_archive` flag.
          */
         get: operations["get_archived_event_odds"];
         put?: never;
@@ -455,7 +455,7 @@ export interface paths {
         };
         /**
          * One player's archived prop offers as of a time
-         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the 48 hours before it; a game whose offers were all withdrawn or that had left scope is left out. Behind the `snapshot_archive` flag.
+         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the 48 hours before it, and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`. Behind the `snapshot_archive` flag.
          */
         get: operations["get_archived_player_props"];
         put?: never;
@@ -2317,9 +2317,14 @@ export interface components {
         ArchiveStatsOut: {
             /**
              * Approx Bytes
-             * @description PostgreSQL: the five tables with their indexes. SQLite: rows times 400 bytes.
+             * @description The data the archive holds, as the storage cap counts it: each table's row count times its measured bytes per row. It falls when the prune deletes rows.
              */
             approx_bytes: number;
+            /**
+             * Disk Bytes
+             * @description PostgreSQL only: the size of the five tables' files with their indexes. It does not fall after the prune, whose freed space later rows reuse.
+             */
+            disk_bytes?: number | null;
             /** Enabled */
             enabled: boolean;
             /** Keep Days */
@@ -2359,7 +2364,10 @@ export interface components {
             data_mode: "synthetic" | "replay";
             /** @description The odds comparison as of the requested time, from the same code as the live board with the stale thresholds in force at capture. Only when the coverage status is `captured`. */
             odds?: components["schemas"]["EventOddsOut"] | null;
-            /** Quotes */
+            /**
+             * Quotes
+             * @description Each book's stored quote from the covering capture. Empty unless the coverage status is `captured`: an older kept capture is not the market at that time.
+             */
             quotes: components["schemas"]["ArchivedQuoteOut"][];
             /**
              * Requested As Of
@@ -2412,6 +2420,7 @@ export interface components {
         };
         /** ArchivedPropsOut */
         ArchivedPropsOut: {
+            coverage: components["schemas"]["PropsCoverageOut"];
             /**
              * Data Mode
              * @enum {string}
@@ -2419,6 +2428,11 @@ export interface components {
             data_mode: "synthetic" | "replay";
             /** Offers */
             offers: components["schemas"]["ArchivedPropOut"][];
+            /**
+             * Pruned Event Ids
+             * @description The player's games whose offers at the requested time cannot be read back exactly, because the retention prune kept only their closing offers. Their offers are left out of `offers`.
+             */
+            pruned_event_ids?: string[];
             /**
              * Requested As Of
              * Format: date-time
@@ -2428,6 +2442,7 @@ export interface components {
         /**
          * ArchivedQuoteOut
          * @description One book's quote as it was stored: the latest row at or before the coverage row.
+         *     Quotes are returned only when the coverage status is `captured`.
          */
         ArchivedQuoteOut: {
             /**
@@ -4962,6 +4977,20 @@ export interface components {
              */
             status: "open" | "suspended" | "unavailable";
             under?: components["schemas"]["PriceOut"] | null;
+        };
+        /** PropsCoverageOut */
+        PropsCoverageOut: {
+            /**
+             * Captured At
+             * @description When the latest successful props capture at or before the time ran.
+             */
+            captured_at?: string | null;
+            /**
+             * Status
+             * @description Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the time is past the keep horizon. Offers are returned only when `captured`.
+             * @enum {string}
+             */
+            status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
         };
         /** ProviderHealthOut */
         ProviderHealthOut: {

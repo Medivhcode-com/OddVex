@@ -9,11 +9,16 @@ One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the work
    ``snapshot_odds_interval_seconds`` old, less ``INTERVAL_SLACK_SECONDS`` for the drift of
    the 120 s loop; props likewise with ``snapshot_props_interval_seconds``.
 5. At ``snapshot_max_bytes`` capture stops with a ``skipped_full`` run; the prune goes on.
+   The size is the rows held times measured bytes per row (``ROW_BYTES``), not the size
+   of the files: on PostgreSQL a delete and a plain VACUUM make room for new rows but do
+   not shrink the files, so a file-size cap would never release after the prune.
 6. In scope: live events, and upcoming ones starting within ``snapshot_horizon_hours``
    whose start time passed at most ``UPCOMING_GRACE_HOURS`` ago.
 7. A quote or offer is written only when it differs from the latest stored row for its
    key; a key that disappears gets a tombstone row, and so does every prop offer of a
-   game that has left scope. Inserts go in chunks of
+   game that has left scope. An unchanged prop offer is stored again once its latest row
+   is ``PROP_REFRESH_HOURS`` old, so the 48-hour props read always finds it. Inserts go
+   in chunks of
    ``INSERT_CHUNK``, one transaction per kind. A failed kind is rolled back and recorded
    as a ``failed`` run with the exception's class name only.
 8. The prune (``archive/prune.py``) runs when it is due.
@@ -59,9 +64,19 @@ ARCHIVE_VERSION = 1
 INTERVAL_SLACK_SECONDS = 15
 #: Rows per INSERT statement.
 INSERT_CHUNK = 500
-#: SQLite has no relation sizes: the size check counts rows at this many bytes each, the
-#: measured PostgreSQL figure for an odds row (398 bytes) rounded up.
-SQLITE_ROW_BYTES = 400
+#: Bytes per stored row, heap, keys and indexes, measured on PostgreSQL 16 with
+#: ``pg_total_relation_size`` after ``VACUUM ANALYZE`` (docs/features/p0-1.md, "Bounds").
+#: The status figure is an estimate: no status source exists yet to measure (P0.5).
+ROW_BYTES: dict[str, int] = {
+    "odds_snapshots": 415,
+    "prop_snapshots": 395,
+    "event_snapshots": 349,
+    "status_snapshots": 400,
+    "snapshot_runs": 388,
+}
+#: An unchanged prop offer is stored again once its latest row is this old: well inside
+#: the props read's 48-hour look-back, with room for a missed props capture.
+PROP_REFRESH_HOURS = 24
 #: ``pg_try_advisory_lock`` key held for the length of one pass (72 for MED-72).
 ADVISORY_LOCK_KEY = 72001
 #: An event the provider still calls ``upcoming`` this many hours after its start time
@@ -182,19 +197,29 @@ def is_due(session: Session, provider_name: str, kind: str, now: datetime, inter
 
 
 def archive_bytes(session: Session) -> int:
-    """The archive's size: the five tables with their indexes on PostgreSQL, a row count
-    times ``SQLITE_ROW_BYTES`` elsewhere."""
-    if session.get_bind().dialect.name == "postgresql":
-        names = ", ".join(f"'{model.__tablename__}'" for model in ARCHIVE_MODELS)
-        total = session.execute(
-            text(
-                "SELECT coalesce(sum(pg_total_relation_size(n::regclass)), 0) "
-                f"FROM unnest(ARRAY[{names}]) AS n"
-            )
-        ).scalar()
-        return int(total or 0)
-    rows = sum(session.scalar(select(func.count()).select_from(m)) or 0 for m in ARCHIVE_MODELS)
-    return rows * SQLITE_ROW_BYTES
+    """The data the archive holds, as the cap counts it: each table's row count times its
+    ``ROW_BYTES``. It falls as soon as the prune deletes rows, on every database."""
+    return sum(
+        int(session.scalar(select(func.count()).select_from(model)) or 0)
+        * ROW_BYTES[model.__tablename__]
+        for model in ARCHIVE_MODELS
+    )
+
+
+def archive_disk_bytes(session: Session) -> int | None:
+    """On PostgreSQL, the size of the five tables' files with their indexes. It does not
+    fall after the prune (the freed space is reused by later rows), so it is shown to
+    administrators but never used for the cap. ``None`` elsewhere."""
+    if session.get_bind().dialect.name != "postgresql":
+        return None
+    names = ", ".join(f"'{model.__tablename__}'" for model in ARCHIVE_MODELS)
+    total = session.execute(
+        text(
+            "SELECT coalesce(sum(pg_total_relation_size(n::regclass)), 0) "
+            f"FROM unnest(ARRAY[{names}]) AS n"
+        )
+    ).scalar()
+    return int(total or 0)
 
 
 def new_run(
@@ -449,6 +474,7 @@ def _latest_props(
             p.over_american,
             p.under_american,
             p.provider_id,
+            p.captured_at,
         ).join(
             newest,
             and_(
@@ -500,11 +526,16 @@ def capture_props(
                 current[key] = _prop_values(offer)
     recent = _recent_prop_events(session, provider.name, now, settings)
     latest = _latest_props(session, provider.name, sorted(scope | recent))
+    refresh_before = now - timedelta(hours=PROP_REFRESH_HOURS)
     rows: list[dict[str, Any]] = []
     unchanged = 0
     for key, values in current.items():
         previous = latest.get(key)
-        if previous is not None and _same(previous, values, _PROP_COMPARED):
+        if (
+            previous is not None
+            and _same(previous, values, _PROP_COMPARED)
+            and previous["captured_at"] > refresh_before
+        ):
             unchanged += 1
         else:
             rows.append(values)
@@ -752,12 +783,14 @@ __all__ = [
     "FLAG",
     "INSERT_CHUNK",
     "INTERVAL_SLACK_SECONDS",
-    "SQLITE_ROW_BYTES",
+    "PROP_REFRESH_HOURS",
+    "ROW_BYTES",
     "UPCOMING_GRACE_HOURS",
     "PassReport",
     "RunSummary",
     "StatusRecord",
     "archive_bytes",
+    "archive_disk_bytes",
     "capture_odds",
     "capture_pass",
     "capture_props",

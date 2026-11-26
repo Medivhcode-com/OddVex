@@ -2,8 +2,9 @@
 
 Each is bounded to one event and market (at most one row per book), one player (one row
 per market and book of each of the player's games with an offer in the last 48 hours,
-at most two or three games) or one event's status records (at most
-``MAX_STATUS_ENTRIES``), so one request reads a few hundred rows at most.
+at most two or three games, plus a few small queries per game of the player near T for
+the prune check) or one event's status records (at most ``MAX_STATUS_ENTRIES``), so one
+request reads a few hundred rows at most.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from ..db import (
 from ..flags import service as flags
 from ..providers import SportsDataProvider
 from ..schemas import SportsbookRef, price_from_american
-from .capture import FLAG, archive_bytes
+from .capture import FLAG, archive_bytes, archive_disk_bytes
 from .schemas import (
     ArchivedOddsOut,
     ArchivedOutcomeOut,
@@ -37,8 +38,9 @@ from .schemas import (
     ArchiveRunOut,
     ArchiveStatsOut,
     CoverageOut,
+    PropsCoverageOut,
 )
-from .view import ArchiveView, Coverage, board_at, latest_odds_rows, latest_prop_rows
+from .view import ArchiveView, Coverage, board_at, latest_odds_rows, props_at
 
 #: Most status entries one request returns.
 MAX_STATUS_ENTRIES = 500
@@ -73,7 +75,7 @@ def archived_odds(
     refs = _book_refs(provider)
     rows = (
         latest_odds_rows(session, provider.name, event_id, market, coverage.captured_at)
-        if coverage.captured_at is not None
+        if coverage.status == "captured" and coverage.captured_at is not None
         else []
     )
     order = {key: i for i, key in enumerate(refs)}
@@ -116,6 +118,16 @@ def archived_props(
     as_of: datetime,
 ) -> ArchivedPropsOut:
     refs = _book_refs(provider)
+    player = provider.get_player(player_id)
+    read = props_at(
+        session,
+        provider.name,
+        player_id,
+        market,
+        as_of,
+        settings,
+        team_id=player.team_id if player is not None else None,
+    )
     offers = [
         ArchivedPropOut(
             sportsbook=_ref(refs, row.sportsbook_id),
@@ -131,12 +143,14 @@ def archived_props(
             provider=row.provider,
             provider_id=row.provider_id,
         )
-        for row in latest_prop_rows(session, provider.name, player_id, market, as_of, settings)
+        for row in read.rows
     ]
     return ArchivedPropsOut(
         requested_as_of=as_of,
         data_mode=provider.data_mode,  # type: ignore[arg-type]
+        coverage=PropsCoverageOut(status=read.status, captured_at=read.captured_at),
         offers=offers,
+        pruned_event_ids=read.pruned_event_ids,
     )
 
 
@@ -209,6 +223,7 @@ def archive_stats(session: Session, settings: Settings) -> ArchiveStatsOut:
     return ArchiveStatsOut(
         enabled=flags.is_enabled(session, FLAG, settings),
         approx_bytes=archive_bytes(session),
+        disk_bytes=archive_disk_bytes(session),
         max_bytes=settings.snapshot_max_bytes,
         retention_days=settings.snapshot_retention_days,
         keep_days=max(settings.snapshot_keep_days, settings.snapshot_retention_days),
