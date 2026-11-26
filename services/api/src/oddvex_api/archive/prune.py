@@ -1,16 +1,25 @@
 """Retention prune of the snapshot archive: the only code that deletes archive rows.
 
-Full-resolution odds, prop and event rows are kept ``snapshot_retention_days`` (7). When
-they age out, two kinds of row are kept for ``snapshot_keep_days`` (400):
+Full-resolution odds, prop and event rows are kept ``snapshot_retention_days`` (7). The
+prune handles an event once, when all of its rows are older than that (its last event
+row has aged out), so a read at any time after the cutoff never misses a row that an
+unchanged quote carried forward. It then keeps, for ``snapshot_keep_days`` (400):
 
-- **Closing rows.** Per event, its last ``upcoming`` event row and, per (market, book) and
-  per (player, market, book), the latest row captured at or before it.
-- **Bet anchors.** For every stored bet leg on the event, the event row covering the bet's
-  ``placed_at`` and, per (market, book), the latest odds row at or before it.
+- **The closing capture.** The event's last ``upcoming`` event row and, per (market, book)
+  and per (player, event, market, book), the latest row captured at or before it.
+- **The last capture.** The event's last event row and, per (market, book), the latest
+  odds row at or before it. It marks when the event left scope, so coverage can tell
+  ``archive_pruned`` from ``not_captured``, and it is a complete capture in its own right.
+- **Bet anchors, bounded.** For stored bet legs the archive can price (moneyline, spread
+  or total with an outcome and, for spread and total, a line), the capture that covered
+  the bet's ``placed_at`` (``view.coverage_at``) and, per (market, book), the latest odds
+  row at or before it. At most ``MAX_ANCHORS_PER_EVENT`` captures per event are kept,
+  ranked by how many users anchor them, each user's weight split evenly over the
+  captures that user anchors on the event, ties to the earlier capture. So one user's
+  bets, however many, never keep more than ``MAX_ANCHORS_PER_EVENT`` captures of a game,
+  and cannot crowd out captures that other users' bets point at.
 
-So every stored bet keeps the rows its placement-time price was read from. Each pass looks
-only at the rows aged out since the previous pass (the previous cutoff less an hour of
-overlap), one event at a time, and deletes in batches of ``DELETE_BATCH`` ids with a commit
+Every other row of the event is deleted, in batches of ``DELETE_BATCH`` ids with a commit
 each, so no long lock is held and the write-ahead log stays small. Then everything older
 than ``snapshot_keep_days`` goes: rows first, then the capture runs, which share the rows'
 ``captured_at`` and so the same cutoff.
@@ -18,11 +27,13 @@ than ``snapshot_keep_days`` goes: rows first, then the capture runs, which share
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from bisect import bisect_right
+from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import ColumnElement, Engine, delete, func, select
+from sqlalchemy import Engine, delete, func, select
 from sqlalchemy.orm import Session
 
 from ..config import Settings
@@ -38,13 +49,15 @@ from ..db import (
 from ..flags import service as flags
 from ..providers import SportsDataProvider
 from .capture import FLAG, RunSummary, guarded, is_due, new_run
+from .placement import structured_leg_condition
 
 #: Ids deleted per statement, each batch in its own transaction.
 DELETE_BATCH = 1000
-#: A condition on an archive model's columns.
-Window = Callable[[Any], ColumnElement[bool]]
-#: Each pass re-examines this much of the previous pass's window.
+#: Each pass re-examines the events whose last row aged out this long before the
+#: previous pass's cutoff.
 WINDOW_OVERLAP = timedelta(hours=1)
+#: Captures kept per event for stored bets, beyond the closing and last captures.
+MAX_ANCHORS_PER_EVENT = 6
 
 
 def _delete_ids(session: Session, model: type[Any], ids: Sequence[int]) -> int:
@@ -65,96 +78,126 @@ def _delete_older(session: Session, model: type[Any], cutoff: datetime) -> int:
         deleted += _delete_ids(session, model, ids)
 
 
-def _anchor_times(
-    session: Session, provider_name: str, event_id: str
-) -> tuple[datetime | None, set[datetime]]:
-    """The event's closing time (its last upcoming row) and the placement times of the
-    stored bets with a leg on it."""
-    closing = session.scalar(
-        select(func.max(ArchivedEvent.captured_at)).where(
-            ArchivedEvent.provider == provider_name,
-            ArchivedEvent.event_id == event_id,
-            ArchivedEvent.status == "upcoming",
-        )
-    )
-    placed = set(
+def _bet_anchors(
+    session: Session,
+    provider_name: str,
+    event_id: str,
+    event_times: Sequence[datetime],
+    settings: Settings,
+) -> set[datetime]:
+    """The captures (event row times) kept for stored bets on the event, at most
+    ``MAX_ANCHORS_PER_EVENT``. A bet anchors the capture that covers its ``placed_at``:
+    the latest ``ok`` odds run at or before it, within ``snapshot_max_gap_seconds``, when
+    the event has a row from that run."""
+    if not event_times:
+        return set()
+    limit = timedelta(seconds=settings.snapshot_max_gap_seconds)
+    first, last = event_times[0], event_times[-1]
+    runs = list(
         session.scalars(
-            select(Bet.placed_at)
-            .join(BetLeg, BetLeg.bet_id == Bet.id)
-            .where(BetLeg.event_id == event_id)
-            .distinct()
+            select(SnapshotRun.captured_at)
+            .where(
+                SnapshotRun.kind == "odds",
+                SnapshotRun.provider == provider_name,
+                SnapshotRun.status == "ok",
+                SnapshotRun.captured_at >= first,
+                SnapshotRun.captured_at <= last + limit,
+            )
+            .order_by(SnapshotRun.captured_at)
         )
     )
-    return closing, placed
-
-
-def _prune_event(session: Session, provider_name: str, event_id: str, window: list[Window]) -> int:
-    closing, placed = _anchor_times(session, provider_name, event_id)
-    e, o, p = ArchivedEvent, ArchivedOdds, ArchivedProp
-    keep_events: set[datetime] = set()
-    keep_odds: set[tuple[str, str, datetime]] = set()
-    keep_props: set[tuple[str, str, str, datetime]] = set()
-    for anchor in sorted({closing, *placed} - {None}):  # type: ignore[type-var]
-        covered = session.scalar(
-            select(func.max(e.captured_at)).where(
-                e.provider == provider_name, e.event_id == event_id, e.captured_at <= anchor
-            )
+    rows = set(event_times)
+    per_user: dict[str, set[datetime]] = defaultdict(set)
+    legs = session.execute(
+        select(Bet.user_id, Bet.placed_at)
+        .join(BetLeg, BetLeg.bet_id == Bet.id)
+        .where(
+            BetLeg.event_id == event_id,
+            structured_leg_condition(),
+            Bet.placed_at >= first,
+            Bet.placed_at <= last + limit,
         )
-        if covered is None:
+        .execution_options(yield_per=1000)
+    )
+    for user_id, placed_at in legs:
+        index = bisect_right(runs, placed_at)
+        if index == 0:
             continue
-        keep_events.add(covered)
-        keep_odds.update(
-            (r.market, r.sportsbook_id, r.at)
-            for r in session.execute(
-                select(o.market, o.sportsbook_id, func.max(o.captured_at).label("at"))
-                .where(
-                    o.provider == provider_name, o.event_id == event_id, o.captured_at <= covered
+        run_at = runs[index - 1]
+        if placed_at - run_at <= limit and run_at in rows:
+            per_user[user_id].add(run_at)
+    weight: dict[datetime, float] = defaultdict(float)
+    for anchored in per_user.values():
+        for run_at in anchored:
+            weight[run_at] += 1 / len(anchored)
+    ranked = sorted(weight, key=lambda run_at: (-weight[run_at], run_at))
+    return set(ranked[:MAX_ANCHORS_PER_EVENT])
+
+
+def _prune_event(session: Session, provider_name: str, event_id: str, settings: Settings) -> int:
+    """Delete every row of an event whose rows have all aged out, except the closing
+    capture, the last capture and the bounded bet anchors."""
+    e, o, p = ArchivedEvent, ArchivedOdds, ArchivedProp
+    events = session.execute(
+        select(e.id, e.captured_at, e.status)
+        .where(e.provider == provider_name, e.event_id == event_id)
+        .order_by(e.captured_at)
+    ).all()
+    if not events:
+        return 0
+    times = [r.captured_at for r in events]
+    upcoming = [r.captured_at for r in events if r.status == "upcoming"]
+    closing = upcoming[-1] if upcoming else None
+    keep_events = {times[-1], *_bet_anchors(session, provider_name, event_id, times, settings)}
+    if closing is not None:
+        keep_events.add(closing)
+
+    odds = session.execute(
+        select(o.id, o.market, o.sportsbook_id, o.captured_at)
+        .where(o.provider == provider_name, o.event_id == event_id)
+        .order_by(o.captured_at)
+    ).all()
+    by_key: dict[tuple[str, str], list[tuple[datetime, int]]] = defaultdict(list)
+    for r in odds:
+        by_key[(r.market, r.sportsbook_id)].append((r.captured_at, r.id))
+    keep_odds: set[int] = set()
+    for anchor in keep_events:
+        for rows in by_key.values():
+            # The key's latest row at or before the anchor (rows are in time order).
+            index = bisect_right(rows, (anchor, float("inf")))
+            if index:
+                keep_odds.add(rows[index - 1][1])
+
+    keep_props: set[int] = set()
+    if closing is not None:
+        newest = (
+            select(p.player_id, p.market, p.sportsbook_id, func.max(p.captured_at).label("at"))
+            .where(p.provider == provider_name, p.event_id == event_id, p.captured_at <= closing)
+            .group_by(p.player_id, p.market, p.sportsbook_id)
+            .subquery()
+        )
+        keep_props = set(
+            session.scalars(
+                select(p.id)
+                .join(
+                    newest,
+                    (p.player_id == newest.c.player_id)
+                    & (p.market == newest.c.market)
+                    & (p.sportsbook_id == newest.c.sportsbook_id)
+                    & (p.captured_at == newest.c.at),
                 )
-                .group_by(o.market, o.sportsbook_id)
+                .where(p.provider == provider_name, p.event_id == event_id)
             )
         )
-        if anchor == closing:
-            keep_props.update(
-                (r.player_id, r.market, r.sportsbook_id, r.at)
-                for r in session.execute(
-                    select(
-                        p.player_id, p.market, p.sportsbook_id, func.max(p.captured_at).label("at")
-                    )
-                    .where(
-                        p.provider == provider_name,
-                        p.event_id == event_id,
-                        p.captured_at <= covered,
-                    )
-                    .group_by(p.player_id, p.market, p.sportsbook_id)
-                )
-            )
-
-    def where(model: Any) -> list[ColumnElement[bool]]:
-        return [
-            model.provider == provider_name,
-            model.event_id == event_id,
-            *(c(model) for c in window),
-        ]
-
-    event_ids = [
-        r.id
-        for r in session.execute(select(e.id, e.captured_at).where(*where(e)))
-        if r.captured_at not in keep_events
-    ]
-    odds_ids = [
-        r.id
-        for r in session.execute(
-            select(o.id, o.market, o.sportsbook_id, o.captured_at).where(*where(o))
-        )
-        if (r.market, r.sportsbook_id, r.captured_at) not in keep_odds
-    ]
     prop_ids = [
-        r.id
-        for r in session.execute(
-            select(p.id, p.player_id, p.market, p.sportsbook_id, p.captured_at).where(*where(p))
+        pid
+        for pid in session.scalars(
+            select(p.id).where(p.provider == provider_name, p.event_id == event_id)
         )
-        if (r.player_id, r.market, r.sportsbook_id, r.captured_at) not in keep_props
+        if pid not in keep_props
     ]
+    event_ids = [r.id for r in events if r.captured_at not in keep_events]
+    odds_ids = [r.id for r in odds if r.id not in keep_odds]
     session.commit()
     return (
         _delete_ids(session, o, odds_ids)
@@ -174,24 +217,25 @@ def prune_rows(session: Session, settings: Settings, now: datetime) -> tuple[int
             SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
         )
     )
-    start = previous - WINDOW_OVERLAP if previous is not None else None
-
-    window: list[Window] = [lambda m: m.captured_at < cutoff]
-    if start is not None:
-        window.append(lambda m: m.captured_at >= start)
-
-    events: set[tuple[str, str]] = set()
-    for model in (ArchivedEvent, ArchivedOdds, ArchivedProp):
-        events.update(
-            (r.provider, r.event_id)
-            for r in session.execute(
-                select(model.provider, model.event_id).where(*(c(model) for c in window)).distinct()
-            )
-        )
+    e = ArchivedEvent
+    # Events with a row in the window that aged out since the previous pass; of those,
+    # the ones whose rows have all aged out. The others are handled when their last row
+    # ages out, in a later pass.
+    in_window = select(e.provider, e.event_id).where(e.captured_at < cutoff)
+    if previous is not None:
+        in_window = in_window.where(e.captured_at >= previous - WINDOW_OVERLAP)
+    candidates = sorted(set(session.execute(in_window.distinct()).tuples()))
     session.commit()
     deleted = 0
-    for provider_name, event_id in sorted(events):
-        deleted += _prune_event(session, provider_name, event_id, window)
+    for provider_name, event_id in candidates:
+        last = session.scalar(
+            select(func.max(e.captured_at)).where(
+                e.provider == provider_name, e.event_id == event_id
+            )
+        )
+        if last is None or last >= cutoff:
+            continue
+        deleted += _prune_event(session, provider_name, event_id, settings)
     for table in (ArchivedOdds, ArchivedProp, ArchivedEvent, ArchivedStatus, SnapshotRun):
         deleted += _delete_older(session, table, keep_cutoff)
     return deleted, cutoff
@@ -232,4 +276,4 @@ def prune_archive(
         return prune_pass(session, provider, settings, force=force)
 
 
-__all__ = ["DELETE_BATCH", "prune_archive", "prune_pass", "prune_rows"]
+__all__ = ["DELETE_BATCH", "MAX_ANCHORS_PER_EVENT", "prune_archive", "prune_pass", "prune_rows"]

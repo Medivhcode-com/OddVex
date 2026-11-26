@@ -54,13 +54,21 @@ def _stats(settings: Settings) -> int:
     return 0
 
 
+def _enabled(settings: Settings) -> bool:
+    """Whether the flag is on, read before the provider is built: with the flag off a
+    worker turn loads nothing (a replay provider would otherwise load its dataset)."""
+    engine = make_engine(settings.database_url)
+    try:
+        with Session(engine) as session:
+            return flags.is_enabled(session, FLAG, settings)
+    finally:
+        engine.dispose()
+
+
 def _dry_run(settings: Settings, provider: SportsDataProvider) -> int:
     engine = make_engine(settings.database_url)
     try:
         with Session(engine) as session:
-            if not flags.is_enabled(session, FLAG, settings):
-                print(OFF_MESSAGE)
-                return 0
             now = provider.now()
             odds_due = is_due(
                 session, provider.name, "odds", now, settings.snapshot_odds_interval_seconds
@@ -83,6 +91,9 @@ def main(argv: list[str]) -> int:
     settings = get_settings()
     if "--stats" in argv:
         return _stats(settings)
+    if not _enabled(settings):
+        print(OFF_MESSAGE)
+        return 0
     provider = build_provider(settings)
     if "--dry-run" in argv:
         return _dry_run(settings, provider)

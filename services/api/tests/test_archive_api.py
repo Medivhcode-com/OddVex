@@ -102,6 +102,7 @@ def test_placement_prices_route_returns_every_leg_and_hides_other_users_bets(
     assert (unknown["books"], unknown["books_source"]) == ([], "none")
     (leg,) = unknown["legs"]
     assert leg["status"] == "cannot_price" and leg["your_books_reason"] == "books_unknown"
+    assert leg["reason"] == "books_unknown"  # always a named reason when not priced
     assert leg["best_overall"]["price"]["american"] == -110 and leg["best_at_your_books"] is None
 
     # Another user's bet answers exactly like a missing one.
@@ -203,3 +204,31 @@ def test_capture_with_the_flag_off_writes_nothing_through_the_app(make_app: AppF
         admin = admin_headers(client)
         rows = client.get("/v1/admin/archive/stats", headers=admin).json()["rows"]
         assert rows == {"odds": 0, "props": 0, "events": 0, "status": 0, "runs": 0}
+
+
+def test_a_suspended_account_is_refused_by_the_archive_routes_with_the_flag_on(
+    archived: tuple[TestClient, FastAPI, ControlledProvider],
+) -> None:
+    client, _, provider = archived
+    ada = auth_headers(client, "ada@example.test")
+    bet_id = place(client, ada, bet_body("Summit"))
+    player_id = provider.list_players()[0].id
+    user_id = client.get("/v1/me", headers=ada).json()["id"]
+    as_of = {"as_of": (T0 + timedelta(seconds=100)).isoformat()}
+    urls = [
+        (f"/v1/archive/events/{PREGAME}/odds", {**as_of, "market": "moneyline"}),
+        (f"/v1/archive/players/{player_id}/props", as_of),
+        (f"/v1/archive/events/{PREGAME}/status", as_of),
+        (f"/v1/bets/{bet_id}/placement-prices", {}),
+    ]
+    for url, params in urls:
+        assert client.get(url, params=params, headers=ada).status_code == 200, url
+    admin = admin_headers(client)
+    suspended = client.post(
+        f"/v1/admin/users/{user_id}/suspend", json={"reason": "review"}, headers=admin
+    )
+    assert suspended.status_code == 200, suspended.text
+    for url, params in urls:
+        response = client.get(url, params=params, headers=ada)
+        assert response.status_code == 401, url
+        assert response.json()["error"]["code"] == "account_suspended", url

@@ -16,12 +16,14 @@ from sqlalchemy.exc import IntegrityError
 
 from oddvex_api.archive.capture import (
     ADVISORY_LOCK_KEY,
+    UPCOMING_GRACE_HOURS,
     StatusRecord,
     capture_pass,
     capture_status,
+    in_scope,
 )
 from oddvex_api.archive.guard import ArchiveIsAppendOnly
-from oddvex_api.archive.service import archived_odds
+from oddvex_api.archive.service import archived_odds, archived_props
 from oddvex_api.db import (
     ARCHIVE_MODELS,
     ArchivedEvent,
@@ -30,9 +32,16 @@ from oddvex_api.db import (
     ArchivedStatus,
     SnapshotRun,
 )
-from oddvex_api.providers import OddsSnapshot
+from oddvex_api.providers import Event, OddsSnapshot, PropOffer
 
-from .archive_support import PREGAME, T0, ArchiveEnv, archive_env, enable_archive
+from .archive_support import (
+    OTHER_PREGAME,
+    PREGAME,
+    T0,
+    ArchiveEnv,
+    archive_env,
+    enable_archive,
+)
 from .conftest import EXTERNAL_DATABASE_URL
 from .fakes import ControlledProvider, moneyline
 
@@ -302,12 +311,15 @@ def test_two_passes_never_overlap_on_postgresql(archive_env: ArchiveEnv) -> None
     assert env.capture(T0).odds is not None
 
 
-def _script(env: ArchiveEnv, *args: str) -> subprocess.CompletedProcess[str]:
+def _script(
+    env: ArchiveEnv, *args: str, extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     environment = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "DATABASE_URL": env.settings.database_url,
         "ODDVEX_ENV": "test",
         "ODDVEX_LOG_LEVEL": "WARNING",
+        **(extra or {}),
     }
     return subprocess.run(
         [sys.executable, str(API_ROOT / "scripts" / "capture_snapshots.py"), *args],
@@ -327,6 +339,14 @@ def test_the_capture_script(archive_env: ArchiveEnv) -> None:
     assert off.returncode == 0, off.stderr
     assert "Snapshot archive is off; nothing captured." in off.stdout
     assert total_rows(env) == 0
+    # With the flag off the provider is never built: a replay provider pointed at a
+    # missing dataset would fail if it were loaded.
+    replay = _script(
+        env,
+        extra={"ODDVEX_DATA_PROVIDER": "replay", "ODDVEX_REPLAY_DATA_PATH": "/nonexistent/replay"},
+    )
+    assert replay.returncode == 0, replay.stderr
+    assert "Snapshot archive is off; nothing captured." in replay.stdout
 
     enable_archive(env.session_factory)
     dry = _script(env, "--dry-run")
@@ -363,3 +383,128 @@ def test_a_schedule_error_is_recorded_as_a_failed_run(archive_env: ArchiveEnv) -
         (run,) = db.scalars(select(SnapshotRun)).all()
     assert run.detail == {"error": "TimeoutError"}
     assert total_rows(env) == 1
+
+
+class DoubleheaderProvider(ControlledProvider):
+    """One player is offered on two games in scope, PREGAME and OTHER_PREGAME, with the
+    first game's offers fixed as they were at T0."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        event = self.get_event(PREGAME)
+        assert event is not None
+        self.player_id = self.list_players(team_id=event.home_team_id)[0].id
+        self.fixed = super().get_prop_offers(self.player_id)
+        self.other_line = 0.0
+
+    def get_prop_offers(self, player_id: str, market: str | None = None) -> list[PropOffer]:
+        if player_id != self.player_id:
+            return super().get_prop_offers(player_id, market)
+        offers = [o for o in self.fixed if market is None or o.market == market]
+        second = [
+            o.model_copy(
+                update={
+                    "event_id": OTHER_PREGAME,
+                    "provider_id": o.provider_id + ":game2",
+                    "line": (o.line or 0.0) + 1.0 + self.other_line,
+                }
+            )
+            for o in offers
+            if o.event_id == PREGAME
+        ]
+        return offers + second
+
+
+def test_a_player_with_two_games_in_scope_keeps_both_games_offers(
+    archive_env: ArchiveEnv,
+) -> None:
+    env = archive_env
+    p = DoubleheaderProvider()
+    env.provider = p
+    env.capture(T0)
+    where = (ArchivedProp.player_id == p.player_id,)
+    first = count(env, ArchivedProp, *where, ArchivedProp.event_id == PREGAME)
+    assert first > 0
+    assert count(env, ArchivedProp, *where, ArchivedProp.event_id == OTHER_PREGAME) == first
+    # Only the second game's offers change: the first game's rows stay as they were,
+    # with no overwrite and no tombstone.
+    p.other_line = 0.5
+    env.capture(T0 + timedelta(seconds=360))
+    assert count(env, ArchivedProp, *where, ArchivedProp.event_id == PREGAME) == first
+    assert count(env, ArchivedProp, *where, ArchivedProp.event_id == OTHER_PREGAME) == 2 * first
+    second = ArchivedProp.captured_at == T0 + timedelta(seconds=360)
+    assert count(env, ArchivedProp, *where, second) == first  # all of them the second game's
+    with env.session_factory() as db:
+        read = archived_props(db, p, env.settings, p.player_id, None, T0 + timedelta(seconds=400))
+    by_game: dict[str, set[Any]] = {}
+    for offer in read.offers:
+        by_game.setdefault(offer.event_id, set()).add((offer.market, offer.line))
+    assert set(by_game) == {PREGAME, OTHER_PREGAME}
+    assert len(by_game[PREGAME]) == len(by_game[OTHER_PREGAME])
+
+
+def test_a_game_leaving_scope_tombstones_its_offers(archive_env: ArchiveEnv) -> None:
+    env = archive_env
+    p = env.provider
+    event = p.get_event(PREGAME)
+    assert event is not None
+    player_id = p.list_players(team_id=event.home_team_id)[0].id
+    env.capture(T0)
+    with env.session_factory() as db:
+        before = archived_props(db, p, env.settings, player_id, None, T0 + timedelta(seconds=60))
+    assert before.offers and {o.status for o in before.offers} >= {"open"}
+    stored = count(env, ArchivedProp, ArchivedProp.event_id == PREGAME)
+    open_keys = count(
+        env, ArchivedProp, ArchivedProp.event_id == PREGAME, ArchivedProp.status != "unavailable"
+    )
+    # The game goes final and leaves scope: every stored offer of it gets a tombstone,
+    # and the props read no longer shows the finished game's offers as open.
+    p.finish(PREGAME, 3, 2)
+    env.capture(T0 + timedelta(seconds=360))
+    tombstones = count(
+        env,
+        ArchivedProp,
+        ArchivedProp.event_id == PREGAME,
+        ArchivedProp.status == "unavailable",
+        ArchivedProp.captured_at == T0 + timedelta(seconds=360),
+    )
+    assert tombstones == open_keys
+    with env.session_factory() as db:
+        after = archived_props(db, p, env.settings, player_id, None, T0 + timedelta(seconds=400))
+        # As of before the game left scope, the offers read back as they were.
+        earlier = archived_props(db, p, env.settings, player_id, None, T0 + timedelta(seconds=60))
+    assert [o for o in after.offers if o.event_id == PREGAME] == []
+    assert earlier.offers == before.offers
+    # A second pass writes no further tombstones.
+    env.capture(T0 + timedelta(seconds=720))
+    assert count(env, ArchivedProp, ArchivedProp.event_id == PREGAME) == stored + open_keys
+
+
+class _Schedule:
+    def __init__(self, events: list[Event]) -> None:
+        self.events = events
+
+    def list_events(self) -> list[Event]:
+        return self.events
+
+
+def test_a_game_still_upcoming_long_after_its_start_leaves_scope(
+    archive_env: ArchiveEnv,
+) -> None:
+    """A postponed game the provider never updates is captured for at most
+    ``UPCOMING_GRACE_HOURS`` after its start time."""
+    env = archive_env
+    event = env.provider.get_event(PREGAME)
+    assert event is not None and event.status == "upcoming"
+    now = T0
+    inside = event.model_copy(
+        update={"id": "delayed", "start_time": now - timedelta(hours=UPCOMING_GRACE_HOURS)}
+    )
+    outside = event.model_copy(
+        update={
+            "id": "stuck",
+            "start_time": now - timedelta(hours=UPCOMING_GRACE_HOURS, seconds=1),
+        }
+    )
+    found = in_scope(_Schedule([event, inside, outside]), now, env.settings)  # type: ignore[arg-type]
+    assert [e.id for e in found] == [PREGAME, "delayed"]

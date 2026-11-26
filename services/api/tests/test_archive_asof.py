@@ -300,3 +300,21 @@ class _PropView:
 class _Obj:
     def __init__(self, **values: Any) -> None:
         self.__dict__.update(values)
+
+
+def test_a_later_change_of_stale_threshold_never_rewrites_history(archive_env: ArchiveEnv) -> None:
+    """Staleness as of T uses the thresholds stored on the capture run, not today's
+    settings: captured with a 900 s pregame limit, read with a 60 s one, the best price is
+    the same."""
+    env = archive_env
+    env.settings = env.settings.model_copy(update={"stale_pregame_seconds": 900})
+    build_archive(env)
+    stricter = env.settings.model_copy(update={"stale_pregame_seconds": 60})
+    as_of = T1 + timedelta(seconds=100)  # T1's quotes are 120 s old then
+    with env.session_factory() as db:
+        for settings_now in (env.settings, stricter):
+            odds = archived_odds(db, env.provider, settings_now, PREGAME, "moneyline", as_of)
+            assert odds.odds is not None
+            assert odds.odds.stale_after_seconds == 900
+            (best,) = [b for b in odds.odds.best if b.outcome_key == "home"]
+            assert (best.sportsbook_key, best.price.american) == BEST_HOME[T1]

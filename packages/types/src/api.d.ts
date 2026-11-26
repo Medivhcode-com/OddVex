@@ -455,7 +455,7 @@ export interface paths {
         };
         /**
          * One player's archived prop offers as of a time
-         * @description The latest offer per market and book captured at or before `as_of`, for the player's most recently captured game. Behind the `snapshot_archive` flag.
+         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the 48 hours before it; a game whose offers were all withdrawn or that had left scope is left out. Behind the `snapshot_archive` flag.
          */
         get: operations["get_archived_player_props"];
         put?: never;
@@ -3446,7 +3446,7 @@ export interface components {
             run_id?: number | null;
             /**
              * Status
-             * @description `captured`: the archive holds this event's state from at most `snapshot_max_gap_seconds` before the requested time. `not_captured`: before the first capture, or the event was not in scope. `archive_gap`: capture was not running then. `archive_pruned`: the rows from then are past retention.
+             * @description `captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention.
              * @enum {string}
              */
             status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
@@ -4117,9 +4117,9 @@ export interface components {
             position: number;
             /**
              * Reason
-             * @description Why the leg cannot be priced: `leg_not_structured` (no event, market, outcome or line to match), a coverage status, `stale_at_placement` (every open quote was too old when the bet was placed) or `no_usable_quote`. Null when priced, and when a price existed but not at your books (see `your_books_reason`).
+             * @description Why the leg cannot be priced: `leg_not_structured` (no event, market, outcome or line to match), a coverage status, `stale_at_placement` (every open quote was too old when the bet was placed), `no_usable_quote`, or, when a price existed but not at your books, `none_at_your_books` or `books_unknown` (the same value as `your_books_reason`; `best_overall` then holds that price). Null only when priced.
              */
-            reason?: ("leg_not_structured" | "not_captured" | "archive_gap" | "archive_pruned" | "stale_at_placement" | "no_usable_quote") | null;
+            reason?: ("leg_not_structured" | "not_captured" | "archive_gap" | "archive_pruned" | "stale_at_placement" | "no_usable_quote" | "none_at_your_books" | "books_unknown") | null;
             /**
              * Status
              * @enum {string}

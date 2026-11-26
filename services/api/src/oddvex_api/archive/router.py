@@ -88,8 +88,10 @@ def get_archived_event_odds(
     operation_id="get_archived_player_props",
     summary="One player's archived prop offers as of a time",
     description=(
-        "The latest offer per market and book captured at or before `as_of`, for the "
-        "player's most recently captured game. Behind the `snapshot_archive` flag."
+        "The latest offer per game, market and book captured at or before `as_of`, for "
+        "each of the player's games with an offer in the 48 hours before it; a game whose "
+        "offers were all withdrawn or that had left scope is left out. Behind the "
+        "`snapshot_archive` flag."
     ),
     dependencies=_FLAG,
 )

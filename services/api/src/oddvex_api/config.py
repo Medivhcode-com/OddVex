@@ -132,7 +132,8 @@ class Settings(BaseSettings):
     #: capture runs are kept. Never shorter than ``snapshot_retention_days``.
     snapshot_keep_days: int = Field(default=400, ge=1)
     #: Size at which capture stops (``skipped_full`` runs) while the prune keeps running.
-    #: 1.5 GiB; measured use is about 0.55 GB after a week and 0.8 GB by day 400.
+    #: 1.5 GiB; measured use is about 0.55 GB after a week and 0.85 GB by day 400 (1.2 GB
+    #: with every game at the bet-anchor bound) on the synthetic schedule.
     snapshot_max_bytes: int = Field(default=1_610_612_736, ge=1)
     #: A time more than this many seconds after the last capture is an archive gap: two
     #: odds intervals plus one worker turn, so one missed pass is tolerated and two are not.

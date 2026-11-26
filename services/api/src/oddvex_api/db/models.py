@@ -682,8 +682,8 @@ class _SnapshotColumns:
 
 class ArchivedEvent(_SnapshotColumns, Base):
     """One row per in-scope event per odds capture: the event state staleness depends on.
-    These rows are also the coverage record: an event is covered at T by its latest row
-    at or before T."""
+    These rows are also the coverage record: an event is covered at T by its row from the
+    latest successful odds capture at or before T (``archive/view.py``)."""
 
     __tablename__ = "event_snapshots"
     __table_args__ = (
@@ -732,13 +732,16 @@ class ArchivedOdds(_SnapshotColumns, Base):
 
 
 class ArchivedProp(_SnapshotColumns, Base):
-    """One book's offer for one player market, written only when it changed."""
+    """One book's offer for one player market of one game, written only when it changed.
+    The game is part of the key, so a player with two games in scope (a doubleheader)
+    keeps both games' offers. Once a game leaves scope its open offers get tombstones."""
 
     __tablename__ = "prop_snapshots"
     __table_args__ = (
         UniqueConstraint(
             "provider",
             "player_id",
+            "event_id",
             "market",
             "sportsbook_id",
             "captured_at",

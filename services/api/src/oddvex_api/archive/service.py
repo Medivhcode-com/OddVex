@@ -1,8 +1,9 @@
 """The archive's read paths, as the routes answer them.
 
 Each is bounded to one event and market (at most one row per book), one player (one row
-per market and book of one event) or one event's status records (at most
-``MAX_STATUS_ENTRIES``), so one request reads a few dozen rows at most.
+per market and book of each of the player's games with an offer in the last 48 hours,
+at most two or three games) or one event's status records (at most
+``MAX_STATUS_ENTRIES``), so one request reads a few hundred rows at most.
 """
 
 from __future__ import annotations
@@ -130,7 +131,7 @@ def archived_props(
             provider=row.provider,
             provider_id=row.provider_id,
         )
-        for row in latest_prop_rows(session, provider.name, player_id, market, as_of)
+        for row in latest_prop_rows(session, provider.name, player_id, market, as_of, settings)
     ]
     return ArchivedPropsOut(
         requested_as_of=as_of,

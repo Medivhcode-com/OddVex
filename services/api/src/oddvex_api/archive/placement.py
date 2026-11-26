@@ -3,15 +3,16 @@
 For each leg, ``placement_prices`` answers either ``priced`` (the best open, non-stale
 price overall and at the user's books, read from the archive as of ``placed_at`` through
 the live :class:`Board` code) or ``cannot_price`` with a named reason. It never guesses:
-an unstructured leg, an event the archive does not cover at ``placed_at``, or quotes that
-were stale then all say so (hard rule 3).
+an unstructured leg, an event the archive does not cover at ``placed_at``, quotes that
+were stale then, or a price that existed only at books the user does not hold all say so
+(hard rule 3).
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.orm import Session
 
 from ..board import BestQuote, Board
@@ -32,6 +33,8 @@ CANNOT_PRICE_REASONS = (
     "archive_pruned",
     "stale_at_placement",
     "no_usable_quote",
+    "none_at_your_books",
+    "books_unknown",
 )
 #: Markets the archive can price; anything else is ``leg_not_structured``.
 STRUCTURED_MARKETS = ("moneyline", "spread", "total")
@@ -91,12 +94,23 @@ def _structured(leg: BetLeg) -> bool:
     return leg.market == "moneyline" or leg.line is not None
 
 
+def structured_leg_condition() -> ColumnElement[bool]:
+    """:func:`_structured` as a SQL condition on ``bet_legs`` (the prune anchors only
+    legs the archive can price)."""
+    return and_(
+        BetLeg.event_id.is_not(None),
+        BetLeg.outcome_key.is_not(None),
+        BetLeg.market.in_(STRUCTURED_MARKETS),
+        or_(BetLeg.market == "moneyline", BetLeg.line.is_not(None)),
+    )
+
+
 def _stale_only(
     board: Board, event: Event, market: str, outcome_key: str, line: float | None
 ) -> bool:
     """Whether open, fully priced quotes for the outcome (on the leg's line) existed but
     every one was stale at placement. Called only when no usable quote was found."""
-    for snap, status, stale, prices in board._quote_rows(event, market):
+    for snap, status, stale, prices in board.quote_rows(event, market):
         if status != "open" or len(prices) < 2:
             continue
         if (
@@ -164,7 +178,8 @@ def _leg_price(
             your_books_reason=None,
         )
     elif overall is not None:
-        update["your_books_reason"] = "none_at_your_books" if book_ids else "books_unknown"
+        why = "none_at_your_books" if book_ids else "books_unknown"
+        update.update(reason=why, your_books_reason=why)
     elif _stale_only(board, event, leg.market, leg.outcome_key, market_line):
         update["reason"] = "stale_at_placement"
     else:
@@ -192,4 +207,5 @@ __all__ = [
     "STRUCTURED_MARKETS",
     "placement_prices",
     "resolve_books",
+    "structured_leg_condition",
 ]

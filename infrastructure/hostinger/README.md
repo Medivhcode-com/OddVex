@@ -217,8 +217,9 @@ the list holds an address: deploy a commit that has it, or empty the list first.
 - A `worker` container evaluates alert rules and grades community picks every two minutes. Delivery is in-app only.
   It also runs `scripts/capture_snapshots.py`, the snapshot archive (P0.1). While the `snapshot_archive` flag is off,
   the default, it writes nothing. Switched on, it captures odds every 6 minutes and props hourly, keeps full
-  resolution for 7 days and closing and bet-anchor rows for 400 days, and stops capturing at 1.5 GiB: about 0.55 GB
-  after the first week and 0.8 GB by day 400 on the synthetic schedule, all of it inside the database and so inside
+  resolution for 7 days and each game's closing and last captures, plus at most six captures per game for stored
+  bets, for 400 days, and stops capturing at 1.5 GiB: about 0.55 GB after the first week and 0.85 GB by day 400 on
+  the synthetic schedule (1.2 GB if every game reaches the bet bound), all of it inside the database and so inside
   every dump (`docs/features/p0-1.md`, owner question OQ-23). Turning the flag off stops the growth; the rows stay.
 - The API container does not write uvicorn's access log. The application writes one line per request (time, method,
   path, status, duration, client address) and no query string. The API container that ran before this change did

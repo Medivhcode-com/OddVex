@@ -3,8 +3,9 @@
 ``coverage_at`` says whether the archive covers an event at T. :class:`ArchiveView` is a
 read-only :class:`SportsDataProvider` that answers from rows captured at or before T, so
 the live :class:`Board` code computes best price and consensus as of T unchanged
-(``board_at`` gives it the stale thresholds that were in force at capture). No method
-ever returns a row captured after T.
+(``board_at`` gives it the stale thresholds that were in force at capture, and judges an
+archived ``upcoming`` event whose start time had passed at T by the live threshold). No
+method ever returns a row captured after T.
 """
 
 from __future__ import annotations
@@ -37,16 +38,22 @@ from ..providers import (
 )
 
 CoverageStatus = Literal["captured", "not_captured", "archive_gap", "archive_pruned"]
+#: Hours a game lasts at most, for the props look-back (:func:`prop_lookback`).
+PROP_GAME_HOURS = 12
 
 
 @dataclass(frozen=True)
 class Coverage:
     """How the archive covers one event at T.
 
-    - ``captured``: an event row at or before T, at most ``snapshot_max_gap_seconds`` old.
-    - ``archive_gap``: capture was not running near T (no odds capture within the limit).
-    - ``archive_pruned``: capture was running, but the event's rows from then were pruned.
-    - ``not_captured``: before the first capture, or the event was not in scope.
+    Let R be the latest ``ok`` odds capture run at or before T (runs are kept 400 days).
+
+    - ``captured``: R is at most ``snapshot_max_gap_seconds`` before T and the archive
+      holds the event's row from R. Only then is anything priced.
+    - ``archive_gap``: no ``ok`` odds capture within the limit before T.
+    - ``archive_pruned``: R ran while the event was in scope, but its rows from R were
+      pruned; or no run is left from before T and T is past the keep horizon.
+    - ``not_captured``: before the first capture, or the event was not in scope at R.
 
     ``snapshot`` is the latest event row at or before T, whatever the status.
     """
@@ -74,10 +81,8 @@ def _latest_odds_run_at(session: Session, provider_name: str, as_of: datetime) -
     )
 
 
-def _was_pruned(session: Session, as_of: datetime, settings: Settings, *, no_run: bool) -> bool:
-    """Whether rows from ``as_of`` may have existed and been pruned: T is before the newest
-    prune's full-resolution cutoff or, when no capture run is left from before T, before
-    that prune's keep horizon (the runs themselves are gone)."""
+def _newest_prune(session: Session) -> tuple[datetime, datetime] | None:
+    """(captured_at, prune_cutoff) of the newest successful prune run."""
     newest = session.execute(
         select(SnapshotRun.captured_at, SnapshotRun.prune_cutoff)
         .where(SnapshotRun.kind == "prune", SnapshotRun.status == "ok")
@@ -85,13 +90,43 @@ def _was_pruned(session: Session, as_of: datetime, settings: Settings, *, no_run
         .limit(1)
     ).first()
     if newest is None or newest.prune_cutoff is None:
+        return None
+    return newest.captured_at, newest.prune_cutoff
+
+
+def _runs_pruned(session: Session, as_of: datetime, settings: Settings) -> bool:
+    """With no capture run left from before T: whether T is before the newest prune's keep
+    horizon (the runs themselves were deleted) rather than before the first capture."""
+    newest = _newest_prune(session)
+    if newest is None:
         return False
-    if no_run:
-        horizon = newest.captured_at - timedelta(
-            days=max(settings.snapshot_keep_days, settings.snapshot_retention_days)
-        )
-        return as_of < horizon
-    return as_of < newest.prune_cutoff
+    horizon = newest[0] - timedelta(
+        days=max(settings.snapshot_keep_days, settings.snapshot_retention_days)
+    )
+    return as_of < horizon
+
+
+def _pruned_while_in_scope(
+    session: Session, provider_name: str, event_id: str, run_at: datetime, settings: Settings
+) -> bool:
+    """Whether the event's row from the run at ``run_at`` existed and was pruned.
+
+    The prune handles an event only once all of its rows are older than the cutoff, and
+    keeps its last capture, so the event was pruned exactly when its latest kept row is
+    before the newest prune cutoff, and it was in scope at ``run_at`` when that run falls
+    between ``snapshot_horizon_hours`` before its start and its last capture."""
+    last = session.execute(
+        select(ArchivedEvent.captured_at, ArchivedEvent.start_time)
+        .where(ArchivedEvent.provider == provider_name, ArchivedEvent.event_id == event_id)
+        .order_by(ArchivedEvent.captured_at.desc())
+        .limit(1)
+    ).first()
+    if last is None or run_at > last.captured_at:
+        return False
+    if run_at < last.start_time - timedelta(hours=settings.snapshot_horizon_hours):
+        return False
+    newest = _newest_prune(session)
+    return newest is not None and last.captured_at < newest[1]
 
 
 def coverage_at(
@@ -107,16 +142,17 @@ def coverage_at(
         .order_by(ArchivedEvent.captured_at.desc())
         .limit(1)
     ).first()
-    limit = timedelta(seconds=settings.snapshot_max_gap_seconds)
-    if snapshot is not None and as_of - snapshot.captured_at <= limit:
-        return Coverage("captured", snapshot)
     run_at = _latest_odds_run_at(session, provider_name, as_of)
     if run_at is None:
-        pruned = _was_pruned(session, as_of, settings, no_run=True)
+        pruned = _runs_pruned(session, as_of, settings)
         return Coverage("archive_pruned" if pruned else "not_captured", snapshot)
-    if as_of - run_at > limit:
+    if as_of - run_at > timedelta(seconds=settings.snapshot_max_gap_seconds):
         return Coverage("archive_gap", snapshot)
-    if _was_pruned(session, as_of, settings, no_run=False):
+    # Captured only from the latest capture at or before T, never from an older row
+    # (for example another bet's kept anchor) when that capture's row is gone.
+    if snapshot is not None and snapshot.captured_at >= run_at:
+        return Coverage("captured", snapshot)
+    if _pruned_while_in_scope(session, provider_name, event_id, run_at, settings):
         return Coverage("archive_pruned", snapshot)
     return Coverage("not_captured", snapshot)
 
@@ -153,35 +189,41 @@ def latest_odds_rows(
     )
 
 
+def prop_lookback(settings: Settings) -> timedelta:
+    """How far back an offer can still be current: an unchanged offer is stored once, when
+    its game enters scope (``snapshot_horizon_hours`` before the start), and stays valid
+    until the game ends; ``PROP_GAME_HOURS`` covers the game itself."""
+    return timedelta(hours=settings.snapshot_horizon_hours + PROP_GAME_HOURS)
+
+
 def latest_prop_rows(
-    session: Session, provider_name: str, player_id: str, market: str | None, as_of: datetime
+    session: Session,
+    provider_name: str,
+    player_id: str,
+    market: str | None,
+    as_of: datetime,
+    settings: Settings,
 ) -> list[ArchivedProp]:
-    """Per (market, book), the latest row captured at or before T for the player's most
-    recently captured event at or before T."""
+    """Per (event, market, book), the latest row captured at or before T, among the rows
+    captured within :func:`prop_lookback` before T. A game whose latest rows are all
+    tombstones (its offers were withdrawn, or it left scope) is left out, so a finished
+    game's last offers are never shown as open. Ordered by event, market and book."""
     p = ArchivedProp
-    event_id = session.scalar(
-        select(p.event_id)
-        .where(p.provider == provider_name, p.player_id == player_id, p.captured_at <= as_of)
-        .order_by(p.captured_at.desc())
-        .limit(1)
-    )
-    if event_id is None:
-        return []
     conditions = [
         p.provider == provider_name,
         p.player_id == player_id,
-        p.event_id == event_id,
         p.captured_at <= as_of,
+        p.captured_at >= as_of - prop_lookback(settings),
     ]
     if market is not None:
         conditions.append(p.market == market)
     newest = (
-        select(p.market, p.sportsbook_id, func.max(p.captured_at).label("at"))
+        select(p.event_id, p.market, p.sportsbook_id, func.max(p.captured_at).label("at"))
         .where(*conditions)
-        .group_by(p.market, p.sportsbook_id)
+        .group_by(p.event_id, p.market, p.sportsbook_id)
         .subquery()
     )
-    return list(
+    rows = list(
         session.scalars(
             select(p)
             .join(
@@ -189,15 +231,17 @@ def latest_prop_rows(
                 and_(
                     p.provider == provider_name,
                     p.player_id == player_id,
-                    p.event_id == event_id,
+                    p.event_id == newest.c.event_id,
                     p.market == newest.c.market,
                     p.sportsbook_id == newest.c.sportsbook_id,
                     p.captured_at == newest.c.at,
                 ),
             )
-            .order_by(p.market, p.sportsbook_id)
+            .order_by(p.event_id, p.market, p.sportsbook_id)
         )
     )
+    offered = {r.event_id for r in rows if r.status != "unavailable"}
+    return [r for r in rows if r.event_id in offered]
 
 
 def event_from(snapshot: ArchivedEvent) -> Event:
@@ -370,7 +414,9 @@ class ArchiveView:
     def get_prop_offers(self, player_id: str, market: str | None = None) -> list[PropOffer]:
         return [
             prop_from(r)
-            for r in latest_prop_rows(self.session, self.name, player_id, market, self.as_of)
+            for r in latest_prop_rows(
+                self.session, self.name, player_id, market, self.as_of, self.settings
+            )
         ]
 
     def get_line_history(self, event_id: str, market: str) -> list[LineSeries]:
@@ -383,9 +429,23 @@ class ArchiveView:
         return None
 
 
+class ArchiveBoard(Board):
+    """The live :class:`Board` over an :class:`ArchiveView`, with one difference: an event
+    archived as ``upcoming`` whose start time had passed at T is judged by the live stale
+    threshold. Its last capture was before the start; by T the game may be in play, and
+    a pregame quote must not pass as an in-play price. The event keeps the status it was
+    captured with in every response; only the threshold changes."""
+
+    def freshness_status(self, event: Event) -> str:
+        if event.status == "upcoming" and self.now >= event.start_time:
+            return "live"
+        return event.status
+
+
 def board_at(view: ArchiveView, coverage: Coverage) -> Board:
-    """A :class:`Board` over the view, judging staleness at T with the stale thresholds in
-    force when the covering capture ran: a later change of setting never rewrites history."""
+    """An :class:`ArchiveBoard` over the view, judging staleness at T with the stale
+    thresholds in force when the covering capture ran: a later change of setting never
+    rewrites history."""
     settings = view.settings
     run = view.session.get(SnapshotRun, coverage.run_id) if coverage.run_id is not None else None
     if run is not None:
@@ -395,10 +455,12 @@ def board_at(view: ArchiveView, coverage: Coverage) -> Board:
                 "stale_live_seconds": run.stale_live_seconds,
             }
         )
-    return Board(view, settings, InMemoryTTLCache())
+    return ArchiveBoard(view, settings, InMemoryTTLCache())
 
 
 __all__ = [
+    "PROP_GAME_HOURS",
+    "ArchiveBoard",
     "ArchiveView",
     "Coverage",
     "CoverageStatus",
@@ -407,4 +469,5 @@ __all__ = [
     "event_from",
     "latest_odds_rows",
     "latest_prop_rows",
+    "prop_lookback",
 ]

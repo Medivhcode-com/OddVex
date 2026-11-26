@@ -129,6 +129,7 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "provider",
             "player_id",
+            "event_id",
             "market",
             "sportsbook_id",
             "captured_at",

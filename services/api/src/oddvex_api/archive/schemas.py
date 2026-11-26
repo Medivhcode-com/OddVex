@@ -18,16 +18,19 @@ LegReason = Literal[
     "archive_pruned",
     "stale_at_placement",
     "no_usable_quote",
+    "none_at_your_books",
+    "books_unknown",
 ]
 
 
 class CoverageOut(BaseModel):
     status: CoverageStatusOut = Field(
         description=(
-            "`captured`: the archive holds this event's state from at most "
-            "`snapshot_max_gap_seconds` before the requested time. `not_captured`: before "
-            "the first capture, or the event was not in scope. `archive_gap`: capture was "
-            "not running then. `archive_pruned`: the rows from then are past retention."
+            "`captured`: the archive holds this event's state from the latest capture at "
+            "or before the requested time, at most `snapshot_max_gap_seconds` before it. "
+            "`not_captured`: before the first capture, or the event was not in scope then. "
+            "`archive_gap`: capture was not running then. `archive_pruned`: the event's "
+            "rows from that capture are past retention."
         )
     )
     captured_at: datetime | None = Field(
@@ -138,8 +141,10 @@ class LegPlacementPriceOut(BaseModel):
         description=(
             "Why the leg cannot be priced: `leg_not_structured` (no event, market, outcome "
             "or line to match), a coverage status, `stale_at_placement` (every open quote "
-            "was too old when the bet was placed) or `no_usable_quote`. Null when priced, "
-            "and when a price existed but not at your books (see `your_books_reason`)."
+            "was too old when the bet was placed), `no_usable_quote`, or, when a price "
+            "existed but not at your books, `none_at_your_books` or `books_unknown` (the "
+            "same value as `your_books_reason`; `best_overall` then holds that price). "
+            "Null only when priced."
         ),
     )
     coverage: CoverageOut | None = None

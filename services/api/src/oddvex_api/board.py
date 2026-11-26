@@ -91,6 +91,8 @@ _BOARD_TTL_SECONDS = 10.0
 
 #: One book's quote: (snapshot, API status, is stale, decimal price per outcome).
 type _QuoteRow = tuple[OddsSnapshot, str, bool, list[Decimal]]
+#: The public name of :data:`_QuoteRow`, returned by :meth:`Board.quote_rows`.
+type QuoteRow = _QuoteRow
 #: Best price for one outcome: (decimal price, sportsbook id, line).
 type _Best = tuple[Decimal, str, float | None]
 
@@ -164,6 +166,12 @@ class Board:
         return TeamRef(id=team.id, name=team.name, abbreviation=team.abbreviation)
 
     # -------------------------------------------------------------- freshness
+    def freshness_status(self, event: Event) -> str:
+        """The event status whose stale threshold applies to the event's quotes: the
+        event's own status. The snapshot archive's board (``archive/view.py``) overrides
+        it for an archived event whose start time had passed at T."""
+        return event.status
+
     def stale_after_seconds(self, event_status: str) -> int:
         if event_status == "live":
             return self.settings.stale_live_seconds
@@ -258,7 +266,7 @@ class Board:
         for snap in self.provider.get_odds(event.id, market):
             status = self._api_status(snap.status)
             stale = status != "unavailable" and self.is_stale(
-                snap.last_updated, event.status, event.score_updated_at
+                snap.last_updated, self.freshness_status(event), event.score_updated_at
             )
             prices = (
                 []
@@ -267,6 +275,11 @@ class Board:
             )
             rows.append((snap, status, stale, prices))
         return rows
+
+    def quote_rows(self, event: Event, market: str) -> list[QuoteRow]:
+        """Every book's quote for one market: (snapshot, API status, is stale, decimal price
+        per outcome), judged exactly as :meth:`event_odds` and :meth:`best_price` judge it."""
+        return self._quote_rows(event, market)
 
     @staticmethod
     def _usable(rows: Sequence[_QuoteRow]) -> list[_QuoteRow]:
@@ -387,7 +400,7 @@ class Board:
             market=market,  # type: ignore[arg-type]
             as_of=self.now,
             data_mode=self.provider.data_mode,  # type: ignore[arg-type]
-            stale_after_seconds=self.stale_after_seconds(event.status),
+            stale_after_seconds=self.stale_after_seconds(self.freshness_status(event)),
             books=books,
             consensus=ConsensusOut(
                 outcomes=[
@@ -483,7 +496,7 @@ class Board:
                         edge=round(found.ev.ev_per_unit, 6),
                         breakeven_probability=round(found.ev.breakeven_probability, 6),
                         last_updated=snap.last_updated,
-                        stale_after_seconds=self.stale_after_seconds(event.status),
+                        stale_after_seconds=self.stale_after_seconds(self.freshness_status(event)),
                     )
                 )
         return rows
@@ -623,7 +636,7 @@ class Board:
         offers = self.provider.get_prop_offers(player.id, market) if event else []
         offer_rows, line, _, _ = self._prop_offers(
             offers,
-            event.status if event else "upcoming",
+            self.freshness_status(event) if event else "upcoming",
             event.score_updated_at if event else None,
         )
 
@@ -743,7 +756,7 @@ class Board:
                     # No sportsbook lists this player for this game (replay: did not play).
                     continue
                 _, line, best_over, best_under = self._prop_offers(
-                    market_offers, event.status, event.score_updated_at
+                    market_offers, self.freshness_status(event), event.score_updated_at
                 )
                 l10_rate: float | None = None
                 over_count = sample = 0
@@ -777,5 +790,6 @@ __all__ = [
     "BestQuote",
     "Board",
     "PriceOut",
+    "QuoteRow",
     "consensus_line",
 ]

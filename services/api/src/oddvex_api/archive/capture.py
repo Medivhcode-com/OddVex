@@ -9,9 +9,11 @@ One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the work
    ``snapshot_odds_interval_seconds`` old, less ``INTERVAL_SLACK_SECONDS`` for the drift of
    the 120 s loop; props likewise with ``snapshot_props_interval_seconds``.
 5. At ``snapshot_max_bytes`` capture stops with a ``skipped_full`` run; the prune goes on.
-6. In scope: live events, and upcoming ones starting within ``snapshot_horizon_hours``.
+6. In scope: live events, and upcoming ones starting within ``snapshot_horizon_hours``
+   whose start time passed at most ``UPCOMING_GRACE_HOURS`` ago.
 7. A quote or offer is written only when it differs from the latest stored row for its
-   key; a key that disappears gets a tombstone row. Inserts go in chunks of
+   key; a key that disappears gets a tombstone row, and so does every prop offer of a
+   game that has left scope. Inserts go in chunks of
    ``INSERT_CHUNK``, one transaction per kind. A failed kind is rolled back and recorded
    as a ``failed`` run with the exception's class name only.
 8. The prune (``archive/prune.py``) runs when it is due.
@@ -62,6 +64,9 @@ INSERT_CHUNK = 500
 SQLITE_ROW_BYTES = 400
 #: ``pg_try_advisory_lock`` key held for the length of one pass (72 for MED-72).
 ADVISORY_LOCK_KEY = 72001
+#: An event the provider still calls ``upcoming`` this many hours after its start time
+#: (a postponed game whose status was never updated) is no longer captured.
+UPCOMING_GRACE_HOURS = 6
 
 RunKind = Literal["odds", "props", "status", "prune"]
 StatusKind = Literal["lineup", "injury", "news", "weather"]
@@ -147,12 +152,15 @@ class PassReport:
 # ------------------------------------------------------------------ helpers
 def in_scope(provider: SportsDataProvider, now: datetime, settings: Settings) -> list[Event]:
     """Live events and upcoming events that start within the horizon. Final events are
-    not captured: their last rows from before the start are the closing rows."""
+    not captured: their last rows from before the start are the closing rows. An event
+    still ``upcoming`` more than ``UPCOMING_GRACE_HOURS`` after its start time is left
+    out, so a postponed game the provider never updates is not captured forever."""
     horizon = now + timedelta(hours=settings.snapshot_horizon_hours)
+    grace = now - timedelta(hours=UPCOMING_GRACE_HOURS)
     return [
         e
         for e in provider.list_events()
-        if e.status == "live" or (e.status == "upcoming" and e.start_time <= horizon)
+        if e.status == "live" or (e.status == "upcoming" and grace <= e.start_time <= horizon)
     ]
 
 
@@ -259,7 +267,6 @@ def guarded(
 # --------------------------------------------------------------------- odds
 _ODDS_COMPARED = ("status", "last_updated", "outcomes", "provider_id")
 _PROP_COMPARED = (
-    "event_id",
     "status",
     "last_updated",
     "line",
@@ -406,17 +413,28 @@ def _prop_values(offer: PropOffer) -> dict[str, Any]:
     }
 
 
+#: A prop offer's key: (player, event, market, book). The event is part of it, so a
+#: player with two games in scope (a doubleheader) keeps both games' offers.
+type PropKey = tuple[str, str, str, str]
+
+
 def _latest_props(
     session: Session, provider_name: str, event_ids: Sequence[str]
-) -> dict[tuple[str, str, str], dict[str, Any]]:
-    """The latest stored row per (player, market, book) among the rows of these events."""
+) -> dict[PropKey, dict[str, Any]]:
+    """The latest stored row per (player, event, market, book) of these events."""
     if not event_ids:
         return {}
     p = ArchivedProp
     newest = (
-        select(p.player_id, p.market, p.sportsbook_id, func.max(p.captured_at).label("at"))
+        select(
+            p.player_id,
+            p.event_id,
+            p.market,
+            p.sportsbook_id,
+            func.max(p.captured_at).label("at"),
+        )
         .where(p.provider == provider_name, p.event_id.in_(event_ids))
-        .group_by(p.player_id, p.market, p.sportsbook_id)
+        .group_by(p.player_id, p.event_id, p.market, p.sportsbook_id)
         .subquery()
     )
     rows = session.execute(
@@ -436,13 +454,31 @@ def _latest_props(
             and_(
                 p.provider == provider_name,
                 p.player_id == newest.c.player_id,
+                p.event_id == newest.c.event_id,
                 p.market == newest.c.market,
                 p.sportsbook_id == newest.c.sportsbook_id,
                 p.captured_at == newest.c.at,
             ),
         )
     )
-    return {(r.player_id, r.market, r.sportsbook_id): dict(r._mapping) for r in rows}
+    return {(r.player_id, r.event_id, r.market, r.sportsbook_id): dict(r._mapping) for r in rows}
+
+
+def _recent_prop_events(
+    session: Session, provider_name: str, now: datetime, settings: Settings
+) -> set[str]:
+    """Events with a prop row in the props look-back: the games whose offers may still be
+    stored as open, including games that have just left scope."""
+    from .view import prop_lookback  # view imports helpers from this module
+
+    p = ArchivedProp
+    return set(
+        session.scalars(
+            select(p.event_id)
+            .where(p.provider == provider_name, p.captured_at >= now - prop_lookback(settings))
+            .distinct()
+        )
+    )
 
 
 def capture_props(
@@ -452,14 +488,18 @@ def capture_props(
     now: datetime,
     events: Sequence[Event],
 ) -> SnapshotRun:
-    """One props run: every changed offer for an in-scope event."""
+    """One props run: every changed offer for an in-scope event, and a tombstone for every
+    stored open offer that is gone, including all of a game's offers once it leaves
+    scope (so a finished game's last offers are never read back as open)."""
     scope = {e.id for e in events}
-    current: dict[tuple[str, str, str], dict[str, Any]] = {}
+    current: dict[PropKey, dict[str, Any]] = {}
     for player in provider.list_players():
         for offer in provider.get_prop_offers(player.id):
             if offer.event_id in scope:
-                current[(offer.player_id, offer.market, offer.sportsbook_id)] = _prop_values(offer)
-    latest = _latest_props(session, provider.name, sorted(scope))
+                key = (offer.player_id, offer.event_id, offer.market, offer.sportsbook_id)
+                current[key] = _prop_values(offer)
+    recent = _recent_prop_events(session, provider.name, now, settings)
+    latest = _latest_props(session, provider.name, sorted(scope | recent))
     rows: list[dict[str, Any]] = []
     unchanged = 0
     for key, values in current.items():
@@ -473,9 +513,9 @@ def capture_props(
             rows.append(
                 {
                     "player_id": key[0],
-                    "event_id": previous["event_id"],
-                    "sportsbook_id": key[2],
-                    "market": key[1],
+                    "event_id": key[1],
+                    "sportsbook_id": key[3],
+                    "market": key[2],
                     "status": "unavailable",
                     "last_updated": None,
                     "line": None,
@@ -500,7 +540,8 @@ def _status_key(row: Any) -> tuple[str | None, str | None, str | None, str]:
 def _latest_status(
     session: Session, provider_name: str, records: Sequence[StatusRecord]
 ) -> dict[tuple[str | None, str | None, str | None, str], dict[str, Any]]:
-    """The latest stored row per (event, team, player, kind) for the subjects named."""
+    """The latest stored row per (event, team, player, kind) for the subjects named: one
+    grouped query per subject column, so a subject's history is never loaded whole."""
     events = {r.event_id for r in records if r.event_id}
     players = {r.player_id for r in records if r.player_id}
     teams = {r.team_id for r in records if r.team_id}
@@ -509,6 +550,12 @@ def _latest_status(
     for column, values in ((s.event_id, events), (s.player_id, players), (s.team_id, teams)):
         if not values:
             continue
+        newest = (
+            select(s.event_id, s.team_id, s.player_id, s.kind, func.max(s.captured_at).label("at"))
+            .where(s.provider == provider_name, column.in_(sorted(values)))
+            .group_by(s.event_id, s.team_id, s.player_id, s.kind)
+            .subquery()
+        )
         rows = session.execute(
             select(
                 s.event_id,
@@ -521,8 +568,18 @@ def _latest_status(
                 s.provider_id,
                 s.captured_at,
             )
-            .where(s.provider == provider_name, column.in_(sorted(values)))
-            .order_by(s.captured_at)
+            .join(
+                newest,
+                and_(
+                    s.event_id.is_not_distinct_from(newest.c.event_id),
+                    s.team_id.is_not_distinct_from(newest.c.team_id),
+                    s.player_id.is_not_distinct_from(newest.c.player_id),
+                    s.kind == newest.c.kind,
+                    s.captured_at == newest.c.at,
+                ),
+            )
+            .where(s.provider == provider_name)
+            .order_by(s.captured_at, s.id)
         )
         for row in rows:
             mapping = dict(row._mapping)
@@ -696,6 +753,7 @@ __all__ = [
     "INSERT_CHUNK",
     "INTERVAL_SLACK_SECONDS",
     "SQLITE_ROW_BYTES",
+    "UPCOMING_GRACE_HOURS",
     "PassReport",
     "RunSummary",
     "StatusRecord",
