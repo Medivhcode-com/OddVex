@@ -619,12 +619,13 @@ ARCHIVE_ID = BigInteger().with_variant(Integer(), "sqlite")
 
 
 class SnapshotRun(Base):
-    """One capture or prune pass of the snapshot archive (P0.1).
+    """One capture, prune or index-reclaim pass of the snapshot archive (P0.1).
 
     ``captured_at`` is the provider's clock at capture, shared by every row the pass
     wrote. The stale thresholds in force are stored, because they decide which archived
     quotes count for best price and consensus: a later change of setting never rewrites
-    history. Kept ``snapshot_keep_days``; never updated.
+    history. Kept at least ``snapshot_keep_days``, and as long as a kept row refers to
+    it; never updated.
     """
 
     __tablename__ = "snapshot_runs"
@@ -633,7 +634,7 @@ class SnapshotRun(Base):
     )
 
     id: Mapped[int] = mapped_column(ARCHIVE_ID, primary_key=True, autoincrement=True)
-    #: odds | props | status | prune
+    #: odds | props | status | prune | reclaim
     kind: Mapped[str] = mapped_column(String(16))
     provider: Mapped[str] = mapped_column(String(40))
     #: synthetic | replay
@@ -652,9 +653,15 @@ class SnapshotRun(Base):
     rows_written: Mapped[int] = mapped_column(Integer, default=0)
     rows_unchanged: Mapped[int] = mapped_column(Integer, default=0)
     rows_deleted: Mapped[int] = mapped_column(Integer, default=0)
-    #: Prune runs: full-resolution rows captured before this were pruned.
+    #: Prune runs: games whose last capture is before this have been reduced to their kept
+    #: captures. It never moves back from one prune to the next, whatever the settings.
     prune_cutoff: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    #: A failed pass: the exception's class name only, never data or a message.
+    #: Prune runs: games whose last capture is before this, and capture runs before it
+    #: that no kept row refers to, have been removed (the keep horizon). Reads answer
+    #: nothing from before it. It never moves back either.
+    keep_cutoff: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: A failed pass: the exception's class name only, never data or a message. A
+    #: ``reclaim`` run: index names and byte counts (``archive/reclaim.py``).
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
@@ -664,7 +671,8 @@ class _SnapshotColumns:
     ``run_id`` holds ``snapshot_runs.id`` but is deliberately not a foreign key: a
     RESTRICT key with no index on this side makes every run deletion scan the archive,
     and an index would cost about 16 MB a day. A run and its rows share one
-    ``captured_at`` and the prune removes both by the same cutoff, rows first.
+    ``captured_at``; the prune removes a run only once it is past the keep horizon and
+    no row refers to it any more, rows first.
     ``provider`` is the running provider's name: every read filters on it, so replay
     and synthetic rows never mix. ``provider_id`` and ``fetched_at`` are the record's own
     provenance. Rows are never updated (``archive/guard.py``); the only deletions are

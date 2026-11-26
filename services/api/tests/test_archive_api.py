@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -19,7 +19,13 @@ from .archive_support import (
     capture_schedule_on,
     enable_archive,
 )
-from .conftest import ADMIN_EMAIL, AppFactory, admin_headers, auth_headers
+from .conftest import (
+    ADMIN_EMAIL,
+    EXTERNAL_DATABASE_URL,
+    AppFactory,
+    admin_headers,
+    auth_headers,
+)
 from .fakes import ControlledProvider
 
 Headers = dict[str, str]
@@ -189,7 +195,38 @@ def test_admin_stats_show_the_archive_whatever_the_flag(
     assert (body["retention_days"], body["keep_days"]) == (7, 400)
     assert body["rows"]["odds"] > 0 and body["rows"]["events"] > 0 and body["rows"]["runs"] >= 8
     assert body["approx_bytes"] > 0
+    # The ceiling on the files, and the files themselves where the database reports them.
+    assert body["max_disk_bytes"] == 2_147_483_648
+    if EXTERNAL_DATABASE_URL:
+        assert 0 < body["disk_bytes"] < body["max_disk_bytes"]
+    else:
+        assert body["disk_bytes"] is None
     assert {run["kind"] for run in body["last_runs"]} >= {"odds", "props", "prune"}
+    for run in body["last_runs"]:
+        assert run["finished_at"] is not None
+        if run["kind"] != "reclaim":
+            assert run["indexes_rebuilt"] is None and run["bytes_freed"] is None
+    # The status read says what it covers.
+    status = client.get(
+        f"/v1/archive/events/{PREGAME}/status",
+        params={"as_of": (T0 + timedelta(seconds=400)).isoformat()},
+        headers=admin,
+    )
+    assert status.status_code == 404  # the flag is off
+    enable_archive(app.state.session_factory, True)
+    status = client.get(
+        f"/v1/archive/events/{PREGAME}/status",
+        params={"as_of": (T0 + timedelta(seconds=400)).isoformat()},
+        headers=admin,
+    )
+    assert status.status_code == 200, status.text
+    coverage = status.json()["coverage"]
+    assert (coverage["status"], coverage["captured_at"]) == ("not_captured", None)
+    # Records are kept 400 days back from the newest prune.
+    kept_from = datetime.fromisoformat(coverage["kept_from"])
+    assert timedelta(days=399) < T0 - kept_from <= timedelta(days=400)
+    assert status.json()["entries"] == []
+    enable_archive(app.state.session_factory, False)
     audit = client.get("/v1/admin/audit", params={"action": "admin.read"}, headers=admin).json()
     assert any(row["entity_type"] == "archive_stats" for row in audit["items"])
 

@@ -1121,12 +1121,74 @@
       },
       "ArchiveRunOut": {
         "properties": {
+          "bytes_freed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: bytes the run returned to the disk.",
+            "title": "Bytes Freed"
+          },
           "captured_at": {
             "format": "date-time",
             "title": "Captured At",
             "type": "string"
           },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wall-clock time the run ended.",
+            "title": "Finished At"
+          },
+          "indexes_dropped": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: invalid indexes an interrupted rebuild had left, dropped.",
+            "title": "Indexes Dropped"
+          },
+          "indexes_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: rebuilds or drops that failed and wait for a later pass.",
+            "title": "Indexes Failed"
+          },
+          "indexes_rebuilt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: indexes rebuilt to return space to the disk.",
+            "title": "Indexes Rebuilt"
+          },
           "kind": {
+            "description": "`odds`, `props`, `status`, `prune` or `reclaim`.",
             "title": "Kind",
             "type": "string"
           },
@@ -1169,7 +1231,7 @@
                 "type": "null"
               }
             ],
-            "description": "PostgreSQL only: the size of the five tables' files with their indexes. It does not fall after the prune, whose freed space later rows reuse.",
+            "description": "PostgreSQL only: the size of the five tables' files with their indexes. The table files do not shrink after the prune (later rows reuse the freed space); the index files shrink when a `reclaim` run rebuilds them.",
             "title": "Disk Bytes"
           },
           "enabled": {
@@ -1181,7 +1243,7 @@
             "type": "integer"
           },
           "last_runs": {
-            "description": "The latest run of each kind.",
+            "description": "The latest run of each kind. A `reclaim` run is recorded only when it rebuilt or dropped an index or failed, so the latest one is the last time index space was returned to the disk.",
             "items": {
               "$ref": "#/components/schemas/ArchiveRunOut"
             },
@@ -1190,6 +1252,11 @@
           },
           "max_bytes": {
             "title": "Max Bytes",
+            "type": "integer"
+          },
+          "max_disk_bytes": {
+            "description": "PostgreSQL only: capture also stops while `disk_bytes` is at this ceiling.",
+            "title": "Max Disk Bytes",
             "type": "integer"
           },
           "retention_days": {
@@ -1204,6 +1271,7 @@
           "enabled",
           "approx_bytes",
           "max_bytes",
+          "max_disk_bytes",
           "retention_days",
           "keep_days",
           "rows",
@@ -1637,6 +1705,9 @@
       },
       "ArchivedStatusOut": {
         "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/StatusCoverageOut"
+          },
           "data_mode": {
             "enum": [
               "synthetic",
@@ -1662,6 +1733,7 @@
         "required": [
           "requested_as_of",
           "data_mode",
+          "coverage",
           "entries"
         ],
         "title": "ArchivedStatusOut",
@@ -4103,7 +4175,7 @@
             "title": "Run Id"
           },
           "status": {
-            "description": "`captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention.",
+            "description": "`captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention, or the time is at or before the keep horizon, where the archive no longer answers.",
             "enum": [
               "captured",
               "not_captured",
@@ -7803,7 +7875,7 @@
             "title": "Captured At"
           },
           "status": {
-            "description": "Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the time is past the keep horizon. Offers are returned only when `captured`.",
+            "description": "Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the 48 hours before the time reach past the keep horizon. Offers are returned only when `captured`.",
             "enum": [
               "captured",
               "not_captured",
@@ -8291,6 +8363,51 @@
           "weekly_stake_threshold"
         ],
         "title": "StakeReminderUpdate",
+        "type": "object"
+      },
+      "StatusCoverageOut": {
+        "properties": {
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the newest of the entries was captured.",
+            "title": "Captured At"
+          },
+          "kept_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Status records are kept 400 days. A record that had not changed since before this time has been removed and is not among `entries`. Null before the first prune.",
+            "title": "Kept From"
+          },
+          "status": {
+            "description": "`captured`: the archive holds status records of the event captured at or before the requested time, and `entries` is the latest of each. `not_captured`: it holds none. `archive_pruned`: it holds none and the time is before `kept_from`, so they may have been removed.",
+            "enum": [
+              "captured",
+              "not_captured",
+              "archive_pruned"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusCoverageOut",
         "type": "object"
       },
       "SuspendUserRequest": {

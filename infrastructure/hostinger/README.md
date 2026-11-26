@@ -217,10 +217,20 @@ the list holds an address: deploy a commit that has it, or empty the list first.
 - A `worker` container evaluates alert rules and grades community picks every two minutes. Delivery is in-app only.
   It also runs `scripts/capture_snapshots.py`, the snapshot archive (P0.1). While the `snapshot_archive` flag is off,
   the default, it writes nothing. Switched on, it captures odds every 6 minutes and props hourly, keeps full
-  resolution for 7 days and each game's closing and last captures, plus at most six captures per game for stored
-  bets, for 400 days, and stops capturing at 1.5 GiB: about 0.55 GB after the first week and 0.85 GB by day 400 on
-  the synthetic schedule (1.2 GB if every game reaches the bet bound), all of it inside the database and so inside
-  every dump (`docs/features/p0-1.md`, owner question OQ-23). Turning the flag off stops the growth; the rows stay.
+  resolution for 7 days and each game's first, closing and last captures, plus at most six captures per game for
+  stored bets, for 400 days, and stops capturing at 1.5 GiB of counted data: about 0.55 GB after the first week and
+  0.95 GB by day 400 on the synthetic schedule (1.3 GB if every game reaches the bet bound), all of it inside the
+  database and so inside every dump (`docs/features/p0-1.md`, owner question OQ-23). After each hourly prune the
+  same script rebuilds archive indexes that have grown past 1.3 times the size their rows need
+  (`REINDEX INDEX CONCURRENTLY`, one at a time; reads and writes go on), so the files on the disk stay within 1.25
+  times the largest counted size, and capture also stops at a ceiling of 2 GiB of files
+  (`ODDVEX_SNAPSHOT_MAX_DISK_BYTES`). A rebuild needs extra disk while it runs: one new copy of the index, the
+  sort's temporary files and as much write-ahead log, about 0.5 GiB and 0.2 GiB of log for the largest index with
+  the archive at its cap, for some seconds (14.5 s measured on the development machine). It waits for older
+  transactions, such as a dump in progress, for at most 10 s, then gives up until the next prune; a rebuild that is
+  cut short (a deploy restarts the worker) leaves an invalid index that the next pass drops. `GET
+  /v1/admin/archive/stats` shows the size of the files, the ceiling and the last rebuild. Turning the flag off stops
+  the growth, the prune and the rebuilds; the rows stay.
 - The API container does not write uvicorn's access log. The application writes one line per request (time, method,
   path, status, duration, client address) and no query string. The API container that ran before this change did
   write uvicorn's access log, with query strings; the deploy that removes that container removes its log with it

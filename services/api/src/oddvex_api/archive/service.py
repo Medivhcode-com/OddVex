@@ -39,8 +39,9 @@ from .schemas import (
     ArchiveStatsOut,
     CoverageOut,
     PropsCoverageOut,
+    StatusCoverageOut,
 )
-from .view import ArchiveView, Coverage, board_at, latest_odds_rows, props_at
+from .view import ArchiveView, Coverage, board_at, latest_odds_rows, props_at, prune_cutoffs
 
 #: Most status entries one request returns.
 MAX_STATUS_ENTRIES = 500
@@ -161,7 +162,12 @@ def archived_status(
     event_id: str,
     as_of: datetime,
 ) -> ArchivedStatusOut:
-    """The latest status record per (team, player, kind) of one event at or before T."""
+    """The latest status record per (team, player, kind) of one event at or before T.
+
+    A record is stored when it changes and kept ``snapshot_keep_days``; one that has not
+    changed since before the keep horizon is gone, and the answer says from when records
+    are kept (``kept_from``). With nothing found the answer is ``not_captured``, or
+    ``archive_pruned`` when T is before the keep horizon."""
     s = ArchivedStatus
     newest = (
         select(s.team_id, s.player_id, s.kind, func.max(s.captured_at).label("at"))
@@ -185,24 +191,38 @@ def archived_status(
         .order_by(s.kind, s.team_id, s.player_id, s.id)
         .limit(MAX_STATUS_ENTRIES)
     )
+    entries = [
+        ArchivedStatusEntryOut(
+            kind=row.kind,  # type: ignore[arg-type]
+            status=row.status,
+            source=row.source,
+            reported_at=row.reported_at,
+            captured_at=row.captured_at,
+            event_id=row.event_id,
+            team_id=row.team_id,
+            player_id=row.player_id,
+            provider=row.provider,
+            provider_id=row.provider_id,
+        )
+        for row in rows
+    ]
+    keep_cutoff = prune_cutoffs(session)[1]
+    if entries:
+        coverage = StatusCoverageOut(
+            status="captured",
+            captured_at=max(entry.captured_at for entry in entries),
+            kept_from=keep_cutoff,
+        )
+    else:
+        removed = keep_cutoff is not None and as_of < keep_cutoff
+        coverage = StatusCoverageOut(
+            status="archive_pruned" if removed else "not_captured", kept_from=keep_cutoff
+        )
     return ArchivedStatusOut(
         requested_as_of=as_of,
         data_mode=provider.data_mode,  # type: ignore[arg-type]
-        entries=[
-            ArchivedStatusEntryOut(
-                kind=row.kind,  # type: ignore[arg-type]
-                status=row.status,
-                source=row.source,
-                reported_at=row.reported_at,
-                captured_at=row.captured_at,
-                event_id=row.event_id,
-                team_id=row.team_id,
-                player_id=row.player_id,
-                provider=row.provider,
-                provider_id=row.provider_id,
-            )
-            for row in rows
-        ],
+        coverage=coverage,
+        entries=entries,
     )
 
 
@@ -225,6 +245,7 @@ def archive_stats(session: Session, settings: Settings) -> ArchiveStatsOut:
         approx_bytes=archive_bytes(session),
         disk_bytes=archive_disk_bytes(session),
         max_bytes=settings.snapshot_max_bytes,
+        max_disk_bytes=settings.snapshot_max_disk_bytes,
         retention_days=settings.snapshot_retention_days,
         keep_days=max(settings.snapshot_keep_days, settings.snapshot_retention_days),
         rows=ArchiveRowCountsOut(
@@ -234,16 +255,29 @@ def archive_stats(session: Session, settings: Settings) -> ArchiveStatsOut:
             status=count(ArchivedStatus),
             runs=count(SnapshotRun),
         ),
-        last_runs=[
-            ArchiveRunOut(
-                kind=run.kind,
-                captured_at=run.captured_at,
-                status=run.status,
-                rows_written=run.rows_written,
-                rows_deleted=run.rows_deleted,
-            )
-            for run in runs
-        ],
+        last_runs=[_run_out(run) for run in runs],
+    )
+
+
+def _run_out(run: SnapshotRun) -> ArchiveRunOut:
+    out = ArchiveRunOut(
+        kind=run.kind,
+        captured_at=run.captured_at,
+        status=run.status,
+        rows_written=run.rows_written,
+        rows_deleted=run.rows_deleted,
+        finished_at=run.finished_at,
+    )
+    if run.kind != "reclaim":
+        return out
+    detail = run.detail or {}
+    return out.model_copy(
+        update={
+            "indexes_rebuilt": len(detail.get("rebuilt") or {}),
+            "indexes_dropped": len(detail.get("dropped") or {}),
+            "indexes_failed": len(detail.get("failed") or {}),
+            "bytes_freed": int(detail.get("freed_bytes") or 0),
+        }
     )
 
 

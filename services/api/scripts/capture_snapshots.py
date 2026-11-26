@@ -4,15 +4,18 @@
     python scripts/capture_snapshots.py               # capture what is due, prune when due
     python scripts/capture_snapshots.py --force       # capture now, whatever the intervals
     python scripts/capture_snapshots.py --prune-only  # prune when due (with --force: now)
+    python scripts/capture_snapshots.py --reclaim     # PostgreSQL: check the indexes now
     python scripts/capture_snapshots.py --dry-run     # say what a pass would capture; write nothing
     python scripts/capture_snapshots.py --stats       # print the archive's size and row counts
 
 The worker container runs this every 120 s (``infrastructure/hostinger/compose.yaml``).
 While the ``snapshot_archive`` flag is off it writes nothing and exits at once, so turning
 the flag off stops all storage growth. On PostgreSQL an advisory lock stops two passes
-from overlapping. It reads only the configured provider (synthetic unless set), never a
-sportsbook. Exit status 1 when a capture or prune failed; the failure is recorded as a
-``failed`` run with the exception's class name only.
+from overlapping, and after each prune the pass rebuilds bloated archive indexes and drops
+whatever an interrupted rebuild left (``oddvex_api/archive/reclaim.py``); ``--reclaim``
+does only that, now. It reads only the configured provider (synthetic unless set), never a
+sportsbook. Exit status 1 when a capture, prune or rebuild failed; the failure is recorded
+as a ``failed`` run with the exception's class name only.
 """
 
 from __future__ import annotations
@@ -46,7 +49,16 @@ def _stats(settings: Settings) -> int:
         f"of {stats.max_bytes:,}; rows: {rows.odds:,} odds, {rows.props:,} props, "
         f"{rows.events:,} events, {rows.status:,} status, {rows.runs:,} runs."
     )
+    if stats.disk_bytes is not None:
+        print(f"  files on disk: {stats.disk_bytes:,} bytes of {stats.max_disk_bytes:,}")
     for run in stats.last_runs:
+        if run.kind == "reclaim":
+            print(
+                f"  last reclaim: {run.status} at {run.captured_at.isoformat()}, "
+                f"{run.indexes_rebuilt} index(es) rebuilt, {run.indexes_dropped} dropped, "
+                f"{run.indexes_failed} failed, {run.bytes_freed or 0:,} bytes freed"
+            )
+            continue
         print(
             f"  last {run.kind}: {run.status} at {run.captured_at.isoformat()}, "
             f"{run.rows_written:,} written, {run.rows_deleted:,} deleted"
@@ -99,6 +111,7 @@ def main(argv: list[str]) -> int:
         return _dry_run(settings, provider)
     install_archive_guard()
     prune_only = "--prune-only" in argv
+    reclaim_only = "--reclaim" in argv
     force = "--force" in argv
     engine = make_engine(settings.database_url)
     try:
@@ -106,9 +119,11 @@ def main(argv: list[str]) -> int:
             engine,
             provider,
             settings,
-            force=force and not prune_only,
-            capture=not prune_only,
+            force=force and not (prune_only or reclaim_only),
+            capture=not (prune_only or reclaim_only),
+            prune=not reclaim_only,
             force_prune=force and prune_only,
+            force_reclaim=reclaim_only,
         )
     finally:
         engine.dispose()
@@ -129,6 +144,14 @@ def main(argv: list[str]) -> int:
                 f"{name} {run.status}, {run.rows_written} row(s) written, "
                 f"{run.rows_unchanged} unchanged"
             )
+    if report.reclaim is not None:
+        detail = report.reclaim.detail or {}
+        parts.append(
+            f"reclaim {report.reclaim.status}, {len(detail.get('rebuilt') or {})} index(es) "
+            f"rebuilt, {int(detail.get('freed_bytes') or 0):,} bytes freed"
+        )
+    elif reclaim_only:
+        parts.append("reclaim: nothing to rebuild")
     print("Snapshot archive: " + "; ".join(parts) + ".")
     return 1 if report.failed else 0
 

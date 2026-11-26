@@ -2300,11 +2300,39 @@ export interface components {
         /** ArchiveRunOut */
         ArchiveRunOut: {
             /**
+             * Bytes Freed
+             * @description `reclaim` runs: bytes the run returned to the disk.
+             */
+            bytes_freed?: number | null;
+            /**
              * Captured At
              * Format: date-time
              */
             captured_at: string;
-            /** Kind */
+            /**
+             * Finished At
+             * @description Wall-clock time the run ended.
+             */
+            finished_at?: string | null;
+            /**
+             * Indexes Dropped
+             * @description `reclaim` runs: invalid indexes an interrupted rebuild had left, dropped.
+             */
+            indexes_dropped?: number | null;
+            /**
+             * Indexes Failed
+             * @description `reclaim` runs: rebuilds or drops that failed and wait for a later pass.
+             */
+            indexes_failed?: number | null;
+            /**
+             * Indexes Rebuilt
+             * @description `reclaim` runs: indexes rebuilt to return space to the disk.
+             */
+            indexes_rebuilt?: number | null;
+            /**
+             * Kind
+             * @description `odds`, `props`, `status`, `prune` or `reclaim`.
+             */
             kind: string;
             /** Rows Deleted */
             rows_deleted: number;
@@ -2322,7 +2350,7 @@ export interface components {
             approx_bytes: number;
             /**
              * Disk Bytes
-             * @description PostgreSQL only: the size of the five tables' files with their indexes. It does not fall after the prune, whose freed space later rows reuse.
+             * @description PostgreSQL only: the size of the five tables' files with their indexes. The table files do not shrink after the prune (later rows reuse the freed space); the index files shrink when a `reclaim` run rebuilds them.
              */
             disk_bytes?: number | null;
             /** Enabled */
@@ -2331,11 +2359,16 @@ export interface components {
             keep_days: number;
             /**
              * Last Runs
-             * @description The latest run of each kind.
+             * @description The latest run of each kind. A `reclaim` run is recorded only when it rebuilt or dropped an index or failed, so the latest one is the last time index space was returned to the disk.
              */
             last_runs: components["schemas"]["ArchiveRunOut"][];
             /** Max Bytes */
             max_bytes: number;
+            /**
+             * Max Disk Bytes
+             * @description PostgreSQL only: capture also stops while `disk_bytes` is at this ceiling.
+             */
+            max_disk_bytes: number;
             /** Retention Days */
             retention_days: number;
             rows: components["schemas"]["ArchiveRowCountsOut"];
@@ -2502,6 +2535,7 @@ export interface components {
         };
         /** ArchivedStatusOut */
         ArchivedStatusOut: {
+            coverage: components["schemas"]["StatusCoverageOut"];
             /**
              * Data Mode
              * @enum {string}
@@ -3461,7 +3495,7 @@ export interface components {
             run_id?: number | null;
             /**
              * Status
-             * @description `captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention.
+             * @description `captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention, or the time is at or before the keep horizon, where the archive no longer answers.
              * @enum {string}
              */
             status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
@@ -4987,7 +5021,7 @@ export interface components {
             captured_at?: string | null;
             /**
              * Status
-             * @description Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the time is past the keep horizon. Offers are returned only when `captured`.
+             * @description Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the 48 hours before the time reach past the keep horizon. Offers are returned only when `captured`.
              * @enum {string}
              */
             status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
@@ -5212,6 +5246,25 @@ export interface components {
              * @description Total stake per week at which you want a reminder. Null turns it off.
              */
             weekly_stake_threshold: number | null;
+        };
+        /** StatusCoverageOut */
+        StatusCoverageOut: {
+            /**
+             * Captured At
+             * @description When the newest of the entries was captured.
+             */
+            captured_at?: string | null;
+            /**
+             * Kept From
+             * @description Status records are kept 400 days. A record that had not changed since before this time has been removed and is not among `entries`. Null before the first prune.
+             */
+            kept_from?: string | null;
+            /**
+             * Status
+             * @description `captured`: the archive holds status records of the event captured at or before the requested time, and `entries` is the latest of each. `not_captured`: it holds none. `archive_pruned`: it holds none and the time is before `kept_from`, so they may have been removed.
+             * @enum {string}
+             */
+            status: "captured" | "not_captured" | "archive_pruned";
         };
         /** SuspendUserRequest */
         SuspendUserRequest: {

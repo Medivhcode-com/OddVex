@@ -5,6 +5,8 @@ prune handles an event once, when all of its rows are older than that (its last 
 row has aged out), so a read at any time after the cutoff never misses a row that an
 unchanged quote carried forward. It then keeps, for ``snapshot_keep_days`` (400):
 
+- **The first capture.** The event's first event row and its odds rows. It marks when the
+  event entered scope, whatever its start time was then or became later.
 - **The closing capture.** The event's last ``upcoming`` event row and, per (market, book)
   and per (player, event, market, book), the latest row captured at or before it.
 - **The last capture.** The event's last event row and, per (market, book), the latest
@@ -26,9 +28,20 @@ each, so no long lock is held and the write-ahead log stays small. That includes
 captured after the event's last event row (the tombstones written when it left scope),
 which therefore go up to about an hour before they are 7 days old; the props read
 (``view.props_at``) serves the kept closing offers only for times at which they are still
-the answer, and names the game as pruned otherwise. Then everything older than
-``snapshot_keep_days`` goes: rows first, then the capture runs, which share the rows'
-``captured_at`` and so the same cutoff.
+the answer, and names the game as pruned otherwise.
+
+**The keep horizon** (``keep_sweep``) works per game, because a kept capture holds rows
+older than itself (a quote unchanged since an earlier capture is stored once). A game's
+event, odds and prop rows leave together, once its last event row is older than
+``snapshot_keep_days``; until then every kept capture of it is whole. A status row goes
+by its own age (each record stands alone). A capture run past the horizon is deleted
+only when no remaining row refers to it; the last successful odds and props capture
+before the horizon also stays, so a later time with no capture since still reads as a
+gap. Each prune run records its two cutoffs (``prune_cutoff``, ``keep_cutoff``); neither
+ever moves back, so a later change of setting cannot make a read trust what an earlier
+prune removed. The reads (``view.py``) answer nothing from capture runs before
+``keep_cutoff``: runs are thinned there, so "the latest capture at or before T" is no
+longer knowable.
 """
 
 from __future__ import annotations
@@ -36,6 +49,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -51,11 +65,13 @@ from ..db import (
     Bet,
     BetLeg,
     SnapshotRun,
+    utcnow,
 )
 from ..flags import service as flags
 from ..providers import SportsDataProvider
 from .capture import FLAG, RunSummary, guarded, is_due, new_run
 from .placement import structured_leg_condition
+from .view import prune_cutoffs
 
 #: Ids deleted per statement, each batch in its own transaction.
 DELETE_BATCH = 1000
@@ -71,17 +87,6 @@ def _delete_ids(session: Session, model: type[Any], ids: Sequence[int]) -> int:
         session.execute(delete(model).where(model.id.in_(ids[start : start + DELETE_BATCH])))
         session.commit()
     return len(ids)
-
-
-def _delete_older(session: Session, model: type[Any], cutoff: datetime) -> int:
-    deleted = 0
-    while True:
-        ids = list(
-            session.scalars(select(model.id).where(model.captured_at < cutoff).limit(DELETE_BATCH))
-        )
-        if not ids:
-            return deleted
-        deleted += _delete_ids(session, model, ids)
 
 
 def _bet_anchors(
@@ -141,8 +146,8 @@ def _bet_anchors(
 
 
 def _prune_event(session: Session, provider_name: str, event_id: str, settings: Settings) -> int:
-    """Delete every row of an event whose rows have all aged out, except the closing
-    capture, the last capture and the bounded bet anchors."""
+    """Delete every row of an event whose rows have all aged out, except the first
+    capture, the closing capture, the last capture and the bounded bet anchors."""
     e, o, p = ArchivedEvent, ArchivedOdds, ArchivedProp
     events = session.execute(
         select(e.id, e.captured_at, e.status)
@@ -154,7 +159,11 @@ def _prune_event(session: Session, provider_name: str, event_id: str, settings: 
     times = [r.captured_at for r in events]
     upcoming = [r.captured_at for r in events if r.status == "upcoming"]
     closing = upcoming[-1] if upcoming else None
-    keep_events = {times[-1], *_bet_anchors(session, provider_name, event_id, times, settings)}
+    keep_events = {
+        times[0],
+        times[-1],
+        *_bet_anchors(session, provider_name, event_id, times, settings),
+    }
     if closing is not None:
         keep_events.add(closing)
 
@@ -212,17 +221,134 @@ def _prune_event(session: Session, provider_name: str, event_id: str, settings: 
     )
 
 
-def prune_rows(session: Session, settings: Settings, now: datetime) -> tuple[int, datetime]:
-    """Delete what has aged out. Returns (rows deleted, full-resolution cutoff)."""
+@dataclass(frozen=True)
+class PruneResult:
+    """What one prune did: rows deleted and the two cutoffs it reached."""
+
+    deleted: int
+    cutoff: datetime
+    keep_cutoff: datetime
+
+
+def _sweep_event(session: Session, provider_name: str, event_id: str, cutoff: datetime) -> int:
+    """Delete a game whose last event row is past the keep horizon: its odds, prop and
+    event rows together. (Prop rows of it captured at or after the cutoff, which only a
+    provider that briefly listed the game again could have left, stay until they age.)"""
+    deleted = 0
+    for model, conditions in (
+        (ArchivedOdds, ()),
+        (ArchivedProp, (ArchivedProp.captured_at < cutoff,)),
+        (ArchivedEvent, ()),
+    ):
+        ids = list(
+            session.scalars(
+                select(model.id).where(
+                    model.provider == provider_name, model.event_id == event_id, *conditions
+                )
+            )
+        )
+        session.commit()
+        deleted += _delete_ids(session, model, ids)
+    return deleted
+
+
+def _delete_where(session: Session, model: type[Any], *conditions: Any) -> int:
+    deleted = 0
+    while True:
+        ids = list(session.scalars(select(model.id).where(*conditions).limit(DELETE_BATCH)))
+        session.commit()
+        if not ids:
+            return deleted
+        deleted += _delete_ids(session, model, ids)
+
+
+def keep_sweep(session: Session, cutoff: datetime) -> int:
+    """Delete what is past the keep horizon, game by game (module docstring)."""
+    e, s = ArchivedEvent, ArchivedStatus
+    deleted = 0
+    # Games with a row older than the cutoff; of those, the ones whose last row is.
+    old = sorted(
+        set(
+            session.execute(
+                select(e.provider, e.event_id).where(e.captured_at < cutoff).distinct()
+            ).tuples()
+        )
+    )
+    session.commit()
+    for provider_name, event_id in old:
+        last = session.scalar(
+            select(func.max(e.captured_at)).where(
+                e.provider == provider_name, e.event_id == event_id
+            )
+        )
+        if last is not None and last < cutoff:
+            deleted += _sweep_event(session, provider_name, event_id, cutoff)
+    # Odds and prop rows of a game with no event row at all (a props capture of a game
+    # no odds capture ever had, or rows a swept game left behind) go by their own age.
+    for model in (ArchivedOdds, ArchivedProp):
+        has_event = (
+            select(e.id).where(e.provider == model.provider, e.event_id == model.event_id).exists()
+        )
+        deleted += _delete_where(session, model, model.captured_at < cutoff, ~has_event)
+    # Status rows stand alone (the read takes the latest per subject and kind), so each
+    # goes by its own age: a record that has not changed for the whole keep period is
+    # dropped, and the status read says from when its records are kept.
+    deleted += _delete_where(session, s, s.captured_at < cutoff)
+    # Capture runs past the cutoff that no remaining row refers to. A row's
+    # ``captured_at`` is its run's, so only rows past the cutoff can refer to such a run.
+    referenced: set[int] = set()
+    rows: tuple[type[Any], ...] = (ArchivedEvent, ArchivedOdds, ArchivedProp, ArchivedStatus)
+    for table in rows:
+        referenced |= set(
+            session.scalars(select(table.run_id).where(table.captured_at < cutoff).distinct())
+        )
+    # The last successful odds and props capture before the cutoff stays as well: a time
+    # after the cutoff with no capture since still reads when capture last ran (a gap),
+    # not "never captured".
+    newest = (
+        select(
+            func.max(SnapshotRun.captured_at).label("at"), SnapshotRun.kind, SnapshotRun.provider
+        )
+        .where(
+            SnapshotRun.captured_at < cutoff,
+            SnapshotRun.status == "ok",
+            SnapshotRun.kind.in_(("odds", "props")),
+        )
+        .group_by(SnapshotRun.kind, SnapshotRun.provider)
+        .subquery()
+    )
+    referenced |= set(
+        session.scalars(
+            select(SnapshotRun.id).join(
+                newest,
+                (SnapshotRun.kind == newest.c.kind)
+                & (SnapshotRun.provider == newest.c.provider)
+                & (SnapshotRun.captured_at == newest.c.at),
+            )
+        )
+    )
+    run_ids = [
+        run_id
+        for run_id in session.scalars(
+            select(SnapshotRun.id).where(SnapshotRun.captured_at < cutoff)
+        )
+        if run_id not in referenced
+    ]
+    session.commit()
+    return deleted + _delete_ids(session, SnapshotRun, run_ids)
+
+
+def prune_rows(session: Session, settings: Settings, now: datetime) -> PruneResult:
+    """Delete what has aged out. The cutoffs never move back from an earlier prune's."""
+    previous, previous_keep = prune_cutoffs(session)
     cutoff = now - timedelta(days=settings.snapshot_retention_days)
     keep_cutoff = now - timedelta(
         days=max(settings.snapshot_keep_days, settings.snapshot_retention_days)
     )
-    previous = session.scalar(
-        select(func.max(SnapshotRun.prune_cutoff)).where(
-            SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
-        )
-    )
+    if previous is not None:
+        cutoff = max(cutoff, previous)
+    if previous_keep is not None:
+        keep_cutoff = max(keep_cutoff, previous_keep)
     e = ArchivedEvent
     # Events with a row in the window that aged out since the previous pass; of those,
     # the ones whose rows have all aged out. The others are handled when their last row
@@ -242,9 +368,8 @@ def prune_rows(session: Session, settings: Settings, now: datetime) -> tuple[int
         if last is None or last >= cutoff:
             continue
         deleted += _prune_event(session, provider_name, event_id, settings)
-    for table in (ArchivedOdds, ArchivedProp, ArchivedEvent, ArchivedStatus, SnapshotRun):
-        deleted += _delete_older(session, table, keep_cutoff)
-    return deleted, cutoff
+    deleted += keep_sweep(session, keep_cutoff)
+    return PruneResult(deleted, cutoff, keep_cutoff)
 
 
 def prune_pass(
@@ -260,10 +385,12 @@ def prune_pass(
         return None
 
     def work() -> SnapshotRun:
-        deleted, cutoff = prune_rows(session, settings, now)
+        result = prune_rows(session, settings, now)
         run = new_run(provider, settings, "prune", now)
-        run.rows_deleted = deleted
-        run.prune_cutoff = cutoff
+        run.rows_deleted = result.deleted
+        run.prune_cutoff = result.cutoff
+        run.keep_cutoff = result.keep_cutoff
+        run.finished_at = utcnow()
         session.add(run)
         session.flush()
         return run
@@ -282,4 +409,12 @@ def prune_archive(
         return prune_pass(session, provider, settings, force=force)
 
 
-__all__ = ["DELETE_BATCH", "MAX_ANCHORS_PER_EVENT", "prune_archive", "prune_pass", "prune_rows"]
+__all__ = [
+    "DELETE_BATCH",
+    "MAX_ANCHORS_PER_EVENT",
+    "PruneResult",
+    "keep_sweep",
+    "prune_archive",
+    "prune_pass",
+    "prune_rows",
+]

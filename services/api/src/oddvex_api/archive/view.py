@@ -6,13 +6,19 @@ the live :class:`Board` code computes best price and consensus as of T unchanged
 (``board_at`` gives it the stale thresholds that were in force at capture, and judges an
 archived ``upcoming`` event whose start time had passed at T by the live threshold). No
 method ever returns a row captured after T.
+
+Two cutoffs recorded by the prune (``prune_cutoffs``) bound what a read may trust. Games
+whose last capture is before ``prune_cutoff`` hold only their kept captures. Before
+``keep_cutoff`` (the keep horizon) capture runs are thinned, so a read that would have to
+rely on a run from before it answers ``archive_pruned`` and returns nothing.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal
+from itertools import pairwise
+from typing import Any, Literal
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -53,8 +59,9 @@ class Coverage:
     - ``captured``: R is at most ``snapshot_max_gap_seconds`` before T and the archive
       holds the event's row from R. Only then is anything priced.
     - ``archive_gap``: no ``ok`` odds capture within the limit before T.
-    - ``archive_pruned``: R ran while the event was in scope, but its rows from R were
-      pruned; or no run is left from before T and T is past the keep horizon.
+    - ``archive_pruned``: R ran while the event was in scope (between its first and its
+      last capture), but its rows from R were pruned; or T is within the gap limit of
+      the keep horizon or before it, where capture runs are no longer all kept.
     - ``not_captured``: before the first capture, or the event was not in scope at R.
 
     ``snapshot`` is the latest event row at or before T, whatever the status.
@@ -83,57 +90,123 @@ def _latest_odds_run_at(session: Session, provider_name: str, as_of: datetime) -
     )
 
 
-def _newest_prune(session: Session) -> tuple[datetime, datetime] | None:
-    """(captured_at, prune_cutoff) of the newest successful prune run."""
-    newest = session.execute(
-        select(SnapshotRun.captured_at, SnapshotRun.prune_cutoff)
-        .where(SnapshotRun.kind == "prune", SnapshotRun.status == "ok")
-        .order_by(SnapshotRun.captured_at.desc())
-        .limit(1)
-    ).first()
-    if newest is None or newest.prune_cutoff is None:
-        return None
-    return newest.captured_at, newest.prune_cutoff
+def prune_cutoffs(session: Session) -> tuple[datetime | None, datetime | None]:
+    """(prune_cutoff, keep_cutoff) reached by the prunes so far: the largest recorded, so
+    a later change of the retention settings never makes a read trust what an earlier
+    prune removed. ``None`` before the first prune."""
+    row = session.execute(
+        select(func.max(SnapshotRun.prune_cutoff), func.max(SnapshotRun.keep_cutoff)).where(
+            SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
+        )
+    ).one()
+    return row[0], row[1]
 
 
-def _runs_pruned(session: Session, as_of: datetime, settings: Settings) -> bool:
-    """With no capture run left from before T: whether T is before the newest prune's keep
-    horizon (the runs themselves were deleted) rather than before the first capture."""
-    newest = _newest_prune(session)
-    if newest is None:
-        return False
-    horizon = newest[0] - timedelta(
-        days=max(settings.snapshot_keep_days, settings.snapshot_retention_days)
+def _event_bounds(
+    session: Session, provider_name: str, event_id: str
+) -> tuple[datetime | None, datetime | None]:
+    """When the event's first and last remaining event rows were captured. The prune
+    keeps both captures, so they are when the event entered and left scope."""
+    row = session.execute(
+        select(func.min(ArchivedEvent.captured_at), func.max(ArchivedEvent.captured_at)).where(
+            ArchivedEvent.provider == provider_name, ArchivedEvent.event_id == event_id
+        )
+    ).one()
+    return row[0], row[1]
+
+
+def reduced_until(session: Session, provider_name: str, event_id: str) -> datetime | None:
+    """The time up to which the event's rows are only the kept ones, or ``None`` when the
+    prune has never handled it (every row of it is still there).
+
+    A prune handles an event when its last event row is before that prune's cutoff, and
+    then reduces every row the event has at that moment. So prune i (run at ``now_i``,
+    cutoff ``c_i``) handled the event exactly when the event had a row before ``c_i`` and
+    none in ``[c_i, now_i]``: a gap in its event rows, or the open end after its last
+    one, that holds a prune. Rows captured after ``now_i`` (the game came back into
+    scope) were never touched by it. The latest such ``now_i`` is the answer. A cutoff is
+    at least a day before its prune (``snapshot_retention_days`` is at least 1), so only
+    gaps longer than a day are looked at."""
+    times = list(
+        session.scalars(
+            select(ArchivedEvent.captured_at)
+            .where(ArchivedEvent.provider == provider_name, ArchivedEvent.event_id == event_id)
+            .order_by(ArchivedEvent.captured_at)
+        )
     )
-    return as_of < horizon
+    if not times:
+        return None
+    gaps: list[tuple[datetime, datetime | None]] = [
+        (earlier, later)
+        for earlier, later in pairwise(times)
+        if later - earlier > timedelta(days=1)
+    ]
+    gaps.append((times[-1], None))
+    for earlier, later in reversed(gaps):
+        conditions = [SnapshotRun.kind == "prune", SnapshotRun.status == "ok"]
+        if later is not None:
+            conditions.append(SnapshotRun.captured_at < later)
+        # Cutoffs never move back, so the last prune before the gap's end has the
+        # largest: if any prune in the gap handled the event, this one did.
+        prune = session.execute(
+            select(SnapshotRun.captured_at, SnapshotRun.prune_cutoff)
+            .where(*conditions)
+            .order_by(SnapshotRun.captured_at.desc(), SnapshotRun.id.desc())
+            .limit(1)
+        ).first()
+        if prune is not None and prune.prune_cutoff is not None and prune.prune_cutoff > earlier:
+            return prune.captured_at  # type: ignore[no-any-return]
+    return None
 
 
 def _pruned_while_in_scope(
-    session: Session, provider_name: str, event_id: str, run_at: datetime, settings: Settings
+    session: Session, provider_name: str, event_id: str, run_at: datetime
 ) -> bool:
-    """Whether the event's row from the run at ``run_at`` existed and was pruned.
+    """Whether the event's row from the run at ``run_at`` existed and was pruned: the run
+    falls between the event's first and last captures (the prune keeps both, so they are
+    when it entered and left scope) and at or before the time up to which the prune has
+    reduced the event's rows (:func:`reduced_until`)."""
+    first, last = _event_bounds(session, provider_name, event_id)
+    if first is None or last is None or not first <= run_at <= last:
+        return False
+    reduced = reduced_until(session, provider_name, event_id)
+    return reduced is not None and run_at <= reduced
 
-    The prune handles an event only once all of its rows are older than the cutoff, and
-    keeps its last capture, so the event was pruned exactly when its latest kept row is
-    before the newest prune cutoff, and it was in scope at ``run_at`` when that run falls
-    between ``snapshot_horizon_hours`` before its start and its last capture."""
-    last = session.execute(
-        select(ArchivedEvent.captured_at, ArchivedEvent.start_time)
-        .where(ArchivedEvent.provider == provider_name, ArchivedEvent.event_id == event_id)
-        .order_by(ArchivedEvent.captured_at.desc())
-        .limit(1)
-    ).first()
-    if last is None or run_at > last.captured_at:
-        return False
-    if run_at < last.start_time - timedelta(hours=settings.snapshot_horizon_hours):
-        return False
-    newest = _newest_prune(session)
-    return newest is not None and last.captured_at < newest[1]
+
+def _covering_run(
+    session: Session,
+    provider_name: str,
+    as_of: datetime,
+    settings: Settings,
+    keep_cutoff: datetime | None,
+) -> tuple[CoverageStatus, datetime | None]:
+    """R, the latest ``ok`` odds capture at or before T, when it covers T
+    (``captured``); otherwise why not. A run from before the keep horizon is not
+    trusted: runs are thinned there, so a later capture may have existed."""
+    limit = timedelta(seconds=settings.snapshot_max_gap_seconds)
+    run_at = _latest_odds_run_at(session, provider_name, as_of)
+    if (
+        keep_cutoff is not None
+        and as_of - limit < keep_cutoff
+        and (run_at is None or run_at < keep_cutoff)
+    ):
+        return "archive_pruned", None
+    if run_at is None:
+        return "not_captured", None
+    if as_of - run_at > limit:
+        return "archive_gap", run_at
+    return "captured", run_at
 
 
 def coverage_at(
-    session: Session, provider_name: str, event_id: str, as_of: datetime, settings: Settings
+    session: Session,
+    provider_name: str,
+    event_id: str,
+    as_of: datetime,
+    settings: Settings,
+    cutoffs: tuple[datetime | None, datetime | None] | None = None,
 ) -> Coverage:
+    prune_cutoff, keep_cutoff = cutoffs if cutoffs is not None else prune_cutoffs(session)
     snapshot = session.scalars(
         select(ArchivedEvent)
         .where(
@@ -144,17 +217,17 @@ def coverage_at(
         .order_by(ArchivedEvent.captured_at.desc())
         .limit(1)
     ).first()
-    run_at = _latest_odds_run_at(session, provider_name, as_of)
-    if run_at is None:
-        pruned = _runs_pruned(session, as_of, settings)
-        return Coverage("archive_pruned" if pruned else "not_captured", snapshot)
-    if as_of - run_at > timedelta(seconds=settings.snapshot_max_gap_seconds):
-        return Coverage("archive_gap", snapshot)
+    status, run_at = _covering_run(session, provider_name, as_of, settings, keep_cutoff)
+    if status != "captured" or run_at is None:
+        return Coverage(status, snapshot)
     # Captured only from the latest capture at or before T, never from an older row
-    # (for example another bet's kept anchor) when that capture's row is gone.
+    # (for example another bet's kept anchor) when that capture's row is gone. A kept
+    # capture is whole: the keep horizon removes a game's rows together.
     if snapshot is not None and snapshot.captured_at >= run_at:
         return Coverage("captured", snapshot)
-    if _pruned_while_in_scope(session, provider_name, event_id, run_at, settings):
+    if prune_cutoff is not None and _pruned_while_in_scope(
+        session, provider_name, event_id, run_at
+    ):
         return Coverage("archive_pruned", snapshot)
     return Coverage("not_captured", snapshot)
 
@@ -259,8 +332,9 @@ class PropsRead:
     ``status`` is read from P, the latest ``ok`` props capture at or before T:
     ``captured`` when P is at most :func:`props_max_gap_seconds` before T,
     ``archive_gap`` when it is older, ``not_captured`` before the first capture, and
-    ``archive_pruned`` when no run is left from before T and T is past the keep horizon.
-    ``rows`` is empty unless the status is ``captured``.
+    ``archive_pruned`` when the look-back before T reaches past the keep horizon, where
+    rows and runs are no longer all kept. ``rows`` is empty unless the status is
+    ``captured``.
 
     ``pruned_event_ids`` names the player's games whose offers at T cannot be read back
     exactly because the retention prune removed rows of them; their rows are left out.
@@ -273,18 +347,20 @@ class PropsRead:
 
 
 def _run_after(
-    session: Session, provider_name: str, kind: str, moment: datetime, *, inclusive: bool
+    session: Session, provider_name: str, kind: str, moment: datetime | None, *, inclusive: bool
 ) -> datetime | None:
-    """The first ``ok`` run of ``kind`` at (``inclusive``) or after ``moment``."""
-    after = SnapshotRun.captured_at >= moment if inclusive else SnapshotRun.captured_at > moment
-    return session.scalar(
-        select(func.min(SnapshotRun.captured_at)).where(
-            SnapshotRun.kind == kind,
-            SnapshotRun.provider == provider_name,
-            SnapshotRun.status == "ok",
-            after,
+    """The first ``ok`` run of ``kind`` at (``inclusive``) or after ``moment``; the first
+    of all when ``moment`` is ``None``."""
+    conditions = [
+        SnapshotRun.kind == kind,
+        SnapshotRun.provider == provider_name,
+        SnapshotRun.status == "ok",
+    ]
+    if moment is not None:
+        conditions.append(
+            SnapshotRun.captured_at >= moment if inclusive else SnapshotRun.captured_at > moment
         )
-    )
+    return session.scalar(select(func.min(SnapshotRun.captured_at)).where(*conditions))
 
 
 def _pruned_prop_events(
@@ -296,18 +372,31 @@ def _pruned_prop_events(
     as_of: datetime,
     settings: Settings,
     prune_cutoff: datetime,
+    run_at: datetime,
 ) -> tuple[set[str], list[str]]:
-    """(games whose rows are left out, games named as pruned) for one player at T.
+    """(games whose rows are left out, games named as pruned) for one player at T, where
+    ``run_at`` is P, the props capture that covers T.
 
-    The prune handles a game G once its last event row L is before the cutoff. It keeps,
-    per prop key, only the latest row at or before G's closing capture C, and deletes
-    every other prop row of G. So G's props at T are still exact only when T is before
-    P1, the first props capture after C, and no kept row of the player lies in (T, C]
-    (else an earlier row of that key was deleted). Otherwise G's rows are left out, and
-    G is named as pruned while T is inside its props activity: from the first props
-    capture after G entered scope (``snapshot_horizon_hours`` before its start) to the
-    look-back after the props capture that tombstoned its offers (the first one after
-    the odds capture that no longer had G).
+    Let U be the time up to which the prune has reduced a game G
+    (:func:`reduced_until`). Of G's prop rows captured up to U only the closing offers are
+    left: per offer, the latest row at or before C, G's last ``upcoming`` capture up to
+    U. Rows captured after U (G came back into scope) are all there. So G's props at T
+    are exact in two cases only:
+
+    - T is at or before U and before P1, the first props capture after C, and no kept row
+      of the player lies in (T, C] (else an earlier row of that offer was deleted);
+    - T and P are after U, and the player has no row of G from the look-back before T
+      that was captured up to U: the answer then comes from rows captured after U only.
+      (Every offer open at P has such a row: an offer is stored again at a capture
+      unless its stored row is less than ``PROP_REFRESH_HOURS`` old.)
+
+    Otherwise G's rows are left out, and G is named as pruned while T is inside its
+    props activity: from the first props capture that can have had G (the first one
+    after the odds capture before G's first, which the prune keeps, so a start time
+    moved after G entered scope changes nothing) to the look-back after the props
+    capture that tombstoned its offers (the first one after the odds capture that no
+    longer had G). A game with a kept row of the player at or before T was in scope by
+    T whatever the runs say, and is checked the same way.
 
     Candidate games: those with a prop row of the player, or (by the player's team) an
     event row in the pruned range, within a few look-backs of T.
@@ -338,44 +427,60 @@ def _pruned_prop_events(
                 .distinct()
             )
         )
-    withheld: set[str] = set()
-    named: list[str] = []
-    horizon = timedelta(hours=settings.snapshot_horizon_hours)
-    for event_id in sorted(candidates):
-        last = session.execute(
-            select(e.captured_at, e.start_time)
-            .where(e.provider == provider_name, e.event_id == event_id)
-            .order_by(e.captured_at.desc())
-            .limit(1)
-        ).first()
-        if last is None or last.captured_at >= prune_cutoff:
-            continue  # not pruned: every row of it is still there
-        first = _run_after(
-            session, provider_name, "props", last.start_time - horizon, inclusive=True
-        )
-        if first is None or as_of < first:
-            continue  # nothing of it had been captured by T
-        closing = session.scalar(
-            select(func.max(e.captured_at)).where(
-                e.provider == provider_name, e.event_id == event_id, e.status == "upcoming"
-            )
-        )
-        if closing is not None:
-            next_props = _run_after(session, provider_name, "props", closing, inclusive=False)
-            later_kept = session.scalar(
+
+    def rows_of(event_id: str, *conditions: Any) -> int:
+        return int(
+            session.scalar(
                 select(func.count())
                 .select_from(p)
-                .where(
-                    *prop_filter,
-                    p.event_id == event_id,
-                    p.captured_at > as_of,
-                    p.captured_at <= closing,
+                .where(*prop_filter, p.event_id == event_id, *conditions)
+            )
+            or 0
+        )
+
+    withheld: set[str] = set()
+    named: list[str] = []
+    for event_id in sorted(candidates):
+        reduced = reduced_until(session, provider_name, event_id)
+        if reduced is None:
+            continue  # never pruned: every row of it is still there
+        of_event = (e.provider == provider_name, e.event_id == event_id)
+        entered = session.scalar(select(func.min(e.captured_at)).where(*of_event))
+        before = session.scalar(
+            select(func.max(SnapshotRun.captured_at)).where(
+                SnapshotRun.kind == "odds",
+                SnapshotRun.provider == provider_name,
+                SnapshotRun.status == "ok",
+                SnapshotRun.captured_at < entered,
+            )
+        )
+        first = _run_after(session, provider_name, "props", before, inclusive=False)
+        if (first is None or as_of < first) and not rows_of(event_id, p.captured_at <= as_of):
+            continue  # nothing of it had been captured by T
+        if as_of > reduced:
+            if run_at > reduced and not rows_of(
+                event_id, p.captured_at >= as_of - lookback, p.captured_at <= reduced
+            ):
+                continue  # exact: only rows captured after the prune are the answer
+            withheld.add(event_id)
+            named.append(event_id)
+            continue
+        else:
+            closing = session.scalar(
+                select(func.max(e.captured_at)).where(
+                    *of_event, e.status == "upcoming", e.captured_at <= reduced
                 )
             )
-            if (next_props is None or as_of < next_props) and not later_kept:
-                continue  # exact: the kept closing rows are the answer
+            if closing is not None:
+                next_props = _run_after(session, provider_name, "props", closing, inclusive=False)
+                later_kept = rows_of(event_id, p.captured_at > as_of, p.captured_at <= closing)
+                if (next_props is None or as_of < next_props) and not later_kept:
+                    continue  # exact: the kept closing rows are the answer
         withheld.add(event_id)
-        left = _run_after(session, provider_name, "odds", last.captured_at, inclusive=False)
+        last = session.scalar(
+            select(func.max(e.captured_at)).where(*of_event, e.captured_at <= reduced)
+        )
+        left = _run_after(session, provider_name, "odds", last, inclusive=False)
         tombstoned = (
             _run_after(session, provider_name, "props", left, inclusive=True)
             if left is not None
@@ -396,6 +501,12 @@ def props_at(
     team_id: str | None = None,
 ) -> PropsRead:
     """The player's props as of T with their coverage (:class:`PropsRead`)."""
+    prune_cutoff, keep_cutoff = prune_cutoffs(session)
+    lookback = prop_lookback(settings)
+    gap = timedelta(seconds=props_max_gap_seconds(settings))
+    if keep_cutoff is not None and as_of - max(lookback, gap) < keep_cutoff:
+        # The rows and runs this read would look at reach past the keep horizon.
+        return PropsRead("archive_pruned", None, [], [])
     run_at = session.scalar(
         select(func.max(SnapshotRun.captured_at)).where(
             SnapshotRun.kind == "props",
@@ -405,16 +516,14 @@ def props_at(
         )
     )
     if run_at is None:
-        pruned = _runs_pruned(session, as_of, settings)
-        return PropsRead("archive_pruned" if pruned else "not_captured", None, [], [])
-    if (as_of - run_at).total_seconds() > props_max_gap_seconds(settings):
+        return PropsRead("not_captured", None, [], [])
+    if as_of - run_at > gap:
         return PropsRead("archive_gap", run_at, [], [])
     rows = latest_prop_rows(session, provider_name, player_id, market, as_of, settings)
-    newest = _newest_prune(session)
-    if newest is None:
+    if prune_cutoff is None:
         return PropsRead("captured", run_at, rows, [])
     withheld, named = _pruned_prop_events(
-        session, provider_name, player_id, team_id, market, as_of, settings, newest[1]
+        session, provider_name, player_id, team_id, market, as_of, settings, prune_cutoff, run_at
     )
     return PropsRead("captured", run_at, [r for r in rows if r.event_id not in withheld], named)
 
@@ -493,6 +602,7 @@ class ArchiveView:
         self.name = base.name
         self.data_mode = base.data_mode
         self._coverage: dict[str, Coverage] = {}
+        self._cutoffs: tuple[datetime | None, datetime | None] | None = None
         self._book_order = {b.id: i for i, b in enumerate(base.list_sportsbooks())}
         #: (event id, market, sportsbook id) -> the archived row last served for it.
         self.served: dict[tuple[str, str, str], ArchivedOdds] = {}
@@ -535,9 +645,16 @@ class ArchiveView:
     def coverage(self, event_id: str) -> Coverage:
         found = self._coverage.get(event_id)
         if found is None:
-            found = coverage_at(self.session, self.name, event_id, self.as_of, self.settings)
+            found = coverage_at(
+                self.session, self.name, event_id, self.as_of, self.settings, self.cutoffs()
+            )
             self._coverage[event_id] = found
         return found
+
+    def cutoffs(self) -> tuple[datetime | None, datetime | None]:
+        if self._cutoffs is None:
+            self._cutoffs = prune_cutoffs(self.session)
+        return self._cutoffs
 
     def get_event(self, event_id: str) -> Event | None:
         coverage = self.coverage(event_id)
@@ -549,11 +666,10 @@ class ArchiveView:
         self, league: str | None = None, status: str | None = None, on_date: date | None = None
     ) -> list[Event]:
         """The events of the latest odds capture at or before T, unless T is in a gap."""
-        run_at = _latest_odds_run_at(self.session, self.name, self.as_of)
-        if (
-            run_at is None
-            or (self.as_of - run_at).total_seconds() > self.settings.snapshot_max_gap_seconds
-        ):
+        covered, run_at = _covering_run(
+            self.session, self.name, self.as_of, self.settings, self.cutoffs()[1]
+        )
+        if covered != "captured" or run_at is None:
             return []
         rows = self.session.scalars(
             select(ArchivedEvent)
@@ -656,4 +772,6 @@ __all__ = [
     "prop_lookback",
     "props_at",
     "props_max_gap_seconds",
+    "prune_cutoffs",
+    "reduced_until",
 ]

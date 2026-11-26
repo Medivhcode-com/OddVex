@@ -64,6 +64,7 @@ def upgrade() -> None:
         sa.Column("rows_unchanged", sa.Integer(), nullable=False),
         sa.Column("rows_deleted", sa.Integer(), nullable=False),
         sa.Column("prune_cutoff", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("keep_cutoff", sa.DateTime(timezone=True), nullable=True),
         sa.Column("detail", sa.JSON(), nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_snapshot_runs")),
     )

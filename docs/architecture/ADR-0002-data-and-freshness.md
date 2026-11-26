@@ -42,6 +42,7 @@ provenance columns.
 when a time T is asked for, through `ArchiveView`, a read-only `SportsDataProvider` that answers from rows captured
 at or before T. Staleness as of T is judged by the same `Board.is_stale` rule, with the thresholds stored on the
 capture run, so a later change of `ODDVEX_STALE_*_SECONDS` does not rewrite history. Rows are never updated; the only
-deletion is the retention prune (7 days at full resolution; 400 days for each game's closing and last captures and
-at most six captures per game that stored bets point at). Details,
-storage bounds and limits: `docs/features/p0-1.md`.
+deletion is the retention prune (7 days at full resolution; 400 days for each game's first, closing and last
+captures and at most six captures per game that stored bets point at; a game's rows leave together, so a kept
+capture is always whole). On PostgreSQL the same job rebuilds archive indexes the prune has left mostly empty, so
+the files stay within a stated factor of the data. Details, storage bounds and limits: `docs/features/p0-1.md`.

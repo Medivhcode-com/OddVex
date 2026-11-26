@@ -30,7 +30,8 @@ class CoverageOut(BaseModel):
             "or before the requested time, at most `snapshot_max_gap_seconds` before it. "
             "`not_captured`: before the first capture, or the event was not in scope then. "
             "`archive_gap`: capture was not running then. `archive_pruned`: the event's "
-            "rows from that capture are past retention."
+            "rows from that capture are past retention, or the time is at or before the "
+            "keep horizon, where the archive no longer answers."
         )
     )
     captured_at: datetime | None = Field(
@@ -104,8 +105,8 @@ class PropsCoverageOut(BaseModel):
             "Read from the latest successful props capture at or before the requested time. "
             "`captured`: it is at most two props intervals plus one worker turn before it "
             "(7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before "
-            "the first props capture. `archive_pruned`: the time is past the keep horizon. "
-            "Offers are returned only when `captured`."
+            "the first props capture. `archive_pruned`: the 48 hours before the time reach "
+            "past the keep horizon. Offers are returned only when `captured`."
         )
     )
     captured_at: datetime | None = Field(
@@ -142,9 +143,32 @@ class ArchivedStatusEntryOut(BaseModel):
     provider_id: str
 
 
+class StatusCoverageOut(BaseModel):
+    status: Literal["captured", "not_captured", "archive_pruned"] = Field(
+        description=(
+            "`captured`: the archive holds status records of the event captured at or "
+            "before the requested time, and `entries` is the latest of each. "
+            "`not_captured`: it holds none. `archive_pruned`: it holds none and the time "
+            "is before `kept_from`, so they may have been removed."
+        )
+    )
+    captured_at: datetime | None = Field(
+        default=None, description="When the newest of the entries was captured."
+    )
+    kept_from: datetime | None = Field(
+        default=None,
+        description=(
+            "Status records are kept 400 days. A record that had not changed since before "
+            "this time has been removed and is not among `entries`. Null before the "
+            "first prune."
+        ),
+    )
+
+
 class ArchivedStatusOut(BaseModel):
     requested_as_of: datetime
     data_mode: DataMode
+    coverage: StatusCoverageOut
     entries: list[ArchivedStatusEntryOut] = Field(
         description="The latest record per subject and kind captured at or before the time."
     )
@@ -207,11 +231,26 @@ class ArchiveRowCountsOut(BaseModel):
 
 
 class ArchiveRunOut(BaseModel):
-    kind: str
+    kind: str = Field(description="`odds`, `props`, `status`, `prune` or `reclaim`.")
     captured_at: datetime
     status: str
     rows_written: int
     rows_deleted: int
+    finished_at: datetime | None = Field(default=None, description="Wall-clock time the run ended.")
+    indexes_rebuilt: int | None = Field(
+        default=None, description="`reclaim` runs: indexes rebuilt to return space to the disk."
+    )
+    indexes_dropped: int | None = Field(
+        default=None,
+        description="`reclaim` runs: invalid indexes an interrupted rebuild had left, dropped.",
+    )
+    indexes_failed: int | None = Field(
+        default=None,
+        description="`reclaim` runs: rebuilds or drops that failed and wait for a later pass.",
+    )
+    bytes_freed: int | None = Field(
+        default=None, description="`reclaim` runs: bytes the run returned to the disk."
+    )
 
 
 class ArchiveStatsOut(BaseModel):
@@ -225,12 +264,22 @@ class ArchiveStatsOut(BaseModel):
     disk_bytes: int | None = Field(
         default=None,
         description=(
-            "PostgreSQL only: the size of the five tables' files with their indexes. It does "
-            "not fall after the prune, whose freed space later rows reuse."
+            "PostgreSQL only: the size of the five tables' files with their indexes. The "
+            "table files do not shrink after the prune (later rows reuse the freed space); "
+            "the index files shrink when a `reclaim` run rebuilds them."
         ),
     )
     max_bytes: int
+    max_disk_bytes: int = Field(
+        description="PostgreSQL only: capture also stops while `disk_bytes` is at this ceiling."
+    )
     retention_days: int
     keep_days: int
     rows: ArchiveRowCountsOut
-    last_runs: list[ArchiveRunOut] = Field(description="The latest run of each kind.")
+    last_runs: list[ArchiveRunOut] = Field(
+        description=(
+            "The latest run of each kind. A `reclaim` run is recorded only when it rebuilt "
+            "or dropped an index or failed, so the latest one is the last time index "
+            "space was returned to the disk."
+        )
+    )

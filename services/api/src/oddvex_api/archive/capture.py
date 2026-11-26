@@ -11,7 +11,10 @@ One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the work
 5. At ``snapshot_max_bytes`` capture stops with a ``skipped_full`` run; the prune goes on.
    The size is the rows held times measured bytes per row (``ROW_BYTES``), not the size
    of the files: on PostgreSQL a delete and a plain VACUUM make room for new rows but do
-   not shrink the files, so a file-size cap would never release after the prune.
+   not shrink the files, so a file-size cap alone would never release after the prune.
+   On PostgreSQL capture also stops while the files themselves (tables and indexes) are
+   at ``snapshot_max_disk_bytes``, a hard ceiling above anything the counted cap allows;
+   index rebuilds (``archive/reclaim.py``) are what brings the files back under it.
 6. In scope: live events, and upcoming ones starting within ``snapshot_horizon_hours``
    whose start time passed at most ``UPCOMING_GRACE_HOURS`` ago.
 7. A quote or offer is written only when it differs from the latest stored row for its
@@ -22,6 +25,8 @@ One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the work
    ``INSERT_CHUNK``, one transaction per kind. A failed kind is rolled back and recorded
    as a ``failed`` run with the exception's class name only.
 8. The prune (``archive/prune.py``) runs when it is due.
+9. On PostgreSQL, bloated indexes are rebuilt and anything an interrupted rebuild left
+   is dropped (``archive/reclaim.py``), still inside the pass's advisory lock.
 
 The run row is built before it is inserted, with its counters already set: archive rows,
 runs included, are never updated (``archive/guard.py``).
@@ -83,7 +88,7 @@ ADVISORY_LOCK_KEY = 72001
 #: (a postponed game whose status was never updated) is no longer captured.
 UPCOMING_GRACE_HOURS = 6
 
-RunKind = Literal["odds", "props", "status", "prune"]
+RunKind = Literal["odds", "props", "status", "prune", "reclaim"]
 StatusKind = Literal["lineup", "injury", "news", "weather"]
 StatusValue = Literal[
     "expected",
@@ -131,6 +136,8 @@ class RunSummary:
     rows_written: int
     rows_unchanged: int
     rows_deleted: int
+    #: A ``reclaim`` run's figures (``archive/reclaim.py``); a failed run's error class.
+    detail: dict[str, Any] | None = None
 
     @classmethod
     def of(cls, run: SnapshotRun) -> RunSummary:
@@ -143,6 +150,7 @@ class RunSummary:
             rows_written=run.rows_written,
             rows_unchanged=run.rows_unchanged,
             rows_deleted=run.rows_deleted,
+            detail=run.detail,
         )
 
 
@@ -152,15 +160,20 @@ class PassReport:
 
     enabled: bool
     locked: bool = False
+    #: Capture was due and was skipped: the archive is at one of its two limits.
     full: bool = False
+    #: The limit reached was the size of the files (``snapshot_max_disk_bytes``).
+    over_ceiling: bool = False
     odds: RunSummary | None = None
     props: RunSummary | None = None
     prune: RunSummary | None = None
+    reclaim: RunSummary | None = None
 
     @property
     def failed(self) -> bool:
         return any(
-            r is not None and r.status == "failed" for r in (self.odds, self.props, self.prune)
+            r is not None and r.status == "failed"
+            for r in (self.odds, self.props, self.prune, self.reclaim)
         )
 
 
@@ -207,9 +220,11 @@ def archive_bytes(session: Session) -> int:
 
 
 def archive_disk_bytes(session: Session) -> int | None:
-    """On PostgreSQL, the size of the five tables' files with their indexes. It does not
-    fall after the prune (the freed space is reused by later rows), so it is shown to
-    administrators but never used for the cap. ``None`` elsewhere."""
+    """On PostgreSQL, the size of the five tables' files with their indexes
+    (``pg_total_relation_size``, so it includes anything an interrupted index rebuild
+    left). The table files do not shrink after the prune (later rows reuse the freed
+    space); the index files shrink when ``archive/reclaim.py`` rebuilds them. Capture
+    stops while this is at ``snapshot_max_disk_bytes``. ``None`` elsewhere."""
     if session.get_bind().dialect.name != "postgresql":
         return None
     names = ", ".join(f"'{model.__tablename__}'" for model in ARCHIVE_MODELS)
@@ -692,11 +707,19 @@ def run_pass(
     }
     if capture and any(due.values()):
         size = archive_bytes(session)
-        report.full = size >= settings.snapshot_max_bytes
+        disk = archive_disk_bytes(session)
+        report.over_ceiling = disk is not None and disk >= settings.snapshot_max_disk_bytes
+        report.full = size >= settings.snapshot_max_bytes or report.over_ceiling
         session.commit()
-        if report.full:
+        if size >= settings.snapshot_max_bytes:
             logger.warning(
                 "snapshot archive full: %d bytes >= cap %d", size, settings.snapshot_max_bytes
+            )
+        if report.over_ceiling:
+            logger.warning(
+                "snapshot archive files at the ceiling: %d bytes >= %d",
+                disk,
+                settings.snapshot_max_disk_bytes,
             )
         scope: list[list[Event]] = []
 
@@ -739,11 +762,16 @@ def capture_pass(
     capture: bool = True,
     prune: bool = True,
     force_prune: bool = False,
+    reclaim: bool = True,
+    force_reclaim: bool = False,
 ) -> PassReport:
     """One locked pass on its own connection. On PostgreSQL a session-level advisory lock
     is held on that connection for the whole pass (it survives the commits between kinds
     and is released when the pass ends or the connection drops); a pass that cannot take
-    it does nothing."""
+    it does nothing. The index reclaim runs last, inside the same lock, once the capture
+    and the prune have committed: it never overlaps either."""
+    from .reclaim import reclaim_pass  # reclaim imports helpers from this module
+
     with engine.connect() as connection:
         postgres = connection.dialect.name == "postgresql"
         with Session(bind=connection, expire_on_commit=False) as session:
@@ -759,7 +787,7 @@ def capture_pass(
                 return PassReport(enabled=True, locked=True)
         try:
             with Session(bind=connection, expire_on_commit=False) as session:
-                return run_pass(
+                report = run_pass(
                     session,
                     provider,
                     settings,
@@ -768,6 +796,20 @@ def capture_pass(
                     prune=prune,
                     force_prune=force_prune,
                 )
+            # The pass's own connection must hold no transaction now: a concurrent
+            # index rebuild waits for every older transaction to end.
+            connection.rollback()
+            if postgres and reclaim and not report.failed:
+                pruned = report.prune is not None and report.prune.status == "ok"
+                report.reclaim = reclaim_pass(
+                    engine,
+                    provider,
+                    settings,
+                    due=pruned,
+                    over_ceiling=report.over_ceiling,
+                    force=force_reclaim,
+                )
+            return report
         finally:
             if postgres:
                 connection.rollback()

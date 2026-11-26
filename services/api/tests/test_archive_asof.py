@@ -10,6 +10,7 @@ the same assertion runs through the three ``/v1/archive`` routes.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -26,6 +27,15 @@ from .conftest import AppFactory, auth_headers
 
 __all__ = ["archive_env"]
 
+#: The property's settings. In CI (``CI`` is set there) the same 60 times are drawn on
+#: every run, so a time that fails is one every run shows and anyone can replay; a local
+#: run keeps drawing new ones.
+PROPERTY_SETTINGS = settings(
+    max_examples=60,
+    deadline=None,
+    derandomize=bool(os.environ.get("CI")),
+    suppress_health_check=[HealthCheck.too_slow],
+)
 T1 = T0 + timedelta(seconds=360)
 T2 = T0 + timedelta(seconds=720)
 CAPTURES = (T0, T1, T2)
@@ -236,7 +246,7 @@ def test_a_query_for_T_returns_only_rows_captured_at_or_before_T(
     # Random T over the whole span, through all four read paths.
     span = int((T2 - T0 + timedelta(hours=2)).total_seconds() * 1_000_000)
 
-    @settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @PROPERTY_SETTINGS
     @given(st.integers(min_value=0, max_value=span))
     def property_holds(micros: int) -> None:
         assert_as_of(

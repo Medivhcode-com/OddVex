@@ -128,13 +128,22 @@ class Settings(BaseSettings):
     snapshot_horizon_hours: int = Field(default=36, ge=1, le=168)
     #: Days every captured row is kept at full resolution.
     snapshot_retention_days: int = Field(default=7, ge=1)
-    #: Days closing rows, rows a stored bet's placement time points at, status rows and
-    #: capture runs are kept. Never shorter than ``snapshot_retention_days``.
+    #: Days a game's kept captures (first, closing, last and the rows a stored bet's
+    #: placement time points at), status rows and capture runs are kept. A game's rows
+    #: leave together, when its last capture is this old. Never shorter than
+    #: ``snapshot_retention_days``.
     snapshot_keep_days: int = Field(default=400, ge=1)
-    #: Size at which capture stops (``skipped_full`` runs) while the prune keeps running.
-    #: 1.5 GiB; measured use is about 0.55 GB after a week and 0.85 GB by day 400 (1.2 GB
-    #: with every game at the bet-anchor bound) on the synthetic schedule.
+    #: Counted size (rows times measured bytes per row) at which capture stops
+    #: (``skipped_full`` runs) while the prune keeps running. 1.5 GiB; measured use is
+    #: about 0.55 GB after a week and 0.95 GB by day 400 (1.3 GB with every game at the
+    #: bet-anchor bound) on the synthetic schedule.
     snapshot_max_bytes: int = Field(default=1_610_612_736, ge=1)
+    #: PostgreSQL only: size of the archive's files (tables and indexes) at which capture
+    #: also stops, whatever the counted size. A hard ceiling, 2 GiB: with bloated indexes
+    #: rebuilt (``archive/reclaim.py``) the files stay within 1.25 times the largest
+    #: counted size, 1.9 GiB at the cap. Keep it above ``snapshot_max_bytes``: the table
+    #: files never shrink, so a ceiling below them would not release.
+    snapshot_max_disk_bytes: int = Field(default=2_147_483_648, ge=1)
     #: A time more than this many seconds after the last capture is an archive gap: two
     #: odds intervals plus one worker turn, so one missed pass is tolerated and two are not.
     snapshot_max_gap_seconds: int = Field(default=840, ge=60)
