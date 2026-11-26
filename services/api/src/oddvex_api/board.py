@@ -8,7 +8,7 @@ library. Every number shown to a client comes from here (and therefore from
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -284,15 +284,23 @@ class Board:
         return best
 
     def best_price(
-        self, event: Event, market: str, outcome_key: str, line: float | None = None
+        self,
+        event: Event,
+        market: str,
+        outcome_key: str,
+        line: float | None = None,
+        books: Collection[str] | None = None,
     ) -> BestQuote | None:
         """Best open, non-stale price for one outcome, or ``None`` when no book offers it.
 
         The same rows and the same comparison as :meth:`event_odds`. The only difference
         is which books are compared for spread and total: the ones quoting ``line`` for
-        this outcome instead of the ones on the consensus line.
+        this outcome instead of the ones on the consensus line. ``books``, when given,
+        keeps only those sportsbook ids (the user's books); ``None`` compares every book.
         """
         usable = self._usable(self._quote_rows(event, market))
+        if books is not None:
+            usable = [r for r in usable if r[0].sportsbook_id in books]
         if market != "moneyline":
             usable = [
                 r

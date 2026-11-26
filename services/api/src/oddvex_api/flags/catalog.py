@@ -62,6 +62,13 @@ _SPECS = (
         "Enforce plan entitlements. While off, every feature is available to every plan. "
         "Turning it on is a pricing decision and needs Founder approval.",
     ),
+    FlagSpec(
+        "snapshot_archive",
+        False,
+        "Snapshot archive: capture book prices, event state and status records every few "
+        "minutes and serve them as of a past time. Off by default; it uses disk on the "
+        "shared server.",
+    ),
 )
 
 KNOWN_FLAGS: dict[str, FlagSpec] = {spec.key: spec for spec in _SPECS}

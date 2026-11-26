@@ -20,6 +20,7 @@ from sqlalchemy import select
 from oddvex_api.auth.security import JWT_ISSUER, create_access_token
 from oddvex_api.config import DEV_JWT_SECRET
 from oddvex_api.db import Bet, CommunityReport, User
+from oddvex_api.flags import service as flags_service
 from oddvex_api.ratelimit import SlidingWindowRateLimiter
 
 from .conftest import PASSWORD, AppFactory, admin_headers, auth_headers, register, set_flag
@@ -199,6 +200,10 @@ def world(make_app: AppFactory) -> Iterator[tuple[TestClient, Headers, Headers, 
         notifications = client.get("/v1/notifications", headers=a).json()["items"]
         assert notifications, "the stake reminder and the import produced notifications"
         ids["notification"] = notifications[0]["id"]
+        # The snapshot archive's owner-scoped route (P0.1) is in the sweep too.
+        with client.app.state.session_factory() as db:  # type: ignore[attr-defined]
+            flags_service.set_flag(db, "snapshot_archive", True)
+            db.commit()
         yield client, a, b, ids
 
 
@@ -213,6 +218,7 @@ def test_idor_sweep_user_b_cannot_reach_any_of_user_a_objects(
         ("PATCH", f"/v1/bets/{ids['bet']}", {"notes": "mine now", "stake": 1}),
         ("POST", f"/v1/bets/{ids['bet']}/settle", {"result": "lost"}),
         ("DELETE", f"/v1/bets/{ids['bet']}", None),
+        ("GET", f"/v1/bets/{ids['bet']}/placement-prices", None),
         # watchlist
         ("DELETE", f"/v1/watchlist/{ids['watchlist']}", None),
         # alerts
@@ -320,7 +326,14 @@ def test_every_owner_scoped_route_requires_a_token(client: TestClient) -> None:
     )
     #: Behind the ``community`` flag, which is off here: 404 for everyone, token or not.
     #: ``test_every_community_route_requires_a_token`` repeats this with the flag on.
-    flagged_off = ("/v1/community", "/v1/admin/community")
+    #: The snapshot archive routes are behind ``snapshot_archive`` (off) in the same way;
+    #: ``test_every_archive_route_requires_a_token`` repeats them with the flag on.
+    flagged_off = (
+        "/v1/community",
+        "/v1/admin/community",
+        "/v1/archive",
+        "/v1/bets/{bet_id}/placement-prices",
+    )
     checked = 0
     for path, item in schema["paths"].items():
         if path.startswith(public_prefixes):
@@ -819,6 +832,34 @@ def test_every_community_route_requires_a_token(make_app: AppFactory) -> None:
                 assert forged.status_code == 401, (method, path)
                 checked += 1
         assert checked == 26  # 25 before POST /v1/admin/community/restore
+
+
+def test_every_archive_route_requires_a_token(make_app: AppFactory) -> None:
+    with TestClient(make_app(admin_emails="boss@example.test")) as client:
+        admin = admin_headers(client, "boss@example.test")
+        set_flag(client, admin, "snapshot_archive", True)
+        schema = client.get("/openapi.json").json()
+        checked = 0
+        for path, item in schema["paths"].items():
+            if not (
+                path.startswith(("/v1/archive", "/v1/admin/archive"))
+                or path.endswith("/placement-prices")
+            ):
+                continue
+            for method in item:
+                url = path.replace("{", "").replace("}", "")
+                response = client.request(
+                    method.upper(), url, params={"as_of": "2026-03-14T19:00:00Z"}
+                )
+                assert response.status_code == 401, (method, path, response.status_code)
+                assert response.json()["error"]["code"] == "not_authenticated", path
+                forged = client.request(method.upper(), url, headers=bearer("x.y.z"))
+                assert forged.status_code == 401, (method, path)
+                checked += 1
+        assert checked == 5
+        # The admin route is for administrators only.
+        user = auth_headers(client, "ada@example.test")
+        assert client.get("/v1/admin/archive/stats", headers=user).status_code == 403
 
 
 def test_community_idor_on_picks_and_comments(make_app: AppFactory) -> None:

@@ -472,9 +472,12 @@ def test_a_suspended_account_can_export_and_delete_and_nothing_else(
     public += ("/v1/players", "/v1/props", "/v1/quant", "/v1/value", "/v1/flags", "/v1/dev")
     public += ("/v1/auth/register", "/v1/auth/login", "/v1/auth/verify-email/confirm")
     public += ("/v1/auth/password-reset", "/v1/community", "/v1/admin/community")
+    # Behind the snapshot_archive flag, off here: 404 for everyone (test_security.py
+    # checks them with the flag on).
+    public += ("/v1/archive",)
     refused = 0
     for path, item in schema["paths"].items():
-        if path.startswith(public):
+        if path.startswith(public) or path.endswith("/placement-prices"):
             continue
         for method in item:
             if (method, path) in allowed:

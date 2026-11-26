@@ -117,6 +117,29 @@ class Settings(BaseSettings):
     #: Largest request body accepted, in bytes. Larger requests get 413.
     max_body_bytes: int = Field(default=64 * 1024, ge=1024)
 
+    #: Snapshot archive (P0.1, flag ``snapshot_archive``, off by default). The capture
+    #: script (``scripts/capture_snapshots.py``) runs in the worker loop every 120 s and
+    #: captures odds when the last odds capture is at least this old (less 15 s of slack):
+    #: 360 s is every third turn of the loop.
+    snapshot_odds_interval_seconds: int = Field(default=360, ge=60)
+    #: The same for player-prop offers.
+    snapshot_props_interval_seconds: int = Field(default=3600, ge=60)
+    #: Events captured: every live event and every upcoming one starting within this many hours.
+    snapshot_horizon_hours: int = Field(default=36, ge=1, le=168)
+    #: Days every captured row is kept at full resolution.
+    snapshot_retention_days: int = Field(default=7, ge=1)
+    #: Days closing rows, rows a stored bet's placement time points at, status rows and
+    #: capture runs are kept. Never shorter than ``snapshot_retention_days``.
+    snapshot_keep_days: int = Field(default=400, ge=1)
+    #: Size at which capture stops (``skipped_full`` runs) while the prune keeps running.
+    #: 1.5 GiB; measured use is about 0.55 GB after a week and 0.8 GB by day 400.
+    snapshot_max_bytes: int = Field(default=1_610_612_736, ge=1)
+    #: A time more than this many seconds after the last capture is an archive gap: two
+    #: odds intervals plus one worker turn, so one missed pass is tolerated and two are not.
+    snapshot_max_gap_seconds: int = Field(default=840, ge=60)
+    #: Minimum seconds between two prune passes.
+    snapshot_prune_interval_seconds: int = Field(default=3600, ge=60)
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"

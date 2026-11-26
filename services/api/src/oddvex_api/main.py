@@ -16,6 +16,8 @@ from .account import router as account_router
 from .alerts import router as alerts_router
 from .alerts.throttle import EvaluationThrottle
 from .api import admin, data, quant_routes
+from .archive import router as archive_router
+from .archive.guard import install_archive_guard
 from .assistant import router as assistant_router
 from .auth import router as auth_router
 from .auth.security import configure_password_hashing
@@ -95,6 +97,14 @@ TAGS = [
             "profiles, structured picks graded from final scores, comments, follows, "
             "likes, blocks and reports. No money, no stakes, no paid picks, no links and "
             "no direct messages."
+        ),
+    },
+    {
+        "name": "archive",
+        "description": (
+            "Snapshot archive behind the `snapshot_archive` flag (off by default): book "
+            "prices, event state and status records as captured at or before a time, and "
+            "the best price at your books when you placed a bet. Read-only."
         ),
     },
     {
@@ -179,6 +189,8 @@ def create_app(
     )
 
     engine = make_engine(settings.database_url)
+    # Archive rows are never updated through the ORM (archive/guard.py).
+    install_archive_guard()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -263,6 +275,8 @@ def create_app(
     app.include_router(mailer_router.router, prefix="/v1")
     app.include_router(community_router.router, prefix="/v1")
     app.include_router(community_admin_router.router, prefix="/v1")
+    app.include_router(archive_router.router, prefix="/v1")
+    app.include_router(archive_router.admin_router, prefix="/v1")
 
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
     return app

@@ -80,6 +80,18 @@ TABLES = {
     "community_blocks",
     "community_reports",
     "community_reserved_handles",
+    "snapshot_runs",
+    "event_snapshots",
+    "odds_snapshots",
+    "prop_snapshots",
+    "status_snapshots",
+}
+ARCHIVE_TABLES = {
+    "snapshot_runs",
+    "event_snapshots",
+    "odds_snapshots",
+    "prop_snapshots",
+    "status_snapshots",
 }
 NOW = datetime(2026, 3, 14, 19, 30, tzinfo=UTC)
 
@@ -1197,6 +1209,147 @@ def test_upgrade_from_0006_with_existing_data_then_downgrade(
         _reset_external_database(url)
 
 
+@pytest.mark.parametrize("backend", _database_urls())
+def test_upgrade_from_0007_with_existing_data_then_downgrade(
+    backend: str, tmp_path: Path, make_app: AppFactory
+) -> None:
+    """0008 only adds the five archive tables: existing rows are untouched, the archive
+    works on the upgraded database, and the downgrade removes the archive and nothing else."""
+    if backend == "sqlite":
+        url = f"sqlite:///{tmp_path / 'upgrade_0008.db'}"
+    else:
+        url = backend
+        _reset_external_database(url)
+    config = alembic_config(url)
+    command.upgrade(config, "0007")
+    engine = make_engine(url)
+    assert not ARCHIVE_TABLES & set(inspect(engine).get_table_names())
+
+    # Rows written by the 0007 release: one account with one bet.
+    stamp = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    at = bindparam("at", type_=DateTime(timezone=True))
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, password_hash, display_name, role, "
+                "is_active, age_confirmed_at, created_at, token_version, plan, status, "
+                "search_key) VALUES (:id, 'old@example.test', :hash, 'Old', 'user', :active, "
+                ":at, :at, 0, 'free', 'active', 'old')"
+            ).bindparams(at),
+            {
+                "id": "u" * 32,
+                "hash": hash_password("correct-horse-battery"),
+                "active": True,
+                "at": stamp,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO bets (id, user_id, bet_type, status, sport, sportsbook, "
+                "sportsbook_key, stake, odds_decimal, odds_source, placed_at, source, "
+                "created_at, updated_at) VALUES (:id, :user, 'straight', 'pending', 'nba', "
+                "'Northline', 'northline', 10, 1.909091, 'legs', :at, 'manual', :at, :at)"
+            ).bindparams(at),
+            {"id": "b" * 32, "user": "u" * 32, "at": stamp},
+        )
+
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) >= ARCHIVE_TABLES
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        assert connection.execute(text("SELECT count(*) FROM bets")).scalar() == 1
+        for table in ARCHIVE_TABLES:
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() == 0
+    command.check(config)
+    engine.dispose()
+
+    # The archive works on the upgraded database: a capture with the flag on, then a read.
+    app = make_app(
+        database_url=url, env="production", jwt_secret="k" * 48, admin_emails="boss@example.test"
+    )
+    with TestClient(app) as client:
+        with app.state.session_factory() as db:
+            flags_service.set_flag(db, "snapshot_archive", True)
+            db.commit()
+        from oddvex_api.archive.capture import StatusRecord, capture_pass, capture_status
+
+        provider = app.state.provider
+        report = capture_pass(app.state.engine, provider, app.state.settings, force=True)
+        assert (
+            report.odds is not None and report.odds.status == "ok" and report.odds.rows_written > 0
+        )
+        assert report.props is not None and report.props.status == "ok"
+        event = next(e for e in provider.list_events() if e.status == "upcoming")
+        with app.state.session_factory() as db:
+            capture_status(
+                db,
+                provider,
+                app.state.settings,
+                [
+                    StatusRecord(
+                        provider=provider.name,
+                        provider_id="lineup:1",
+                        fetched_at=provider.now(),
+                        event_id=event.id,
+                        kind="lineup",
+                        status="expected",
+                        source="Fictional Lineup Desk",
+                    )
+                ],
+            )
+        token = client.post(
+            "/v1/auth/login",
+            json={"email": "old@example.test", "password": "correct-horse-battery"},
+        ).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        odds = client.get(
+            f"/v1/archive/events/{event.id}/odds",
+            params={"market": "moneyline", "as_of": provider.now().isoformat()},
+            headers=headers,
+        )
+        assert odds.status_code == 200, odds.text
+        assert odds.json()["coverage"]["status"] == "captured" and odds.json()["quotes"]
+        prices = client.get(f"/v1/bets/{'b' * 32}/placement-prices", headers=headers)
+        assert prices.status_code == 200, prices.text
+        assert prices.json()["books_source"] == "bets"
+    app.state.engine.dispose()
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        for table in ARCHIVE_TABLES:
+            assert connection.execute(text(f"SELECT count(*) FROM {table}")).scalar() > 0, table
+    engine.dispose()
+
+    # Downgrade removes only the archive; the account and its bet are kept.
+    command.downgrade(config, "0007")
+    engine = make_engine(url)
+    assert not ARCHIVE_TABLES & set(inspect(engine).get_table_names())
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT id FROM bets")).scalar() == "b" * 32
+        assert connection.execute(text("SELECT email FROM users")).scalar() == "old@example.test"
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0007"
+        )
+    engine.dispose()
+
+    # Up again: empty archive tables, models and migrations agree.
+    command.upgrade(config, "head")
+    engine = make_engine(url)
+    with engine.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        assert diff == [], diff
+        assert connection.execute(text("SELECT count(*) FROM odds_snapshots")).scalar() == 0
+    command.check(config)
+    engine.dispose()
+    command.downgrade(config, "base")
+    engine = make_engine(url)
+    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    engine.dispose()
+    if backend != "sqlite":
+        _reset_external_database(url)
+
+
 def test_app_works_on_a_migrated_database_without_auto_create(
     tmp_path: Path, make_app: AppFactory
 ) -> None:
@@ -1824,6 +1977,11 @@ EXPECTED_OPERATIONS = {
     ("GET", "/v1/admin/community/reports"): "admin_list_reports",
     ("POST", "/v1/admin/community/reports/{report_id}/resolve"): "admin_resolve_report",
     ("POST", "/v1/admin/community/restore"): "admin_restore_content",
+    ("GET", "/v1/archive/events/{event_id}/odds"): "get_archived_event_odds",
+    ("GET", "/v1/archive/players/{player_id}/props"): "get_archived_player_props",
+    ("GET", "/v1/archive/events/{event_id}/status"): "get_archived_event_status",
+    ("GET", "/v1/bets/{bet_id}/placement-prices"): "get_bet_placement_prices",
+    ("GET", "/v1/admin/archive/stats"): "get_archive_stats",
 }
 
 

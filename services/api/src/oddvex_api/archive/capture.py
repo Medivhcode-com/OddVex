@@ -1,0 +1,710 @@
+"""Capture passes of the snapshot archive.
+
+One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the worker loop:
+
+1. Nothing at all happens while the ``snapshot_archive`` flag is off.
+2. On PostgreSQL an advisory lock makes sure two passes never overlap.
+3. Every timestamp is the provider's clock (``provider.now()``).
+4. Odds are captured when the last odds capture is at least
+   ``snapshot_odds_interval_seconds`` old, less ``INTERVAL_SLACK_SECONDS`` for the drift of
+   the 120 s loop; props likewise with ``snapshot_props_interval_seconds``.
+5. At ``snapshot_max_bytes`` capture stops with a ``skipped_full`` run; the prune goes on.
+6. In scope: live events, and upcoming ones starting within ``snapshot_horizon_hours``.
+7. A quote or offer is written only when it differs from the latest stored row for its
+   key; a key that disappears gets a tombstone row. Inserts go in chunks of
+   ``INSERT_CHUNK``, one transaction per kind. A failed kind is rolled back and recorded
+   as a ``failed`` run with the exception's class name only.
+8. The prune (``archive/prune.py``) runs when it is due.
+
+The run row is built before it is inserted, with its counters already set: archive rows,
+runs included, are never updated (``archive/guard.py``).
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Any, Literal
+
+from pydantic import Field, model_validator
+from sqlalchemy import Engine, and_, func, insert, select, text
+from sqlalchemy.orm import Session
+
+from ..config import Settings
+from ..db import (
+    ARCHIVE_MODELS,
+    ArchivedEvent,
+    ArchivedOdds,
+    ArchivedProp,
+    ArchivedStatus,
+    SnapshotRun,
+    utcnow,
+)
+from ..flags import service as flags
+from ..providers import Event, OddsSnapshot, PropOffer, SportsDataProvider
+from ..providers.base import ProviderRecord
+
+logger = logging.getLogger("oddvex.archive")
+
+FLAG = "snapshot_archive"
+#: Changes when the capture rules change.
+ARCHIVE_VERSION = 1
+#: Absorbs the drift of the worker loop: with a 120 s loop and a 360 s interval the
+#: third turn after a capture is a few seconds short of 360 s.
+INTERVAL_SLACK_SECONDS = 15
+#: Rows per INSERT statement.
+INSERT_CHUNK = 500
+#: SQLite has no relation sizes: the size check counts rows at this many bytes each, the
+#: measured PostgreSQL figure for an odds row (398 bytes) rounded up.
+SQLITE_ROW_BYTES = 400
+#: ``pg_try_advisory_lock`` key held for the length of one pass (72 for MED-72).
+ADVISORY_LOCK_KEY = 72001
+
+RunKind = Literal["odds", "props", "status", "prune"]
+StatusKind = Literal["lineup", "injury", "news", "weather"]
+StatusValue = Literal[
+    "expected",
+    "confirmed",
+    "out",
+    "doubtful",
+    "questionable",
+    "probable",
+    "active",
+    "reported",
+    "unknown",
+]
+
+
+class StatusRecord(ProviderRecord):
+    """One lineup, injury, news or weather status, as a P0.5 provider will supply it.
+
+    A status, a source name and times only: no article or headline text.
+    """
+
+    event_id: str | None = Field(default=None, max_length=64)
+    team_id: str | None = Field(default=None, max_length=64)
+    player_id: str | None = Field(default=None, max_length=64)
+    kind: StatusKind
+    status: StatusValue
+    source: str = Field(min_length=1, max_length=120)
+    reported_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _has_a_subject(self) -> StatusRecord:
+        if not (self.event_id or self.team_id or self.player_id):
+            raise ValueError("a status record names an event, a team or a player")
+        return self
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """What one run did, as recorded in ``snapshot_runs``."""
+
+    run_id: int
+    kind: str
+    status: str
+    captured_at: datetime
+    events_in_scope: int
+    rows_written: int
+    rows_unchanged: int
+    rows_deleted: int
+
+    @classmethod
+    def of(cls, run: SnapshotRun) -> RunSummary:
+        return cls(
+            run_id=run.id,
+            kind=run.kind,
+            status=run.status,
+            captured_at=run.captured_at,
+            events_in_scope=run.events_in_scope,
+            rows_written=run.rows_written,
+            rows_unchanged=run.rows_unchanged,
+            rows_deleted=run.rows_deleted,
+        )
+
+
+@dataclass
+class PassReport:
+    """The outcome of one pass. ``None`` for a kind that was not due."""
+
+    enabled: bool
+    locked: bool = False
+    full: bool = False
+    odds: RunSummary | None = None
+    props: RunSummary | None = None
+    prune: RunSummary | None = None
+
+    @property
+    def failed(self) -> bool:
+        return any(
+            r is not None and r.status == "failed" for r in (self.odds, self.props, self.prune)
+        )
+
+
+# ------------------------------------------------------------------ helpers
+def in_scope(provider: SportsDataProvider, now: datetime, settings: Settings) -> list[Event]:
+    """Live events and upcoming events that start within the horizon. Final events are
+    not captured: their last rows from before the start are the closing rows."""
+    horizon = now + timedelta(hours=settings.snapshot_horizon_hours)
+    return [
+        e
+        for e in provider.list_events()
+        if e.status == "live" or (e.status == "upcoming" and e.start_time <= horizon)
+    ]
+
+
+def last_run_at(session: Session, provider_name: str, kind: str) -> datetime | None:
+    """When the last run of ``kind`` that did not fail was captured. A failed run does not
+    count, so the next turn of the loop tries again."""
+    return session.scalar(
+        select(func.max(SnapshotRun.captured_at)).where(
+            SnapshotRun.kind == kind,
+            SnapshotRun.provider == provider_name,
+            SnapshotRun.status.in_(("ok", "skipped_full")),
+        )
+    )
+
+
+def is_due(session: Session, provider_name: str, kind: str, now: datetime, interval: int) -> bool:
+    last = last_run_at(session, provider_name, kind)
+    return last is None or (now - last).total_seconds() >= interval - INTERVAL_SLACK_SECONDS
+
+
+def archive_bytes(session: Session) -> int:
+    """The archive's size: the five tables with their indexes on PostgreSQL, a row count
+    times ``SQLITE_ROW_BYTES`` elsewhere."""
+    if session.get_bind().dialect.name == "postgresql":
+        names = ", ".join(f"'{model.__tablename__}'" for model in ARCHIVE_MODELS)
+        total = session.execute(
+            text(
+                "SELECT coalesce(sum(pg_total_relation_size(n::regclass)), 0) "
+                f"FROM unnest(ARRAY[{names}]) AS n"
+            )
+        ).scalar()
+        return int(total or 0)
+    rows = sum(session.scalar(select(func.count()).select_from(m)) or 0 for m in ARCHIVE_MODELS)
+    return rows * SQLITE_ROW_BYTES
+
+
+def new_run(
+    provider: SportsDataProvider,
+    settings: Settings,
+    kind: RunKind,
+    now: datetime,
+    status: str = "ok",
+) -> SnapshotRun:
+    return SnapshotRun(
+        kind=kind,
+        provider=provider.name,
+        data_mode=provider.data_mode,
+        captured_at=now,
+        started_at=utcnow(),
+        status=status,
+        archive_version=ARCHIVE_VERSION,
+        stale_pregame_seconds=settings.stale_pregame_seconds,
+        stale_live_seconds=settings.stale_live_seconds,
+        events_in_scope=0,
+        rows_written=0,
+        rows_unchanged=0,
+        rows_deleted=0,
+    )
+
+
+def _insert(session: Session, model: type[Any], rows: Sequence[dict[str, Any]]) -> None:
+    for start in range(0, len(rows), INSERT_CHUNK):
+        session.execute(insert(model), list(rows[start : start + INSERT_CHUNK]))
+
+
+def _write_run(
+    session: Session, run: SnapshotRun, tables: Iterable[tuple[type[Any], list[dict[str, Any]]]]
+) -> SnapshotRun:
+    """Insert the run (to get its id), then its rows. Not committed."""
+    run.finished_at = utcnow()
+    session.add(run)
+    session.flush()
+    common = {"run_id": run.id, "captured_at": run.captured_at, "provider": run.provider}
+    for model, rows in tables:
+        _insert(session, model, [{**common, **row} for row in rows])
+    return run
+
+
+def guarded(
+    session: Session,
+    provider: SportsDataProvider,
+    settings: Settings,
+    kind: RunKind,
+    now: datetime,
+    work: Callable[[], SnapshotRun],
+) -> RunSummary:
+    """Run one kind in its own transaction. On any error roll back everything it wrote and
+    record a ``failed`` run carrying only the exception's class name."""
+    try:
+        run = work()
+        session.commit()
+        return RunSummary.of(run)
+    except Exception as exc:
+        session.rollback()
+        logger.warning("snapshot_run_failed", extra={"kind": kind, "error": type(exc).__name__})
+        failed = new_run(provider, settings, kind, now, status="failed")
+        failed.detail = {"error": type(exc).__name__}
+        failed.finished_at = utcnow()
+        session.add(failed)
+        session.commit()
+        return RunSummary.of(failed)
+
+
+# --------------------------------------------------------------------- odds
+_ODDS_COMPARED = ("status", "last_updated", "outcomes", "provider_id")
+_PROP_COMPARED = (
+    "event_id",
+    "status",
+    "last_updated",
+    "line",
+    "over_american",
+    "under_american",
+    "provider_id",
+)
+_STATUS_COMPARED = ("status", "source", "reported_at", "provider_id")
+
+
+def _same(previous: dict[str, Any], current: dict[str, Any], fields: Sequence[str]) -> bool:
+    return all(previous[name] == current[name] for name in fields)
+
+
+def _odds_values(snap: OddsSnapshot) -> dict[str, Any]:
+    return {
+        "event_id": snap.event_id,
+        "market": snap.market,
+        "sportsbook_id": snap.sportsbook_id,
+        "status": snap.status,
+        "last_updated": snap.last_updated,
+        "outcomes": [[o.key, o.name, o.line, o.price_american] for o in snap.outcomes],
+        "provider_id": snap.provider_id,
+        "fetched_at": snap.fetched_at,
+    }
+
+
+def _event_values(event: Event) -> dict[str, Any]:
+    return {
+        "event_id": event.id,
+        "league": event.league,
+        "home_team_id": event.home_team_id,
+        "away_team_id": event.away_team_id,
+        "status": event.status,
+        "start_time": event.start_time,
+        "score_home": event.score.home if event.score else None,
+        "score_away": event.score.away if event.score else None,
+        "score_updated_at": event.score_updated_at,
+        "period_text": event.period_text,
+        "markets": list(event.markets),
+        "provider_id": event.provider_id,
+        "fetched_at": event.fetched_at,
+    }
+
+
+def _latest_odds(
+    session: Session, provider_name: str, event_ids: Sequence[str]
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """The latest stored row per (event, market, book) of these events, in one query."""
+    if not event_ids:
+        return {}
+    o = ArchivedOdds
+    newest = (
+        select(o.event_id, o.market, o.sportsbook_id, func.max(o.captured_at).label("at"))
+        .where(o.provider == provider_name, o.event_id.in_(event_ids))
+        .group_by(o.event_id, o.market, o.sportsbook_id)
+        .subquery()
+    )
+    rows = session.execute(
+        select(
+            o.event_id,
+            o.market,
+            o.sportsbook_id,
+            o.status,
+            o.last_updated,
+            o.outcomes,
+            o.provider_id,
+        ).join(
+            newest,
+            and_(
+                o.provider == provider_name,
+                o.event_id == newest.c.event_id,
+                o.market == newest.c.market,
+                o.sportsbook_id == newest.c.sportsbook_id,
+                o.captured_at == newest.c.at,
+            ),
+        )
+    )
+    return {(r.event_id, r.market, r.sportsbook_id): dict(r._mapping) for r in rows}
+
+
+def capture_odds(
+    session: Session,
+    provider: SportsDataProvider,
+    settings: Settings,
+    now: datetime,
+    events: Sequence[Event],
+) -> SnapshotRun:
+    """One odds run: an event row per in-scope event, and every changed quote."""
+    current: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for event in events:
+        for market in event.markets:
+            for snap in provider.get_odds(event.id, market):
+                current[(snap.event_id, snap.market, snap.sportsbook_id)] = _odds_values(snap)
+    latest = _latest_odds(session, provider.name, [e.id for e in events])
+    rows: list[dict[str, Any]] = []
+    unchanged = 0
+    for key, values in current.items():
+        previous = latest.get(key)
+        if previous is not None and _same(previous, values, _ODDS_COMPARED):
+            unchanged += 1
+        else:
+            rows.append(values)
+    for key, previous in latest.items():
+        if key not in current and previous["status"] != "unavailable":
+            rows.append(
+                {
+                    "event_id": key[0],
+                    "market": key[1],
+                    "sportsbook_id": key[2],
+                    "status": "unavailable",
+                    "last_updated": None,
+                    "outcomes": [],
+                    "provider_id": previous["provider_id"],
+                    "fetched_at": now,
+                }
+            )
+    event_rows = [_event_values(e) for e in events]
+    run = new_run(provider, settings, "odds", now)
+    run.events_in_scope = len(events)
+    run.rows_written = len(rows) + len(event_rows)
+    run.rows_unchanged = unchanged
+    return _write_run(session, run, [(ArchivedEvent, event_rows), (ArchivedOdds, rows)])
+
+
+# -------------------------------------------------------------------- props
+def _line(value: float | None) -> Decimal | None:
+    return None if value is None else Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def _prop_values(offer: PropOffer) -> dict[str, Any]:
+    return {
+        "player_id": offer.player_id,
+        "event_id": offer.event_id,
+        "sportsbook_id": offer.sportsbook_id,
+        "market": offer.market,
+        "status": offer.status,
+        "last_updated": offer.last_updated,
+        "line": _line(offer.line),
+        "over_american": offer.over_american,
+        "under_american": offer.under_american,
+        "provider_id": offer.provider_id,
+        "fetched_at": offer.fetched_at,
+    }
+
+
+def _latest_props(
+    session: Session, provider_name: str, event_ids: Sequence[str]
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """The latest stored row per (player, market, book) among the rows of these events."""
+    if not event_ids:
+        return {}
+    p = ArchivedProp
+    newest = (
+        select(p.player_id, p.market, p.sportsbook_id, func.max(p.captured_at).label("at"))
+        .where(p.provider == provider_name, p.event_id.in_(event_ids))
+        .group_by(p.player_id, p.market, p.sportsbook_id)
+        .subquery()
+    )
+    rows = session.execute(
+        select(
+            p.player_id,
+            p.market,
+            p.sportsbook_id,
+            p.event_id,
+            p.status,
+            p.last_updated,
+            p.line,
+            p.over_american,
+            p.under_american,
+            p.provider_id,
+        ).join(
+            newest,
+            and_(
+                p.provider == provider_name,
+                p.player_id == newest.c.player_id,
+                p.market == newest.c.market,
+                p.sportsbook_id == newest.c.sportsbook_id,
+                p.captured_at == newest.c.at,
+            ),
+        )
+    )
+    return {(r.player_id, r.market, r.sportsbook_id): dict(r._mapping) for r in rows}
+
+
+def capture_props(
+    session: Session,
+    provider: SportsDataProvider,
+    settings: Settings,
+    now: datetime,
+    events: Sequence[Event],
+) -> SnapshotRun:
+    """One props run: every changed offer for an in-scope event."""
+    scope = {e.id for e in events}
+    current: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for player in provider.list_players():
+        for offer in provider.get_prop_offers(player.id):
+            if offer.event_id in scope:
+                current[(offer.player_id, offer.market, offer.sportsbook_id)] = _prop_values(offer)
+    latest = _latest_props(session, provider.name, sorted(scope))
+    rows: list[dict[str, Any]] = []
+    unchanged = 0
+    for key, values in current.items():
+        previous = latest.get(key)
+        if previous is not None and _same(previous, values, _PROP_COMPARED):
+            unchanged += 1
+        else:
+            rows.append(values)
+    for key, previous in latest.items():
+        if key not in current and previous["status"] != "unavailable":
+            rows.append(
+                {
+                    "player_id": key[0],
+                    "event_id": previous["event_id"],
+                    "sportsbook_id": key[2],
+                    "market": key[1],
+                    "status": "unavailable",
+                    "last_updated": None,
+                    "line": None,
+                    "over_american": None,
+                    "under_american": None,
+                    "provider_id": previous["provider_id"],
+                    "fetched_at": now,
+                }
+            )
+    run = new_run(provider, settings, "props", now)
+    run.events_in_scope = len(events)
+    run.rows_written = len(rows)
+    run.rows_unchanged = unchanged
+    return _write_run(session, run, [(ArchivedProp, rows)])
+
+
+# ------------------------------------------------------------------- status
+def _status_key(row: Any) -> tuple[str | None, str | None, str | None, str]:
+    return (row["event_id"], row["team_id"], row["player_id"], row["kind"])
+
+
+def _latest_status(
+    session: Session, provider_name: str, records: Sequence[StatusRecord]
+) -> dict[tuple[str | None, str | None, str | None, str], dict[str, Any]]:
+    """The latest stored row per (event, team, player, kind) for the subjects named."""
+    events = {r.event_id for r in records if r.event_id}
+    players = {r.player_id for r in records if r.player_id}
+    teams = {r.team_id for r in records if r.team_id}
+    s = ArchivedStatus
+    found: dict[tuple[str | None, str | None, str | None, str], dict[str, Any]] = {}
+    for column, values in ((s.event_id, events), (s.player_id, players), (s.team_id, teams)):
+        if not values:
+            continue
+        rows = session.execute(
+            select(
+                s.event_id,
+                s.team_id,
+                s.player_id,
+                s.kind,
+                s.status,
+                s.source,
+                s.reported_at,
+                s.provider_id,
+                s.captured_at,
+            )
+            .where(s.provider == provider_name, column.in_(sorted(values)))
+            .order_by(s.captured_at)
+        )
+        for row in rows:
+            mapping = dict(row._mapping)
+            found[_status_key(mapping)] = mapping
+    return found
+
+
+def capture_status(
+    session: Session,
+    provider: SportsDataProvider,
+    settings: Settings,
+    records: Iterable[StatusRecord],
+    now: datetime | None = None,
+) -> SnapshotRun | None:
+    """Store lineup and news status records, with the same rule as quotes: a row only when
+    the record differs from the latest stored one for its subject and kind. Nothing calls
+    this on a schedule until P0.5 supplies a source. ``None`` while the flag is off."""
+    if not flags.is_enabled(session, FLAG, settings):
+        return None
+    now = now or provider.now()
+    batch = list(records)
+
+    def work() -> SnapshotRun:
+        latest = _latest_status(session, provider.name, batch)
+        rows: list[dict[str, Any]] = []
+        unchanged = 0
+        for record in batch:
+            values = {
+                "event_id": record.event_id,
+                "team_id": record.team_id,
+                "player_id": record.player_id,
+                "kind": record.kind,
+                "status": record.status,
+                "source": record.source,
+                "reported_at": record.reported_at,
+                "provider_id": record.provider_id,
+                "fetched_at": record.fetched_at,
+            }
+            previous = latest.get(_status_key(values))
+            if previous is not None and _same(previous, values, _STATUS_COMPARED):
+                unchanged += 1
+                continue
+            latest[_status_key(values)] = values
+            rows.append(values)
+        run = new_run(provider, settings, "status", now)
+        run.rows_written = len(rows)
+        run.rows_unchanged = unchanged
+        return _write_run(session, run, [(ArchivedStatus, rows)])
+
+    summary = guarded(session, provider, settings, "status", now, work)
+    return session.get(SnapshotRun, summary.run_id)
+
+
+# --------------------------------------------------------------------- pass
+def run_pass(
+    session: Session,
+    provider: SportsDataProvider,
+    settings: Settings,
+    *,
+    force: bool = False,
+    capture: bool = True,
+    prune: bool = True,
+    force_prune: bool = False,
+) -> PassReport:
+    """One pass on an open session. ``force`` ignores the capture intervals and
+    ``force_prune`` the prune's; ``capture=False`` only prunes."""
+    from .prune import prune_pass  # prune imports helpers from this module
+
+    report = PassReport(enabled=flags.is_enabled(session, FLAG, settings))
+    if not report.enabled:
+        session.rollback()
+        return report
+    now = provider.now()
+    due = {
+        "odds": force
+        or is_due(session, provider.name, "odds", now, settings.snapshot_odds_interval_seconds),
+        "props": force
+        or is_due(session, provider.name, "props", now, settings.snapshot_props_interval_seconds),
+    }
+    if capture and any(due.values()):
+        size = archive_bytes(session)
+        report.full = size >= settings.snapshot_max_bytes
+        session.commit()
+        if report.full:
+            logger.warning(
+                "snapshot archive full: %d bytes >= cap %d", size, settings.snapshot_max_bytes
+            )
+        scope: list[list[Event]] = []
+
+        def events() -> list[Event]:
+            """The in-scope events, read once per pass inside the first kind's guard, so a
+            provider error is recorded as that kind's failed run."""
+            if not scope:
+                scope.append(in_scope(provider, now, settings))
+            return scope[0]
+
+        workers: dict[RunKind, Callable[[], SnapshotRun]] = {
+            "odds": lambda: capture_odds(session, provider, settings, now, events()),
+            "props": lambda: capture_props(session, provider, settings, now, events()),
+        }
+        for kind, work in workers.items():
+            if not due[kind]:
+                continue
+            if report.full:
+
+                def skipped(kind: RunKind = kind) -> SnapshotRun:
+                    run = new_run(provider, settings, kind, now, status="skipped_full")
+                    return _write_run(session, run, [])
+
+                work = skipped
+            summary = guarded(session, provider, settings, kind, now, work)
+            setattr(report, kind, summary)
+            if summary.status == "failed":
+                return report
+    if prune:
+        report.prune = prune_pass(session, provider, settings, force=force_prune)
+    return report
+
+
+def capture_pass(
+    engine: Engine,
+    provider: SportsDataProvider,
+    settings: Settings,
+    *,
+    force: bool = False,
+    capture: bool = True,
+    prune: bool = True,
+    force_prune: bool = False,
+) -> PassReport:
+    """One locked pass on its own connection. On PostgreSQL a session-level advisory lock
+    is held on that connection for the whole pass (it survives the commits between kinds
+    and is released when the pass ends or the connection drops); a pass that cannot take
+    it does nothing."""
+    with engine.connect() as connection:
+        postgres = connection.dialect.name == "postgresql"
+        with Session(bind=connection, expire_on_commit=False) as session:
+            if not flags.is_enabled(session, FLAG, settings):
+                return PassReport(enabled=False)
+            session.rollback()
+        if postgres:
+            locked = connection.execute(
+                text("SELECT pg_try_advisory_lock(:key)"), {"key": ADVISORY_LOCK_KEY}
+            ).scalar()
+            connection.commit()
+            if not locked:
+                return PassReport(enabled=True, locked=True)
+        try:
+            with Session(bind=connection, expire_on_commit=False) as session:
+                return run_pass(
+                    session,
+                    provider,
+                    settings,
+                    force=force,
+                    capture=capture,
+                    prune=prune,
+                    force_prune=force_prune,
+                )
+        finally:
+            if postgres:
+                connection.rollback()
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": ADVISORY_LOCK_KEY}
+                )
+                connection.commit()
+
+
+__all__ = [
+    "ADVISORY_LOCK_KEY",
+    "ARCHIVE_VERSION",
+    "FLAG",
+    "INSERT_CHUNK",
+    "INTERVAL_SLACK_SECONDS",
+    "SQLITE_ROW_BYTES",
+    "PassReport",
+    "RunSummary",
+    "StatusRecord",
+    "archive_bytes",
+    "capture_odds",
+    "capture_pass",
+    "capture_props",
+    "capture_status",
+    "in_scope",
+    "is_due",
+    "run_pass",
+]

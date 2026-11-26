@@ -29,3 +29,16 @@ Status: accepted (M1)
   Founder approval. See `docs/research/DATA_PROVIDER_EVALUATION.md`.
 - PostgreSQL is the only datastore. Redis and ClickHouse are deferred until measured load requires them. Caching
   sits behind a small protocol with an in-memory implementation.
+
+## Amendment, 2026-11-26: the snapshot archive (P0.1, MED-72)
+
+Market data is now persisted, behind the `snapshot_archive` flag (off by default). `scripts/capture_snapshots.py`
+copies what the provider reports into five append-only tables (`snapshot_runs`, `event_snapshots`,
+`odds_snapshots`, `prop_snapshots`, `status_snapshots`, migration 0008), keyed on
+`(provider, event_id | player_id, market, sportsbook_id, captured_at)` with the provider's own provenance columns.
+`captured_at` is the provider clock. The live board still reads the provider directly; the archive is read only
+when a time T is asked for, through `ArchiveView`, a read-only `SportsDataProvider` that answers from rows captured
+at or before T. Staleness as of T is judged by the same `Board.is_stale` rule, with the thresholds stored on the
+capture run, so a later change of `ODDVEX_STALE_*_SECONDS` does not rewrite history. Rows are never updated; the only
+deletion is the retention prune (7 days at full resolution, 400 days for closing and bet-anchor rows). Details,
+storage bounds and limits: `docs/features/p0-1.md`.

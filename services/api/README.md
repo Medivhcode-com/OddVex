@@ -25,6 +25,7 @@ ODDVEX_ADMIN_EMAILS=admin@oddvex.test .venv/bin/python scripts/seed_demo.py   # 
 .venv/bin/python scripts/seed_demo.py --with-community   # ...and fictional community profiles (turns the two community flags on in that database)
 .venv/bin/python scripts/evaluate_alerts.py    # optional: evaluate every user's alert rules once
 .venv/bin/python scripts/grade_picks.py        # optional: grade pending community picks once
+.venv/bin/python scripts/capture_snapshots.py  # optional: one snapshot archive pass (needs the snapshot_archive flag on)
 .venv/bin/uvicorn oddvex_api.main:app --reload --port 8000
 ```
 
@@ -885,7 +886,8 @@ alembic/             migrations (0001: users, bets, bet_legs, sync_connections, 
                      users.search_key, bets.sportsbook_key;
                      0006: bets.client_request_id and its unique index)
 scripts/             export_openapi.py, seed_demo.py, evaluate_alerts.py, grade_picks.py,
-                     bootstrap_admin.py (the first administrator; see "Admin role")
+                     bootstrap_admin.py (the first administrator; see "Admin role"),
+                     capture_snapshots.py (the snapshot archive, P0.1; docs/features/p0-1.md)
 docs/QUANT_METHODOLOGY.md
 ```
 

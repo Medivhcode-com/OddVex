@@ -371,3 +371,40 @@ def test_single_outcome_best_price_ignores_unusable_books_and_other_lines(
     assert board.event_odds(event, "spread").consensus.line == -4.5
     scripted.quotes = [("oldmill", "open", 5000, [("home", -4.5, 200), ("away", 4.5, -240)])]
     assert board.consensus_outcome_line(event, "spread", "home") is None
+
+
+def test_best_price_can_be_limited_to_the_users_books(
+    scripted: ScriptedProvider, board: Board
+) -> None:
+    """``books`` (P0.1, the user's books) keeps only those sportsbooks; the stale and
+    suspended rules still apply inside them, and ``None`` compares every book."""
+    event = scripted.list_events(league="nba", status="upcoming")[0]
+    scripted.quotes = [
+        ("northline", "open", 60, ml(120, -140)),
+        ("kestrel", "open", 60, ml(125, -135)),
+        ("summit", "open", 60, ml(110, -130)),
+        ("oldmill", "open", 5000, ml(400, -500)),  # stale
+        ("cardinal", "suspended", 60, ml(300, -400)),
+    ]
+    everyone = board.best_price(event, "moneyline", "home")
+    assert everyone is not None and everyone.sportsbook.key == "kestrel"
+    assert board.best_price(event, "moneyline", "home", books=None) == everyone
+    mine = board.best_price(event, "moneyline", "home", books={"northline", "summit"})
+    assert mine is not None and (mine.sportsbook.key, float(mine.price)) == ("northline", 2.2)
+    away = board.best_price(event, "moneyline", "away", books={"northline", "summit"})
+    assert away is not None and away.sportsbook.key == "summit"
+    # Only unusable books held: nothing.
+    assert board.best_price(event, "moneyline", "home", books={"oldmill", "cardinal"}) is None
+    assert board.best_price(event, "moneyline", "home", books=set()) is None
+
+    scripted.quotes = [
+        ("northline", "open", 60, [("home", -3.5, 130), ("away", 3.5, -150)]),
+        ("summit", "open", 60, [("home", -4.5, -104), ("away", 4.5, -116)]),
+        ("kestrel", "open", 60, [("home", -4.5, -102), ("away", 4.5, -118)]),
+    ]
+    spread_mine = board.best_price(event, "spread", "home", -4.5, books={"northline", "summit"})
+    assert spread_mine is not None and (spread_mine.sportsbook.key, spread_mine.line) == (
+        "summit",
+        -4.5,
+    )
+    assert board.best_price(event, "spread", "home", -3.5, books={"summit"}) is None

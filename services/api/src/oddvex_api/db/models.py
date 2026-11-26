@@ -1,11 +1,12 @@
 """ORM models.
 
 Canonical sports entities (leagues, teams, events, odds) are served straight
-from the provider in this milestone and are referenced by string id only
-(``bet_legs.event_id`` is deliberately not a foreign key). Persisting odds
-later means adding ``odds_snapshots`` keyed on
-``(provider, event_id, market, sportsbook_id, captured_at)`` with the same
-provenance columns the provider contract already carries.
+from the provider and are referenced by string id only (``bet_legs.event_id`` is
+deliberately not a foreign key). The snapshot archive (P0.1, at the end of this
+module) keeps an append-only record of what the provider said: ``odds_snapshots``
+keyed on ``(provider, event_id, market, sportsbook_id, captured_at)``, with the
+same provenance columns the provider contract already carries, and its siblings
+for events, prop offers and lineup or news status.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     ForeignKey,
@@ -607,6 +609,188 @@ class CommunityReservedHandle(Base):
     #: Stored lower-case, like ``community_profiles.handle``.
     handle: Mapped[str] = mapped_column(String(20), primary_key=True)
     reserved_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+# ------------------------------------------------------------ snapshot archive
+#: Archive primary keys: an 8-byte integer, not the 32-character uuid used elsewhere.
+#: These are high-volume, append-only tables, and the integer saves about 25 bytes a
+#: row plus index space. SQLite needs plain INTEGER for its auto-increment rowid.
+ARCHIVE_ID = BigInteger().with_variant(Integer(), "sqlite")
+
+
+class SnapshotRun(Base):
+    """One capture or prune pass of the snapshot archive (P0.1).
+
+    ``captured_at`` is the provider's clock at capture, shared by every row the pass
+    wrote. The stale thresholds in force are stored, because they decide which archived
+    quotes count for best price and consensus: a later change of setting never rewrites
+    history. Kept ``snapshot_keep_days``; never updated.
+    """
+
+    __tablename__ = "snapshot_runs"
+    __table_args__ = (
+        Index("ix_snapshot_runs_kind_provider_captured", "kind", "provider", "captured_at"),
+    )
+
+    id: Mapped[int] = mapped_column(ARCHIVE_ID, primary_key=True, autoincrement=True)
+    #: odds | props | status | prune
+    kind: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str] = mapped_column(String(40))
+    #: synthetic | replay
+    data_mode: Mapped[str] = mapped_column(String(16))
+    captured_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    #: Wall clock, for operators.
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: ok | skipped_full | failed
+    status: Mapped[str] = mapped_column(String(16))
+    #: Changes when the capture rules change. 1 is the first.
+    archive_version: Mapped[int] = mapped_column(Integer)
+    stale_pregame_seconds: Mapped[int] = mapped_column(Integer)
+    stale_live_seconds: Mapped[int] = mapped_column(Integer)
+    events_in_scope: Mapped[int] = mapped_column(Integer, default=0)
+    rows_written: Mapped[int] = mapped_column(Integer, default=0)
+    rows_unchanged: Mapped[int] = mapped_column(Integer, default=0)
+    rows_deleted: Mapped[int] = mapped_column(Integer, default=0)
+    #: Prune runs: full-resolution rows captured before this were pruned.
+    prune_cutoff: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: A failed pass: the exception's class name only, never data or a message.
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class _SnapshotColumns:
+    """Columns every archive row carries.
+
+    ``run_id`` holds ``snapshot_runs.id`` but is deliberately not a foreign key: a
+    RESTRICT key with no index on this side makes every run deletion scan the archive,
+    and an index would cost about 16 MB a day. A run and its rows share one
+    ``captured_at`` and the prune removes both by the same cutoff, rows first.
+    ``provider`` is the running provider's name: every read filters on it, so replay
+    and synthetic rows never mix. ``provider_id`` and ``fetched_at`` are the record's own
+    provenance. Rows are never updated (``archive/guard.py``); the only deletions are
+    the retention prune (``archive/prune.py``), the same append-only, age-based stance
+    as the audit log.
+    """
+
+    id: Mapped[int] = mapped_column(ARCHIVE_ID, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(BigInteger)
+    captured_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    provider: Mapped[str] = mapped_column(String(40))
+    provider_id: Mapped[str] = mapped_column(String(200))
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class ArchivedEvent(_SnapshotColumns, Base):
+    """One row per in-scope event per odds capture: the event state staleness depends on.
+    These rows are also the coverage record: an event is covered at T by its latest row
+    at or before T."""
+
+    __tablename__ = "event_snapshots"
+    __table_args__ = (
+        UniqueConstraint("provider", "event_id", "captured_at", name="uq_event_snapshots_key"),
+        Index("ix_event_snapshots_captured_at", "captured_at"),
+    )
+
+    event_id: Mapped[str] = mapped_column(String(64))
+    league: Mapped[str] = mapped_column(String(32))
+    home_team_id: Mapped[str] = mapped_column(String(64))
+    away_team_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16))
+    start_time: Mapped[datetime] = mapped_column(UTCDateTime)
+    score_home: Mapped[int | None] = mapped_column(Integer)
+    score_away: Mapped[int | None] = mapped_column(Integer)
+    score_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    period_text: Mapped[str | None] = mapped_column(String(40))
+    markets: Mapped[list[str]] = mapped_column(JSON)
+
+
+class ArchivedOdds(_SnapshotColumns, Base):
+    """One book's quote for one market of one event, written only when it changed. A
+    quote that disappears gets a tombstone row (``status='unavailable'``, no outcomes)."""
+
+    __tablename__ = "odds_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "event_id",
+            "market",
+            "sportsbook_id",
+            "captured_at",
+            name="uq_odds_snapshots_key",
+        ),
+        Index("ix_odds_snapshots_captured_at", "captured_at"),
+    )
+
+    event_id: Mapped[str] = mapped_column(String(64))
+    market: Mapped[str] = mapped_column(String(16))
+    sportsbook_id: Mapped[str] = mapped_column(String(64))
+    #: The provider's status as given: open | suspended | unavailable | closed.
+    status: Mapped[str] = mapped_column(String(16))
+    last_updated: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: ``[[key, name, line, price_american], ...]``
+    outcomes: Mapped[list[list[Any]]] = mapped_column(JSON)
+
+
+class ArchivedProp(_SnapshotColumns, Base):
+    """One book's offer for one player market, written only when it changed."""
+
+    __tablename__ = "prop_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "player_id",
+            "market",
+            "sportsbook_id",
+            "captured_at",
+            name="uq_prop_snapshots_key",
+        ),
+        Index("ix_prop_snapshots_event_captured", "event_id", "captured_at"),
+        Index("ix_prop_snapshots_captured_at", "captured_at"),
+    )
+
+    player_id: Mapped[str] = mapped_column(String(64))
+    event_id: Mapped[str] = mapped_column(String(64))
+    sportsbook_id: Mapped[str] = mapped_column(String(64))
+    market: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(16))
+    last_updated: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    line: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    over_american: Mapped[int | None] = mapped_column(Integer)
+    under_american: Mapped[int | None] = mapped_column(Integer)
+
+
+class ArchivedStatus(_SnapshotColumns, Base):
+    """A lineup, injury, news or weather status record: a status, a source name and times
+    only. No article or headline text is stored, which keeps licensed editorial content
+    out of the archive. Filled once a provider exists (P0.5)."""
+
+    __tablename__ = "status_snapshots"
+    __table_args__ = (
+        Index("ix_status_snapshots_event", "provider", "event_id", "captured_at"),
+        Index("ix_status_snapshots_player", "provider", "player_id", "captured_at"),
+        Index("ix_status_snapshots_captured_at", "captured_at"),
+    )
+
+    event_id: Mapped[str | None] = mapped_column(String(64))
+    team_id: Mapped[str | None] = mapped_column(String(64))
+    player_id: Mapped[str | None] = mapped_column(String(64))
+    #: lineup | injury | news | weather
+    kind: Mapped[str] = mapped_column(String(16))
+    #: expected | confirmed | out | doubtful | questionable | probable | active | reported
+    #: | unknown
+    status: Mapped[str] = mapped_column(String(24))
+    source: Mapped[str] = mapped_column(String(120))
+    reported_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+#: Every archive table; the guard, the prune and the size check use this list.
+ARCHIVE_MODELS: tuple[type[Base], ...] = (
+    SnapshotRun,
+    ArchivedEvent,
+    ArchivedOdds,
+    ArchivedProp,
+    ArchivedStatus,
+)
 
 
 # ---------------------------------------------------------- folded text keys
