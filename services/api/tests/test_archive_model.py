@@ -86,24 +86,27 @@ from .fakes import ControlledProvider
 
 __all__ = ["archive_env"]
 
-#: The default run: nine scenarios, of which the first six and the last each catch at
-#: least one defect made on purpose in a copy of the source (docs/features/p0-1.md,
-#: "Tests"). 1, 12, 40 and 64
-#: catch the prune of review round 4 (a game's odds, prop and event rows deleted with a
-#: commit each, cut in between); 3 and 40 the props look-back that did not cover the daily
-#: refresh; 56 the props keep-horizon check without the look-back; all six catch reads
-#: that ignore a prune that has started but not finished, and several each the props gap
-#: limit's boundary and a live game that never leaves scope. 322 and 368 are the two
-#: seeds at which review round 4 first saw the look-back defect; with the scope rule for
-#: live games added since, they are other scenarios now and are kept as two more. 614 is
-#: where this model, in round 5, found the prune deleting the fresh prop rows of a game
-#: that a props capture had back in scope before any odds capture did.
-#: Three use the 36-hour horizon the product ships with: 12, 56 and 64.
+#: The default run of the first kind: nine scenarios. What they catch, checked again on
+#: the round-6 code with each defect made on purpose in a copy of the source
+#: (docs/features/p0-1.md, "Tests"): 1, 12, 40 and 64 the prune of review round 4 (a
+#: game's odds, prop and event rows deleted with a commit each, cut in between); 3 and 40
+#: the props look-back that did not cover the daily refresh; 368 the props keep-horizon
+#: check without the look-back (56 did, until the capture rule of round 6 changed what
+#: that scenario stores); all but 614 reads that ignore a prune that has started but not
+#: finished; most of them the props gap limit's boundary and a live game that never
+#: leaves scope; 12, 322 and 614 a props capture that takes a game without the odds
+#: capture of its pass. 322 and 368 are the two seeds at which review round 4 first saw
+#: the look-back defect. 614 is where this model, in round 5, found the prune deleting
+#: the fresh prop rows of a game that a props capture had back in scope before any odds
+#: capture did. Three use the 36-hour horizon the product ships with: 12, 56 and 64.
 DEFAULT_SEEDS = (1, 3, 12, 40, 56, 64, 322, 368, 614)
-#: The default scenarios with a game listed three times (module docstring). Both catch
+#: The default scenarios with a game listed three times (module docstring). 1 and 4 catch
 #: the round-5 defect made on purpose in a copy of the source (the props read choosing
-#: the games to check by a row near T).
-DEFAULT_STAY_SEEDS = (1, 4)
+#: the games to check by a row near T). 21 is where this model, in round 6, found the
+#: closing offers of a game's first stay served after the game had been reduced a second
+#: time: on PostgreSQL only, where the file ceiling makes passes skip that capture on
+#: SQLite; there it is one more scenario.
+DEFAULT_STAY_SEEDS = (1, 4, 21)
 SCENARIOS = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SCENARIOS", "0"))
 FIRST_SEED = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SEED", "1"))
 SEEDS = (
@@ -702,13 +705,24 @@ class Scenario:
         player = world.roster[0]
         game = world.add_game(teams[0], teams[1], self.now + timedelta(hours=rng.randint(2, 4)))
         world.add_game(teams[0], teams[2], self.now + timedelta(hours=rng.randint(6, 11)))
+
+        def list_again() -> None:
+            """The provider lists the game as upcoming, for a start a few hours on."""
+            world.hidden.discard(game)
+            world.games[game] = world.games[game].model_copy(
+                update={
+                    "start_time": self.now + timedelta(hours=rng.randint(2, 4)),
+                    "status": "upcoming",
+                    "score": None,
+                    "score_updated_at": None,
+                    "period_text": None,
+                }
+            )
+
         for stay in range(3):
             if stay:
                 # Listed again: a new start time a few hours on, and offers on it.
-                world.hidden.discard(game)
-                world.games[game] = world.games[game].model_copy(
-                    update={"start_time": self.now + timedelta(hours=rng.randint(2, 4))}
-                )
+                list_again()
                 for market in player.prop_markets[:2]:
                     for book in rng.sample(world.book_ids, 2):
                         world.set_offer(player.id, game, market, book)
@@ -729,16 +743,13 @@ class Scenario:
             for _ in range(rng.randint(6, 12)):
                 self.turn()
             # The feed may have hidden the game or withdrawn the offers, or the passes
-            # were missed: the stay lasts until one props capture has had them (at most
-            # an hour and a half more).
-            for _ in range(45):
+            # were missed or skipped at a limit: the stay lasts until one props capture
+            # has had them (hourly props get five more chances at most).
+            for _ in range(150):
                 if with_the_game():
                     break
                 if world.freeze(self.settings).in_scope(game) is None:
-                    world.hidden.discard(game)
-                    world.games[game] = world.games[game].model_copy(
-                        update={"start_time": self.now + timedelta(hours=rng.randint(2, 4))}
-                    )
+                    list_again()  # the feed had hidden, moved or finished it
                 if not any(key[0] == game for key in world.offers[player.id]):
                     world.set_offer(player.id, game, player.prop_markets[0], world.book_ids[0])
                 self.turn()
@@ -749,6 +760,7 @@ class Scenario:
             for _ in range(rng.randint(2, 4)):
                 self.turn()
             self.stay_captures.append(with_the_game())
+            assert self.stay_captures[-1], f"stays seed {self.seed}: stay {stay} was not captured"
             self.sweep()
             self.ask_the_stays(game, player.id)
             # Capture is down until the game is listed again (or, after the third stay,

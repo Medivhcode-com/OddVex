@@ -171,9 +171,9 @@ with `KEY` and `VALUE` sets one of these and nothing else:
 It refuses every other key, including the two secrets, and never prints another value from the file. The running
 containers keep the old value until the next `deploy`.
 
-Every other setting of the application has the value written in the code and is not passed through `compose.yaml`:
-`setenv` cannot change it, and a line added to `/opt/oddvex/.env` by any other means would not reach the containers.
-That includes the snapshot archive's settings (`ODDVEX_SNAPSHOT_*`). To change one on the preview, add it to the
+A setting of the application that `compose.yaml` does not pass to the containers keeps the value written in the
+code: `setenv` cannot change it, and a line added to `/opt/oddvex/.env` by any other means would not reach the
+containers. That is the case for all of the snapshot archive's settings (`ODDVEX_SNAPSHOT_*`). To change one on the preview, add it to the
 `&api-env` block of `compose.yaml` (the API, the worker and the migration container share that block), commit, and
 send `ACTION=deploy` with that commit. Two of them an operator may need are named under "Limits of this setup":
 `ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS` and `ODDVEX_SNAPSHOT_MAX_DISK_BYTES`. The API checks the archive's settings
@@ -253,8 +253,9 @@ the list holds an address: deploy a commit that has it, or empty the list first.
   rebuilds; the rows stay.
   - **What an operator can see, and the check to make.** No action runs a script in the worker, so nothing here
     can be run by hand on the server: not `scripts/capture_snapshots.py --reclaim`, and not a query on the
-    database. The two windows are the worker's log (in the Hostinger panel; `capture_snapshots failed` on a turn
-    whose capture, prune or rebuild failed) and `GET /v1/admin/archive/stats` (administrators): the size of the
+    database. The two windows are the worker container's log, where the Docker Manager shows container logs
+    (`capture_snapshots failed` on a turn whose capture, prune or rebuild failed, after the script's own line
+    naming what failed), and `GET /v1/admin/archive/stats` (administrators): the size of the
     files and the ceiling, the row counts, and the latest run of each kind. A failed capture or prune shows the
     class name of its error (`error`); the latest `reclaim` run shows `indexes_rebuilt`, `indexes_dropped`,
     `bytes_freed`, and for each index whose rebuild failed its name and the class of the error
@@ -268,7 +269,7 @@ the list holds an address: deploy a commit that has it, or empty the list first.
     after the flag is turned on (a rebuild is only started for an index that has grown past 1.3 times what its
     rows need, which cannot be before then). The check: on day 8, read the `reclaim` entry of the statistics. It
     should say `status: ok` and `indexes_rebuilt` above 0; `finished_at` less `captured_at` is how long the pass
-    took. No `reclaim` entry at all by day 9 means nothing was rebuilt: compare `disk_bytes` with `approx_bytes`
+    took, its capture and prune included. No `reclaim` entry at all by day 9 means nothing was rebuilt: compare `disk_bytes` with `approx_bytes`
     (the files should be within 1.25 times the largest counted size so far). A `failed` entry names the index
     and the error class:
     - `QueryCanceled`: the rebuild took longer than the limit. Raise `ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS`

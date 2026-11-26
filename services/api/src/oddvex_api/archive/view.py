@@ -25,7 +25,7 @@ passes was built from rows that were all there together.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from itertools import pairwise
@@ -464,8 +464,10 @@ def _pruned_prop_events(
     later than C and so never part of an exact answer below). Rows captured after U (G
     came back into scope) are all there. So G's props at T are exact in two cases only:
 
-    - T is at or before U and before P1, the first props capture after C, and no kept row
-      of the player lies in (T, C] (else an earlier row of that offer was deleted);
+    - T is at or before U and before P1, the first props capture after C, no kept row
+      of the player lies in (T, C] (else an earlier row of that offer was deleted), and
+      no earlier prune can have reduced G between the player's kept rows and C
+      (:func:`_reduced_in_between`);
     - T and P are after U, and the player has no row of G from the look-back before T
       that was captured up to U: the answer then comes from rows captured after U only.
       (Every offer open at P has such a row: an offer is stored again at a capture
@@ -572,7 +574,13 @@ def _pruned_prop_events(
             if closing is not None:
                 next_props = _run_after(session, provider_name, "props", closing, inclusive=False)
                 later_kept = rows_of(event_id, p.captured_at > as_of, p.captured_at <= closing)
-                if (next_props is None or as_of < next_props) and not later_kept:
+                if (
+                    (next_props is None or as_of < next_props)
+                    and not later_kept
+                    and not _reduced_in_between(
+                        session, prop_filter, event_id, as_of, closing, lookback
+                    )
+                ):
                     continue  # exact: the kept closing rows are the answer
         withheld.add(event_id)
         last = session.scalar(
@@ -587,6 +595,59 @@ def _pruned_prop_events(
         if tombstoned is None or as_of - lookback <= tombstoned:
             named.append(event_id)
     return withheld, named
+
+
+def _reduced_in_between(
+    session: Session,
+    prop_filter: Sequence[Any],
+    event_id: str,
+    as_of: datetime,
+    closing: datetime,
+    lookback: timedelta,
+) -> bool:
+    """Whether a prune can have reduced the game after the player's kept rows at or
+    before T and before the closing capture ``closing``.
+
+    The kept closing offers are each offer's latest row at or before the closing capture
+    *of the rows the prune found*. A game that was reduced once (its first stay), came
+    back into scope and was reduced again has a later closing capture, while the rows of
+    its first stay are what the first prune left: the tombstones written after the first
+    stay's closing capture are gone, so its closing offers of then would read as open at
+    any time up to the second stay. (Found by the reference model in round 6, on a game
+    that came back for less than an hour, between two props captures.) A prune that
+    reduced the game ran after its last event row had aged out, and an offer's kept row
+    has the game in scope when it was stored (a tombstone: within two look-backs before
+    it). So if a prune ran between the earliest of the player's kept rows and the closing
+    capture, with a cutoff later than the time such a row shows the game in scope, the
+    kept rows are not known to be the latest of their offers, and the game is not served.
+    With one stay inside the full-resolution period there is no such prune."""
+    p = ArchivedProp
+    kept = session.execute(
+        select(p.captured_at, p.status).where(
+            *prop_filter, p.event_id == event_id, p.captured_at <= as_of
+        )
+    ).all()
+    if not kept:
+        return False
+    earliest = min(row.captured_at for row in kept)
+    in_scope_by = min(
+        row.captured_at if row.status != "unavailable" else row.captured_at - 2 * lookback
+        for row in kept
+    )
+    return (
+        session.scalar(
+            select(SnapshotRun.id)
+            .where(
+                SnapshotRun.kind == "prune",
+                SnapshotRun.status.in_(PRUNE_REACH),
+                SnapshotRun.captured_at > earliest,
+                SnapshotRun.captured_at < closing,
+                SnapshotRun.prune_cutoff > in_scope_by,
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def props_at(

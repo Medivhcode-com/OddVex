@@ -1099,6 +1099,65 @@ def test_a_game_only_a_props_pass_saw_again_is_still_read_right_after_its_prune(
     )
 
 
+def test_a_first_stays_closing_offers_are_not_served_once_the_game_was_reduced_again(
+    archive_env: ArchiveEnv,
+) -> None:
+    """Found by the reference model in round 6 (its three-stay scenarios, seeds 11 and 21
+    on PostgreSQL), in the code as it had been since round 4. A game is captured with a
+    player's offers, postponed (the offers are tombstoned) and reduced: it keeps the
+    closing offers of that stay, and the tombstones go. Twenty days on it is listed
+    again for a few minutes, between two props captures, so no props capture sees it,
+    and is reduced a second time. Its closing capture is now the second stay's, the
+    kept offers of the first stay are still the latest rows at or before it, and nothing
+    of the player's lies in between: the read took them for the answer at any time up
+    to the second stay, and showed offers as open that had been withdrawn three weeks
+    before. A prune that can have reduced the game between the kept rows and the closing
+    capture now stops them from being served; the game is named instead."""
+    env = archive_env
+    world, game, player_id, run = _relisted_world(env)
+    first = MODEL_START
+    run(first, "odds", "props")
+    run(first + timedelta(seconds=360), "odds")
+    world.hidden.add(game)  # postponed
+    run(first + timedelta(seconds=720), "odds")
+    run(first + timedelta(seconds=3600), "odds", "props")  # the offers are tombstoned
+    open_then, withdrawn = first + timedelta(seconds=400), first + timedelta(seconds=3700)
+    before = {t: _relisted_read(env, game, player_id, t)[:3] for t in (open_then, withdrawn)}
+    assert len(before[open_then][1]) >= 4 and before[withdrawn] == ("captured", [], [])
+
+    run(first + timedelta(days=8), "prune")
+    # Reduced once: the closing offers answer for the time they were open, and after
+    # the tombstones the game is named.
+    assert _relisted_read(env, game, player_id, open_then)[:3] == before[open_then]
+    assert _relisted_read(env, game, player_id, withdrawn)[:3] == ("captured", [], [game])
+
+    # Listed again ten minutes after a props capture, gone twelve minutes later.
+    second = first + timedelta(days=20)
+    run(second - timedelta(seconds=600), "odds", "props")
+    world.hidden.discard(game)
+    world.games[game] = world.games[game].model_copy(
+        update={"start_time": second + timedelta(hours=5)}
+    )
+    assert run(second, "odds").props is None
+    assert run(second + timedelta(seconds=360), "odds").props is None
+    world.hidden.add(game)
+    run(second + timedelta(seconds=720), "odds")
+    run(second + timedelta(seconds=3000), "odds", "props")
+    assert run(second + timedelta(days=8), "prune").prune.rows_deleted > 0  # type: ignore[union-attr]
+    assert captured(env, ArchivedEvent, game) == [first, second + timedelta(seconds=360)]
+    assert captured(env, ArchivedProp, game) == [first]  # the first stay's closing offers
+
+    # After the first stay's offers were withdrawn: none of them, and the game is named.
+    assert _relisted_read(env, game, player_id, withdrawn)[:3] == ("captured", [], [game])
+    # While they were open the kept rows cannot be told from stale ones any more: the
+    # game is named there too, never guessed at.
+    assert _relisted_read(env, game, player_id, open_then)[:3] == ("captured", [], [game])
+    # Between the stays no props capture covers the time: a gap, as before.
+    between = first + timedelta(days=10)
+    assert _relisted_read(env, game, player_id, between)[0] == "archive_gap"
+    assert orphan_rows(env) == 0
+
+
 def test_a_player_with_no_closing_offer_keeps_a_marker_row_so_the_game_is_named(
     archive_env: ArchiveEnv,
 ) -> None:
