@@ -11,6 +11,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEV_JWT_SECRET = "dev-only-insecure-secret-change-me-0123456789"
 DEV_DEMO_PASSWORD = "oddvex-demo-2026"
 
+#: Snapshot archive (P0.1): fixed figures the archive settings below are checked against.
+#: Hours a game lasts at most, for the props look-back.
+SNAPSHOT_PROP_GAME_HOURS = 12
+#: An unchanged prop offer is stored again once its latest row is this many hours old.
+SNAPSHOT_PROP_REFRESH_HOURS = 24
+#: The worker loop's period, in seconds.
+SNAPSHOT_WORKER_TURN_SECONDS = 120
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -117,6 +125,83 @@ class Settings(BaseSettings):
     #: Largest request body accepted, in bytes. Larger requests get 413.
     max_body_bytes: int = Field(default=64 * 1024, ge=1024)
 
+    #: Snapshot archive (P0.1, flag ``snapshot_archive``, off by default). The capture
+    #: script (``scripts/capture_snapshots.py``) runs in the worker loop every 120 s and
+    #: captures odds when the last odds capture is at least this old (less 15 s of slack):
+    #: 360 s is every third turn of the loop.
+    snapshot_odds_interval_seconds: int = Field(default=360, ge=60)
+    #: The same for player-prop offers.
+    snapshot_props_interval_seconds: int = Field(default=3600, ge=60)
+    #: Events captured: every live event and every upcoming one starting within this many hours.
+    snapshot_horizon_hours: int = Field(default=36, ge=1, le=168)
+    #: Days every captured row is kept at full resolution.
+    snapshot_retention_days: int = Field(default=7, ge=1)
+    #: Days a game's kept captures (first, closing, last and the rows a stored bet's
+    #: placement time points at), status rows and capture runs are kept. A game's rows
+    #: leave together, when its last capture is this old. Never shorter than
+    #: ``snapshot_retention_days``.
+    snapshot_keep_days: int = Field(default=400, ge=1)
+    #: Counted size (rows times measured bytes per row) at which capture stops
+    #: (``skipped_full`` runs) while the prune keeps running. 1.5 GiB; measured use is
+    #: about 0.55 GB after a week and 0.95 GB by day 400 (1.3 GB with every game at the
+    #: bet-anchor bound) on the synthetic schedule.
+    snapshot_max_bytes: int = Field(default=1_610_612_736, ge=1)
+    #: PostgreSQL only: size of the archive's files (tables and indexes) at which capture
+    #: also stops, whatever the counted size. A hard ceiling, 2 GiB: with bloated indexes
+    #: rebuilt (``archive/reclaim.py``) the files stay within 1.25 times the largest
+    #: counted size, 1.9 GiB at the cap. Keep it above ``snapshot_max_bytes``: the table
+    #: files never shrink, so a ceiling below them would not release.
+    snapshot_max_disk_bytes: int = Field(default=2_147_483_648, ge=1)
+    #: A time more than this many seconds after the last capture is an archive gap: two
+    #: odds intervals plus one worker turn, so one missed pass is tolerated and two are not.
+    snapshot_max_gap_seconds: int = Field(default=840, ge=60)
+    #: Minimum seconds between two prune passes.
+    snapshot_prune_interval_seconds: int = Field(default=3600, ge=60)
+    #: PostgreSQL only: seconds one index rebuild of the archive may take
+    #: (``statement_timeout`` of ``archive/reclaim.py``). 120 s is about eight times what
+    #: the largest index took at the size of the cap on the development machine; raise it
+    #: if rebuilds on a slower server are recorded as failed with ``QueryCanceled``.
+    snapshot_reclaim_timeout_seconds: int = Field(default=120, ge=1, le=3600)
+
+    @property
+    def snapshot_props_max_gap_seconds(self) -> int:
+        """A time more than this after the last props capture is a gap for the props
+        read: two props intervals plus one worker turn (7,320 s with hourly props)."""
+        return 2 * self.snapshot_props_interval_seconds + SNAPSHOT_WORKER_TURN_SECONDS
+
+    @property
+    def snapshot_prop_lookback_seconds(self) -> int:
+        """How far back from T the props read looks for an offer's latest row.
+
+        Two rules, and the look-back is the longer. An offer is stored when its game
+        enters scope, ``snapshot_horizon_hours`` before the start, and can stay valid
+        until the game ends (``SNAPSHOT_PROP_GAME_HOURS``). And an unchanged offer is
+        stored again at the first props capture after its row is
+        ``SNAPSHOT_PROP_REFRESH_HOURS`` old, while a read is answered from a props capture
+        up to ``snapshot_props_max_gap_seconds`` before T: so an open offer's latest row
+        is less than the refresh age plus that gap before T. The second rule holds at
+        every setting; with the first alone, a horizon of 14 hours or less left an offer
+        unchanged for a day out of the read (review round 4)."""
+        return max(
+            (self.snapshot_horizon_hours + SNAPSHOT_PROP_GAME_HOURS) * 3600,
+            SNAPSHOT_PROP_REFRESH_HOURS * 3600 + self.snapshot_props_max_gap_seconds,
+        )
+
+    def snapshot_settings_problem(self) -> str | None:
+        """Why the archive settings cannot work together, or ``None``. The props read
+        answers ``archive_pruned`` whenever its look-back reaches past the keep horizon;
+        with a keep period no longer than the look-back that is every time."""
+        keep_seconds = max(self.snapshot_keep_days, self.snapshot_retention_days) * 86_400
+        lookback = self.snapshot_prop_lookback_seconds
+        if keep_seconds <= lookback:
+            return (
+                "ODDVEX_SNAPSHOT_KEEP_DAYS (or ODDVEX_SNAPSHOT_RETENTION_DAYS, when larger) "
+                f"must be longer than the props look-back of {lookback} seconds "
+                "(ODDVEX_SNAPSHOT_HORIZON_HOURS plus 12 hours, or 24 hours plus two props "
+                "intervals and 120 seconds): otherwise no archived props read ever answers"
+            )
+        return None
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"
@@ -137,7 +222,11 @@ class Settings(BaseSettings):
         return not self.is_production
 
     def validate_for_startup(self) -> None:
-        """Refuse insecure configuration in production."""
+        """Refuse configuration that cannot work, and insecure configuration in
+        production."""
+        problem = self.snapshot_settings_problem()
+        if problem is not None:
+            raise RuntimeError(problem)
         if self.data_provider == "replay" and not self.replay_data_path:
             raise RuntimeError(
                 "ODDVEX_REPLAY_DATA_PATH must point to a replay dataset when "

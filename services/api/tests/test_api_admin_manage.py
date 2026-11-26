@@ -31,6 +31,7 @@ ADMIN_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("PUT", "/v1/admin/flags/community", {"enabled": True}),
     ("GET", "/v1/admin/audit", None),
     ("GET", "/v1/admin/email-outbox", None),
+    ("GET", "/v1/admin/archive/stats", None),
 ]
 #: Behind the ``community`` flag: 404 for everyone while it is off (see
 #: tests/test_api_community_moderation.py for the same checks with the flag on).
@@ -358,6 +359,7 @@ def test_admin_flags_list_and_set(admin_client: TestClient) -> None:
         "tracker_analytics",
         "email_flows",
         "premium_gating",
+        "snapshot_archive",
     ]
     community = listed[0]
     assert community == {

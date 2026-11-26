@@ -1,0 +1,188 @@
+#!/usr/bin/env python
+"""Capture the snapshot archive (P0.1) and prune it.
+
+    python scripts/capture_snapshots.py               # capture what is due, prune when due
+    python scripts/capture_snapshots.py --force       # capture now, whatever the intervals
+    python scripts/capture_snapshots.py --prune-only  # prune when due (with --force: now)
+    python scripts/capture_snapshots.py --reclaim     # PostgreSQL: check the indexes now
+    python scripts/capture_snapshots.py --dry-run     # say what a pass would capture; write nothing
+    python scripts/capture_snapshots.py --stats       # print the archive's size and row counts
+
+The worker container runs this every 120 s (``infrastructure/hostinger/compose.yaml``).
+While the ``snapshot_archive`` flag is off it writes nothing and exits at once, so turning
+the flag off stops all storage growth. On PostgreSQL an advisory lock stops two passes
+from overlapping, and after each prune the pass rebuilds bloated archive indexes and drops
+whatever an interrupted rebuild left (``oddvex_api/archive/reclaim.py``); ``--reclaim``
+does only that, now. It reads only the configured provider (synthetic unless set), never a
+sportsbook. Props are never captured without the odds capture of the same pass: when the
+props are due the pass captures odds too. Exit status 1 when a capture, prune or rebuild
+failed; the failure is recorded as a ``failed`` run with the exception's class name only
+(a rebuild whose database session was ended included; only a database that cannot be
+reached at all leaves no record), and the script's line and ``--stats`` show that name,
+with the index it belongs to for a rebuild. Exit
+status 2, with nothing done, when the archive settings cannot work together.
+"""
+
+from __future__ import annotations
+
+import sys
+
+from sqlalchemy.orm import Session
+
+from oddvex_api.archive.capture import FLAG, RunSummary, capture_pass, in_scope, is_due
+from oddvex_api.archive.guard import install_archive_guard
+from oddvex_api.archive.service import archive_stats
+from oddvex_api.config import Settings, get_settings
+from oddvex_api.db import make_engine
+from oddvex_api.flags import service as flags
+from oddvex_api.main import build_provider
+from oddvex_api.providers import SportsDataProvider
+
+OFF_MESSAGE = "Snapshot archive is off; nothing captured."
+
+
+def _stats(settings: Settings) -> int:
+    engine = make_engine(settings.database_url)
+    try:
+        with Session(engine) as session:
+            stats = archive_stats(session, settings)
+    finally:
+        engine.dispose()
+    rows = stats.rows
+    print(
+        f"Snapshot archive {'on' if stats.enabled else 'off'}: about {stats.approx_bytes:,} bytes "
+        f"of {stats.max_bytes:,}; rows: {rows.odds:,} odds, {rows.props:,} props, "
+        f"{rows.events:,} events, {rows.status:,} status, {rows.runs:,} runs."
+    )
+    if stats.disk_bytes is not None:
+        print(f"  files on disk: {stats.disk_bytes:,} bytes of {stats.max_disk_bytes:,}")
+    for run in stats.last_runs:
+        if run.kind == "reclaim":
+            print(
+                f"  last reclaim: {run.status} at {run.captured_at.isoformat()}, "
+                f"{run.indexes_rebuilt} index(es) rebuilt, {run.indexes_dropped} dropped, "
+                f"{run.indexes_failed} failed{_failed(run.failed_indexes)}, "
+                f"{run.bytes_freed or 0:,} bytes freed"
+            )
+            continue
+        print(
+            f"  last {run.kind}: {run.status}{f' ({run.error})' if run.error else ''} at "
+            f"{run.captured_at.isoformat()}, {run.rows_written:,} written, "
+            f"{run.rows_deleted:,} deleted"
+        )
+    return 0
+
+
+def _failed(indexes: dict[str, str] | None) -> str:
+    """The indexes whose rebuild or drop failed and the class of each error, for the
+    script's lines: `` (uq_odds_snapshots_key: QueryCanceled)``, or nothing."""
+    if not indexes:
+        return ""
+    return " (" + ", ".join(f"{name}: {error}" for name, error in sorted(indexes.items())) + ")"
+
+
+def _error(run: RunSummary) -> str:
+    """A failed run's error class, for the script's line: `` (ConnectionError)``."""
+    error = (run.detail or {}).get("error") if run.status == "failed" else None
+    return f" ({error})" if error else ""
+
+
+def _enabled(settings: Settings) -> bool:
+    """Whether the flag is on, read before the provider is built: with the flag off a
+    worker turn loads nothing (a replay provider would otherwise load its dataset)."""
+    engine = make_engine(settings.database_url)
+    try:
+        with Session(engine) as session:
+            return flags.is_enabled(session, FLAG, settings)
+    finally:
+        engine.dispose()
+
+
+def _dry_run(settings: Settings, provider: SportsDataProvider) -> int:
+    engine = make_engine(settings.database_url)
+    try:
+        with Session(engine) as session:
+            now = provider.now()
+            odds_due = is_due(
+                session, provider.name, "odds", now, settings.snapshot_odds_interval_seconds
+            )
+            props_due = is_due(
+                session, provider.name, "props", now, settings.snapshot_props_interval_seconds
+            )
+    finally:
+        engine.dispose()
+    events = in_scope(provider, now, settings)
+    quotes = sum(len(provider.get_odds(e.id, m)) for e in events for m in e.markets)
+    print(
+        f"Dry run, nothing saved: {len(events)} event(s) in scope with {quotes} quote(s); "
+        f"odds {'due' if odds_due or props_due else 'not due'} (always with the props), "
+        f"props {'due' if props_due else 'not due'}."
+    )
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    settings = get_settings()
+    if "--stats" in argv:
+        return _stats(settings)
+    problem = settings.snapshot_settings_problem()
+    if problem is not None:
+        print(f"Snapshot archive settings: {problem}.", file=sys.stderr)
+        return 2
+    if not _enabled(settings):
+        print(OFF_MESSAGE)
+        return 0
+    provider = build_provider(settings)
+    if "--dry-run" in argv:
+        return _dry_run(settings, provider)
+    install_archive_guard()
+    prune_only = "--prune-only" in argv
+    reclaim_only = "--reclaim" in argv
+    force = "--force" in argv
+    engine = make_engine(settings.database_url)
+    try:
+        report = capture_pass(
+            engine,
+            provider,
+            settings,
+            force=force and not (prune_only or reclaim_only),
+            capture=not (prune_only or reclaim_only),
+            prune=not reclaim_only,
+            force_prune=force and prune_only,
+            force_reclaim=reclaim_only,
+        )
+    finally:
+        engine.dispose()
+    if not report.enabled:
+        print(OFF_MESSAGE)
+        return 0
+    if report.locked:
+        print("Another capture is running; nothing done.")
+        return 0
+    parts = []
+    for name, run in (("odds", report.odds), ("props", report.props), ("prune", report.prune)):
+        if run is None:
+            parts.append(f"{name} not due")
+        elif name == "prune":
+            parts.append(f"prune {run.status}{_error(run)}, {run.rows_deleted} row(s) deleted")
+        else:
+            parts.append(
+                f"{name} {run.status}{_error(run)}, {run.rows_written} row(s) written, "
+                f"{run.rows_unchanged} unchanged"
+            )
+    if report.reclaim is not None:
+        detail = report.reclaim.detail or {}
+        failed = detail.get("failed") or {}
+        parts.append(
+            f"reclaim {report.reclaim.status}, {len(detail.get('rebuilt') or {})} index(es) "
+            f"rebuilt, {len(failed)} failed{_failed(failed)}, "
+            f"{int(detail.get('freed_bytes') or 0):,} bytes freed"
+        )
+    elif reclaim_only:
+        parts.append("reclaim: nothing to rebuild")
+    print("Snapshot archive: " + "; ".join(parts) + ".")
+    return 1 if report.failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

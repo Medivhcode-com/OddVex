@@ -26,7 +26,7 @@ Status values: Not started, In progress, Merged, Blocked (with the owner questio
 
 | Item | Name | Phase | Needs | Ticket | Status | Pull request |
 |---|---|---|---|---|---|---|
-| P0.1 | Snapshot archive | 0 | — | [MED-72](https://linear.app/medivh-code-team/issue/MED-72/p01-snapshot-archive) | Not started | — |
+| P0.1 | Snapshot archive | 0 | — | [MED-72](https://linear.app/medivh-code-team/issue/MED-72/p01-snapshot-archive) | In progress | — |
 | P0.2 | Calculation provenance | 0 | — | [MED-73](https://linear.app/medivh-code-team/issue/MED-73/p02-calculation-provenance) | Not started | — |
 | P0.3 | Entitlements | 0 | — | [MED-74](https://linear.app/medivh-code-team/issue/MED-74/p03-entitlements) | Not started | — |
 | P0.4 | Profile settings | 0 | — | [MED-75](https://linear.app/medivh-code-team/issue/MED-75/p04-profile-settings) | Not started | — |

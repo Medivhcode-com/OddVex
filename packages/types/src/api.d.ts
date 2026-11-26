@@ -24,6 +24,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/archive/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Snapshot archive size, row counts and latest runs */
+        get: operations["get_archive_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/audit": {
         parameters: {
             query?: never;
@@ -389,6 +406,66 @@ export interface paths {
         patch: operations["update_alert"];
         trace?: never;
     };
+    "/v1/archive/events/{event_id}/odds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One event's archived odds as of a time
+         * @description Every book's quote for one market as captured at or before `as_of`, the coverage of the event then, and the odds comparison as of `as_of`; quotes and comparison only when the event is covered. Behind the `snapshot_archive` flag.
+         */
+        get: operations["get_archived_event_odds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/archive/events/{event_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One event's archived lineup and news status as of a time
+         * @description The latest status record per team or player and kind captured at or before `as_of`: a status, a source and times, no article text. Empty until a lineup and news provider exists. Behind the `snapshot_archive` flag.
+         */
+        get: operations["get_archived_event_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/archive/players/{player_id}/props": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One player's archived prop offers as of a time
+         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the look-back before it (48 hours with the default settings), and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`: for any time from the game's first capture to one look-back after its last, the times between two listings of a game that was postponed and listed again included. A props capture holds the games of the odds capture made in the same pass. Behind the `snapshot_archive` flag.
+         */
+        get: operations["get_archived_player_props"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/assistant/query": {
         parameters: {
             query?: never;
@@ -657,6 +734,26 @@ export interface paths {
          * @description Stake, legs, odds and bet type can only change while the bet is pending. The changed bet is checked as a whole before anything is saved, with the same rules as a create (`invalid_decimal_odds`, `odds_out_of_range`, `invalid_stake`, `payout_out_of_range`, all 422): a refused update changes nothing. Editing never adds a bet, so it works at the bet cap. Counts towards the per-user write limit (429 `rate_limited` with `Retry-After`).
          */
         patch: operations["update_bet"];
+        trace?: never;
+    };
+    "/v1/bets/{bet_id}/placement-prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The best price at your books when you placed a bet
+         * @description For each leg: the best open, non-stale price overall and at your books from the archive as of the bet's `placed_at`, or `cannot_price` with the reason. Your books come from `books`, else from the books of your own recorded bets. Behind the `snapshot_archive` flag.
+         */
+        get: operations["get_bet_placement_prices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/bets/{bet_id}/settle": {
@@ -2187,6 +2284,289 @@ export interface components {
              */
             win_rate?: number | null;
         };
+        /** ArchiveRowCountsOut */
+        ArchiveRowCountsOut: {
+            /** Events */
+            events: number;
+            /** Odds */
+            odds: number;
+            /** Props */
+            props: number;
+            /** Runs */
+            runs: number;
+            /** Status */
+            status: number;
+        };
+        /** ArchiveRunOut */
+        ArchiveRunOut: {
+            /**
+             * Bytes Freed
+             * @description `reclaim` runs: bytes the run returned to the disk.
+             */
+            bytes_freed?: number | null;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Error
+             * @description A `failed` capture or prune run: the class name of the error that ended it (a name only, never a message).
+             */
+            error?: string | null;
+            /**
+             * Failed Indexes
+             * @description `reclaim` runs: per index whose rebuild or drop failed, the class name of the error (for example `QueryCanceled` when a rebuild ran into its time limit, `LockNotAvailable` when it waited too long for an older transaction). The key `connection` stands for the rebuild's database session being lost.
+             */
+            failed_indexes?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Finished At
+             * @description Wall-clock time the run ended.
+             */
+            finished_at?: string | null;
+            /**
+             * Indexes Dropped
+             * @description `reclaim` runs: invalid indexes an interrupted rebuild had left, dropped.
+             */
+            indexes_dropped?: number | null;
+            /**
+             * Indexes Failed
+             * @description `reclaim` runs: rebuilds or drops that failed and wait for a later pass.
+             */
+            indexes_failed?: number | null;
+            /**
+             * Indexes Rebuilt
+             * @description `reclaim` runs: indexes rebuilt to return space to the disk.
+             */
+            indexes_rebuilt?: number | null;
+            /**
+             * Kind
+             * @description `odds`, `props`, `status`, `prune` or `reclaim`.
+             */
+            kind: string;
+            /** Rows Deleted */
+            rows_deleted: number;
+            /** Rows Written */
+            rows_written: number;
+            /**
+             * Status
+             * @description `ok`, `skipped_full` (capture stopped at a limit) or `failed`. A prune is recorded when it starts (`started`) and again when it ends: `started` as the latest prune means one is running, or was cut short and will be finished by the next pass.
+             */
+            status: string;
+        };
+        /** ArchiveStatsOut */
+        ArchiveStatsOut: {
+            /**
+             * Approx Bytes
+             * @description The data the archive holds, as the storage cap counts it: each table's row count times its measured bytes per row. It falls when the prune deletes rows.
+             */
+            approx_bytes: number;
+            /**
+             * Disk Bytes
+             * @description PostgreSQL only: the size of the five tables' files with their indexes. The table files do not shrink after the prune (later rows reuse the freed space); the index files shrink when a `reclaim` run rebuilds them.
+             */
+            disk_bytes?: number | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Keep Days */
+            keep_days: number;
+            /**
+             * Last Runs
+             * @description The latest run of each kind. A `reclaim` run is recorded only when it rebuilt or dropped an index or failed, so the latest one is the last time index space was returned to the disk.
+             */
+            last_runs: components["schemas"]["ArchiveRunOut"][];
+            /** Max Bytes */
+            max_bytes: number;
+            /**
+             * Max Disk Bytes
+             * @description PostgreSQL only: capture also stops while `disk_bytes` is at this ceiling.
+             */
+            max_disk_bytes: number;
+            /** Retention Days */
+            retention_days: number;
+            rows: components["schemas"]["ArchiveRowCountsOut"];
+        };
+        /** ArchivedBestOut */
+        ArchivedBestOut: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Last Updated */
+            last_updated?: string | null;
+            /** Line */
+            line?: number | null;
+            price: components["schemas"]["PriceOut"];
+            sportsbook: components["schemas"]["SportsbookRef"];
+        };
+        /** ArchivedOddsOut */
+        ArchivedOddsOut: {
+            coverage: components["schemas"]["CoverageOut"];
+            /**
+             * Data Mode
+             * @enum {string}
+             */
+            data_mode: "synthetic" | "replay";
+            /** @description The odds comparison as of the requested time, from the same code as the live board with the stale thresholds in force at capture. Only when the coverage status is `captured`. */
+            odds?: components["schemas"]["EventOddsOut"] | null;
+            /**
+             * Quotes
+             * @description Each book's stored quote from the covering capture. Empty unless the coverage status is `captured`: an older kept capture is not the market at that time.
+             */
+            quotes: components["schemas"]["ArchivedQuoteOut"][];
+            /**
+             * Requested As Of
+             * Format: date-time
+             */
+            requested_as_of: string;
+        };
+        /** ArchivedOutcomeOut */
+        ArchivedOutcomeOut: {
+            /** Key */
+            key: string;
+            /** Line */
+            line?: number | null;
+            /** Name */
+            name: string;
+            price: components["schemas"]["PriceOut"];
+        };
+        /** ArchivedPropOut */
+        ArchivedPropOut: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Event Id */
+            event_id: string;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Last Updated */
+            last_updated?: string | null;
+            /** Line */
+            line?: number | null;
+            /** Market */
+            market: string;
+            over?: components["schemas"]["PriceOut"] | null;
+            /** Provider */
+            provider: string;
+            /** Provider Id */
+            provider_id: string;
+            sportsbook: components["schemas"]["SportsbookRef"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "suspended" | "unavailable" | "closed";
+            under?: components["schemas"]["PriceOut"] | null;
+        };
+        /** ArchivedPropsOut */
+        ArchivedPropsOut: {
+            coverage: components["schemas"]["PropsCoverageOut"];
+            /**
+             * Data Mode
+             * @enum {string}
+             */
+            data_mode: "synthetic" | "replay";
+            /** Offers */
+            offers: components["schemas"]["ArchivedPropOut"][];
+            /**
+             * Pruned Event Ids
+             * @description The player's games whose offers at the requested time cannot be read back exactly, because the retention prune kept only their closing offers. Their offers are left out of `offers`.
+             */
+            pruned_event_ids?: string[];
+            /**
+             * Requested As Of
+             * Format: date-time
+             */
+            requested_as_of: string;
+        };
+        /**
+         * ArchivedQuoteOut
+         * @description One book's quote as it was stored: the latest row at or before the coverage row.
+         *     Quotes are returned only when the coverage status is `captured`.
+         */
+        ArchivedQuoteOut: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Last Updated */
+            last_updated?: string | null;
+            /** Outcomes */
+            outcomes: components["schemas"]["ArchivedOutcomeOut"][];
+            /** Provider */
+            provider: string;
+            /** Provider Id */
+            provider_id: string;
+            sportsbook: components["schemas"]["SportsbookRef"];
+            /**
+             * Status
+             * @description The provider's status as captured.
+             * @enum {string}
+             */
+            status: "open" | "suspended" | "unavailable" | "closed";
+        };
+        /** ArchivedStatusEntryOut */
+        ArchivedStatusEntryOut: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Event Id */
+            event_id?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lineup" | "injury" | "news" | "weather";
+            /** Player Id */
+            player_id?: string | null;
+            /** Provider */
+            provider: string;
+            /** Provider Id */
+            provider_id: string;
+            /** Reported At */
+            reported_at?: string | null;
+            /** Source */
+            source: string;
+            /** Status */
+            status: string;
+            /** Team Id */
+            team_id?: string | null;
+        };
+        /** ArchivedStatusOut */
+        ArchivedStatusOut: {
+            coverage: components["schemas"]["StatusCoverageOut"];
+            /**
+             * Data Mode
+             * @enum {string}
+             */
+            data_mode: "synthetic" | "replay";
+            /**
+             * Entries
+             * @description The latest record per subject and kind captured at or before the time.
+             */
+            entries: components["schemas"]["ArchivedStatusEntryOut"][];
+            /**
+             * Requested As Of
+             * Format: date-time
+             */
+            requested_as_of: string;
+        };
         /** AssistantQueryRequest */
         AssistantQueryRequest: {
             /** Message */
@@ -2621,6 +3001,34 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** BetPlacementPricesOut */
+        BetPlacementPricesOut: {
+            /** Bet Id */
+            bet_id: string;
+            /**
+             * Books
+             * @description The sportsbook keys counted as your books.
+             */
+            books: string[];
+            /**
+             * Books Source
+             * @description `query`: the `books` parameter. `bets`: the books of your own recorded bets that match a sportsbook of the data provider. `none`: neither.
+             * @enum {string}
+             */
+            books_source: "query" | "bets" | "none";
+            /**
+             * Data Mode
+             * @enum {string}
+             */
+            data_mode: "synthetic" | "replay";
+            /** Legs */
+            legs: components["schemas"]["LegPlacementPriceOut"][];
+            /**
+             * Placed At
+             * Format: date-time
+             */
+            placed_at: string;
         };
         /** BetSettleRequest */
         BetSettleRequest: {
@@ -3090,6 +3498,22 @@ export interface components {
             price: components["schemas"]["PriceOut"];
             /** Steps */
             steps: string[];
+        };
+        /** CoverageOut */
+        CoverageOut: {
+            /**
+             * Captured At
+             * @description When the latest event row at or before the requested time was captured.
+             */
+            captured_at?: string | null;
+            /** Run Id */
+            run_id?: number | null;
+            /**
+             * Status
+             * @description `captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention, or the time is at or before the keep horizon, where the archive no longer answers.
+             * @enum {string}
+             */
+            status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
         };
         /** CurrentStreakOut */
         CurrentStreakOut: {
@@ -3737,6 +4161,38 @@ export interface components {
              * @enum {string}
              */
             odds_format: "american" | "decimal" | "fractional";
+        };
+        /** LegPlacementPriceOut */
+        LegPlacementPriceOut: {
+            best_at_your_books?: components["schemas"]["ArchivedBestOut"] | null;
+            best_overall?: components["schemas"]["ArchivedBestOut"] | null;
+            coverage?: components["schemas"]["CoverageOut"] | null;
+            /** Event Id */
+            event_id?: string | null;
+            /** Leg Id */
+            leg_id: string;
+            /** Line */
+            line?: number | null;
+            /** Market */
+            market: string;
+            /** Outcome Key */
+            outcome_key?: string | null;
+            /** Position */
+            position: number;
+            /**
+             * Reason
+             * @description Why the leg cannot be priced: `leg_not_structured` (no event, market, outcome or line to match), a coverage status, `stale_at_placement` (every open quote was too old when the bet was placed), `no_usable_quote`, or, when a price existed but not at your books, `none_at_your_books` or `books_unknown` (the same value as `your_books_reason`; `best_overall` then holds that price). Null only when priced.
+             */
+            reason?: ("leg_not_structured" | "not_captured" | "archive_gap" | "archive_pruned" | "stale_at_placement" | "no_usable_quote" | "none_at_your_books" | "books_unknown") | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "priced" | "cannot_price";
+            /** Your Books Reason */
+            your_books_reason?: ("books_unknown" | "none_at_your_books") | null;
+            /** @description The price recorded on the leg. */
+            your_price: components["schemas"]["PriceOut"];
         };
         /** LegResultIn */
         LegResultIn: {
@@ -4571,6 +5027,20 @@ export interface components {
             status: "open" | "suspended" | "unavailable";
             under?: components["schemas"]["PriceOut"] | null;
         };
+        /** PropsCoverageOut */
+        PropsCoverageOut: {
+            /**
+             * Captured At
+             * @description When the latest successful props capture at or before the time ran.
+             */
+            captured_at?: string | null;
+            /**
+             * Status
+             * @description Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the look-back before the time (48 hours with the default settings) reaches past the keep horizon. Offers are returned only when `captured`.
+             * @enum {string}
+             */
+            status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
+        };
         /** ProviderHealthOut */
         ProviderHealthOut: {
             /**
@@ -4791,6 +5261,25 @@ export interface components {
              * @description Total stake per week at which you want a reminder. Null turns it off.
              */
             weekly_stake_threshold: number | null;
+        };
+        /** StatusCoverageOut */
+        StatusCoverageOut: {
+            /**
+             * Captured At
+             * @description When the newest of the entries was captured.
+             */
+            captured_at?: string | null;
+            /**
+             * Kept From
+             * @description Status records are kept 400 days. A record that had not changed since before this time has been removed and is not among `entries`. Null before the first prune.
+             */
+            kept_from?: string | null;
+            /**
+             * Status
+             * @description `captured`: the archive holds status records of the event captured at or before the requested time, and `entries` is the latest of each. `not_captured`: it holds none. `archive_pruned`: it holds none and the time is before `kept_from`, so they may have been removed.
+             * @enum {string}
+             */
+            status: "captured" | "not_captured" | "archive_pruned";
         };
         /** SuspendUserRequest */
         SuspendUserRequest: {
@@ -5158,6 +5647,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthOut"];
+                };
+            };
+        };
+    };
+    get_archive_stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveStatsOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Administrator role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -6316,6 +6852,182 @@ export interface operations {
             };
         };
     };
+    get_archived_event_odds: {
+        parameters: {
+            query: {
+                market: "moneyline" | "spread" | "total";
+                /** @description The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned. */
+                as_of: string;
+            };
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchivedOddsOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off, or not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The retention prune kept changing the rows this read needs; try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_archived_event_status: {
+        parameters: {
+            query: {
+                /** @description The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned. */
+                as_of: string;
+            };
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchivedStatusOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off, or not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_archived_player_props: {
+        parameters: {
+            query: {
+                /** @description The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned. */
+                as_of: string;
+                market?: string | null;
+            };
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchivedPropsOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off, or not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The retention prune kept changing the rows this read needs; try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     assistant_query: {
         parameters: {
             query?: never;
@@ -7166,6 +7878,67 @@ export interface operations {
             };
             /** @description Too many requests */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_bet_placement_prices: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated sportsbook keys, at most 20, such as `northline,summit`. */
+                books?: string | null;
+            };
+            header?: never;
+            path: {
+                bet_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetPlacementPricesOut"];
+                };
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The feature is switched off, or not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The retention prune kept changing the rows this read needs; try again */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

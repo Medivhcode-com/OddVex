@@ -1086,6 +1086,687 @@
         "title": "AnalyticsRowOut",
         "type": "object"
       },
+      "ArchiveRowCountsOut": {
+        "properties": {
+          "events": {
+            "title": "Events",
+            "type": "integer"
+          },
+          "odds": {
+            "title": "Odds",
+            "type": "integer"
+          },
+          "props": {
+            "title": "Props",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "odds",
+          "props",
+          "events",
+          "status",
+          "runs"
+        ],
+        "title": "ArchiveRowCountsOut",
+        "type": "object"
+      },
+      "ArchiveRunOut": {
+        "properties": {
+          "bytes_freed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: bytes the run returned to the disk.",
+            "title": "Bytes Freed"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A `failed` capture or prune run: the class name of the error that ended it (a name only, never a message).",
+            "title": "Error"
+          },
+          "failed_indexes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: per index whose rebuild or drop failed, the class name of the error (for example `QueryCanceled` when a rebuild ran into its time limit, `LockNotAvailable` when it waited too long for an older transaction). The key `connection` stands for the rebuild's database session being lost.",
+            "title": "Failed Indexes"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wall-clock time the run ended.",
+            "title": "Finished At"
+          },
+          "indexes_dropped": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: invalid indexes an interrupted rebuild had left, dropped.",
+            "title": "Indexes Dropped"
+          },
+          "indexes_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: rebuilds or drops that failed and wait for a later pass.",
+            "title": "Indexes Failed"
+          },
+          "indexes_rebuilt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`reclaim` runs: indexes rebuilt to return space to the disk.",
+            "title": "Indexes Rebuilt"
+          },
+          "kind": {
+            "description": "`odds`, `props`, `status`, `prune` or `reclaim`.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "rows_deleted": {
+            "title": "Rows Deleted",
+            "type": "integer"
+          },
+          "rows_written": {
+            "title": "Rows Written",
+            "type": "integer"
+          },
+          "status": {
+            "description": "`ok`, `skipped_full` (capture stopped at a limit) or `failed`. A prune is recorded when it starts (`started`) and again when it ends: `started` as the latest prune means one is running, or was cut short and will be finished by the next pass.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "captured_at",
+          "status",
+          "rows_written",
+          "rows_deleted"
+        ],
+        "title": "ArchiveRunOut",
+        "type": "object"
+      },
+      "ArchiveStatsOut": {
+        "properties": {
+          "approx_bytes": {
+            "description": "The data the archive holds, as the storage cap counts it: each table's row count times its measured bytes per row. It falls when the prune deletes rows.",
+            "title": "Approx Bytes",
+            "type": "integer"
+          },
+          "disk_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "PostgreSQL only: the size of the five tables' files with their indexes. The table files do not shrink after the prune (later rows reuse the freed space); the index files shrink when a `reclaim` run rebuilds them.",
+            "title": "Disk Bytes"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "keep_days": {
+            "title": "Keep Days",
+            "type": "integer"
+          },
+          "last_runs": {
+            "description": "The latest run of each kind. A `reclaim` run is recorded only when it rebuilt or dropped an index or failed, so the latest one is the last time index space was returned to the disk.",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveRunOut"
+            },
+            "title": "Last Runs",
+            "type": "array"
+          },
+          "max_bytes": {
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "max_disk_bytes": {
+            "description": "PostgreSQL only: capture also stops while `disk_bytes` is at this ceiling.",
+            "title": "Max Disk Bytes",
+            "type": "integer"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "rows": {
+            "$ref": "#/components/schemas/ArchiveRowCountsOut"
+          }
+        },
+        "required": [
+          "enabled",
+          "approx_bytes",
+          "max_bytes",
+          "max_disk_bytes",
+          "retention_days",
+          "keep_days",
+          "rows",
+          "last_runs"
+        ],
+        "title": "ArchiveStatsOut",
+        "type": "object"
+      },
+      "ArchivedBestOut": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          }
+        },
+        "required": [
+          "price",
+          "sportsbook",
+          "captured_at"
+        ],
+        "title": "ArchivedBestOut",
+        "type": "object"
+      },
+      "ArchivedOddsOut": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageOut"
+          },
+          "data_mode": {
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "odds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventOddsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The odds comparison as of the requested time, from the same code as the live board with the stale thresholds in force at capture. Only when the coverage status is `captured`."
+          },
+          "quotes": {
+            "description": "Each book's stored quote from the covering capture. Empty unless the coverage status is `captured`: an older kept capture is not the market at that time.",
+            "items": {
+              "$ref": "#/components/schemas/ArchivedQuoteOut"
+            },
+            "title": "Quotes",
+            "type": "array"
+          },
+          "requested_as_of": {
+            "format": "date-time",
+            "title": "Requested As Of",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested_as_of",
+          "coverage",
+          "data_mode",
+          "quotes"
+        ],
+        "title": "ArchivedOddsOut",
+        "type": "object"
+      },
+      "ArchivedOutcomeOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PriceOut"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "price"
+        ],
+        "title": "ArchivedOutcomeOut",
+        "type": "object"
+      },
+      "ArchivedPropOut": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "over": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "suspended",
+              "unavailable",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "under": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sportsbook",
+          "event_id",
+          "market",
+          "status",
+          "captured_at",
+          "fetched_at",
+          "provider",
+          "provider_id"
+        ],
+        "title": "ArchivedPropOut",
+        "type": "object"
+      },
+      "ArchivedPropsOut": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/PropsCoverageOut"
+          },
+          "data_mode": {
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/ArchivedPropOut"
+            },
+            "title": "Offers",
+            "type": "array"
+          },
+          "pruned_event_ids": {
+            "description": "The player's games whose offers at the requested time cannot be read back exactly, because the retention prune kept only their closing offers. Their offers are left out of `offers`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Pruned Event Ids",
+            "type": "array"
+          },
+          "requested_as_of": {
+            "format": "date-time",
+            "title": "Requested As Of",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested_as_of",
+          "data_mode",
+          "coverage",
+          "offers"
+        ],
+        "title": "ArchivedPropsOut",
+        "type": "object"
+      },
+      "ArchivedQuoteOut": {
+        "description": "One book's quote as it was stored: the latest row at or before the coverage row.\nQuotes are returned only when the coverage status is `captured`.",
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ArchivedOutcomeOut"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "sportsbook": {
+            "$ref": "#/components/schemas/SportsbookRef"
+          },
+          "status": {
+            "description": "The provider's status as captured.",
+            "enum": [
+              "open",
+              "suspended",
+              "unavailable",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sportsbook",
+          "status",
+          "captured_at",
+          "fetched_at",
+          "provider",
+          "provider_id",
+          "outcomes"
+        ],
+        "title": "ArchivedQuoteOut",
+        "type": "object"
+      },
+      "ArchivedStatusEntryOut": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "enum": [
+              "lineup",
+              "injury",
+              "news",
+              "weather"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "player_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player Id"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported At"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          }
+        },
+        "required": [
+          "kind",
+          "status",
+          "source",
+          "captured_at",
+          "provider",
+          "provider_id"
+        ],
+        "title": "ArchivedStatusEntryOut",
+        "type": "object"
+      },
+      "ArchivedStatusOut": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/StatusCoverageOut"
+          },
+          "data_mode": {
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "entries": {
+            "description": "The latest record per subject and kind captured at or before the time.",
+            "items": {
+              "$ref": "#/components/schemas/ArchivedStatusEntryOut"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "requested_as_of": {
+            "format": "date-time",
+            "title": "Requested As Of",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested_as_of",
+          "data_mode",
+          "coverage",
+          "entries"
+        ],
+        "title": "ArchivedStatusOut",
+        "type": "object"
+      },
       "AssistantQueryRequest": {
         "properties": {
           "message": {
@@ -2300,6 +2981,62 @@
         "title": "BetOut",
         "type": "object"
       },
+      "BetPlacementPricesOut": {
+        "properties": {
+          "bet_id": {
+            "title": "Bet Id",
+            "type": "string"
+          },
+          "books": {
+            "description": "The sportsbook keys counted as your books.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Books",
+            "type": "array"
+          },
+          "books_source": {
+            "description": "`query`: the `books` parameter. `bets`: the books of your own recorded bets that match a sportsbook of the data provider. `none`: neither.",
+            "enum": [
+              "query",
+              "bets",
+              "none"
+            ],
+            "title": "Books Source",
+            "type": "string"
+          },
+          "data_mode": {
+            "enum": [
+              "synthetic",
+              "replay"
+            ],
+            "title": "Data Mode",
+            "type": "string"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/LegPlacementPriceOut"
+            },
+            "title": "Legs",
+            "type": "array"
+          },
+          "placed_at": {
+            "format": "date-time",
+            "title": "Placed At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bet_id",
+          "placed_at",
+          "books",
+          "books_source",
+          "data_mode",
+          "legs"
+        ],
+        "title": "BetPlacementPricesOut",
+        "type": "object"
+      },
       "BetSettleRequest": {
         "properties": {
           "cashout_amount": {
@@ -3437,6 +4174,50 @@
           "steps"
         ],
         "title": "ConvertResponse",
+        "type": "object"
+      },
+      "CoverageOut": {
+        "properties": {
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the latest event row at or before the requested time was captured.",
+            "title": "Captured At"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "status": {
+            "description": "`captured`: the archive holds this event's state from the latest capture at or before the requested time, at most `snapshot_max_gap_seconds` before it. `not_captured`: before the first capture, or the event was not in scope then. `archive_gap`: capture was not running then. `archive_pruned`: the event's rows from that capture are past retention, or the time is at or before the keep horizon, where the archive no longer answers.",
+            "enum": [
+              "captured",
+              "not_captured",
+              "archive_gap",
+              "archive_pruned"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "CoverageOut",
         "type": "object"
       },
       "CurrentStreakOut": {
@@ -4963,6 +5744,143 @@
           "closing_odds"
         ],
         "title": "LegClosingOddsIn",
+        "type": "object"
+      },
+      "LegPlacementPriceOut": {
+        "properties": {
+          "best_at_your_books": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArchivedBestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "best_overall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArchivedBestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CoverageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "leg_id": {
+            "title": "Leg Id",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "outcome_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Key"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "leg_not_structured",
+                  "not_captured",
+                  "archive_gap",
+                  "archive_pruned",
+                  "stale_at_placement",
+                  "no_usable_quote",
+                  "none_at_your_books",
+                  "books_unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the leg cannot be priced: `leg_not_structured` (no event, market, outcome or line to match), a coverage status, `stale_at_placement` (every open quote was too old when the bet was placed), `no_usable_quote`, or, when a price existed but not at your books, `none_at_your_books` or `books_unknown` (the same value as `your_books_reason`; `best_overall` then holds that price). Null only when priced.",
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "priced",
+              "cannot_price"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "your_books_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "books_unknown",
+                  "none_at_your_books"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Your Books Reason"
+          },
+          "your_price": {
+            "$ref": "#/components/schemas/PriceOut",
+            "description": "The price recorded on the leg."
+          }
+        },
+        "required": [
+          "leg_id",
+          "position",
+          "market",
+          "your_price",
+          "status"
+        ],
+        "title": "LegPlacementPriceOut",
         "type": "object"
       },
       "LegResultIn": {
@@ -6969,6 +7887,39 @@
         "title": "PropOfferOut",
         "type": "object"
       },
+      "PropsCoverageOut": {
+        "properties": {
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the latest successful props capture at or before the time ran.",
+            "title": "Captured At"
+          },
+          "status": {
+            "description": "Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the look-back before the time (48 hours with the default settings) reaches past the keep horizon. Offers are returned only when `captured`.",
+            "enum": [
+              "captured",
+              "not_captured",
+              "archive_gap",
+              "archive_pruned"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PropsCoverageOut",
+        "type": "object"
+      },
       "ProviderHealthOut": {
         "properties": {
           "checked_at": {
@@ -7440,6 +8391,51 @@
           "weekly_stake_threshold"
         ],
         "title": "StakeReminderUpdate",
+        "type": "object"
+      },
+      "StatusCoverageOut": {
+        "properties": {
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the newest of the entries was captured.",
+            "title": "Captured At"
+          },
+          "kept_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Status records are kept 400 days. A record that had not changed since before this time has been removed and is not among `entries`. Null before the first prune.",
+            "title": "Kept From"
+          },
+          "status": {
+            "description": "`captured`: the archive holds status records of the event captured at or before the requested time, and `entries` is the latest of each. `not_captured`: it holds none. `archive_pruned`: it holds none and the time is before `kept_from`, so they may have been removed.",
+            "enum": [
+              "captured",
+              "not_captured",
+              "archive_pruned"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusCoverageOut",
         "type": "object"
       },
       "SuspendUserRequest": {
@@ -8190,6 +9186,62 @@
         "summary": "Liveness check",
         "tags": [
           "meta"
+        ]
+      }
+    },
+    "/v1/admin/archive/stats": {
+      "get": {
+        "operationId": "get_archive_stats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveStatsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Administrator role required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Snapshot archive size, row counts and latest runs",
+        "tags": [
+          "admin"
         ]
       }
     },
@@ -9910,6 +10962,297 @@
         ]
       }
     },
+    "/v1/archive/events/{event_id}/odds": {
+      "get": {
+        "description": "Every book's quote for one market as captured at or before `as_of`, the coverage of the event then, and the odds comparison as of `as_of`; quotes and comparison only when the event is covered. Behind the `snapshot_archive` flag.",
+        "operationId": "get_archived_event_odds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": true,
+            "schema": {
+              "enum": [
+                "moneyline",
+                "spread",
+                "total"
+              ],
+              "title": "Market",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned.",
+            "in": "query",
+            "name": "as_of",
+            "required": true,
+            "schema": {
+              "description": "The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned.",
+              "format": "date-time",
+              "title": "As Of",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchivedOddsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off, or not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The retention prune kept changing the rows this read needs; try again"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One event's archived odds as of a time",
+        "tags": [
+          "archive"
+        ]
+      }
+    },
+    "/v1/archive/events/{event_id}/status": {
+      "get": {
+        "description": "The latest status record per team or player and kind captured at or before `as_of`: a status, a source and times, no article text. Empty until a lineup and news provider exists. Behind the `snapshot_archive` flag.",
+        "operationId": "get_archived_event_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned.",
+            "in": "query",
+            "name": "as_of",
+            "required": true,
+            "schema": {
+              "description": "The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned.",
+              "format": "date-time",
+              "title": "As Of",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchivedStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off, or not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One event's archived lineup and news status as of a time",
+        "tags": [
+          "archive"
+        ]
+      }
+    },
+    "/v1/archive/players/{player_id}/props": {
+      "get": {
+        "description": "The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the look-back before it (48 hours with the default settings), and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`: for any time from the game's first capture to one look-back after its last, the times between two listings of a game that was postponed and listed again included. A props capture holds the games of the odds capture made in the same pass. Behind the `snapshot_archive` flag.",
+        "operationId": "get_archived_player_props",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "title": "Player Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned.",
+            "in": "query",
+            "name": "as_of",
+            "required": true,
+            "schema": {
+              "description": "The time to read the archive as of: ISO 8601 with an offset, for example `2026-03-14T19:30:00Z`. Only rows captured at or before it are returned.",
+              "format": "date-time",
+              "title": "As Of",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchivedPropsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off, or not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The retention prune kept changing the rows this read needs; try again"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One player's archived prop offers as of a time",
+        "tags": [
+          "archive"
+        ]
+      }
+    },
     "/v1/assistant/query": {
       "post": {
         "description": "Deterministic keyword routing to internal data tools with templated answers. No language model is connected and the assistant never produces a price, probability or amount that a tool did not compute. Authentication is optional; the bet summary intent needs it.\n\nBefore any routing, each message is checked against fixed patterns for crisis or self-harm language, for distress about gambling and for a user who says they are under 21. When one matches, the answer has intent `support`, carries help resources and no betting data, and `support.case` says which reply it is. A request for a certain winner gets a fixed answer with intent `fallback`. The patterns are a fixed list of rules and miss some messages, so every answer that is not a support reply ends with one sentence giving the gambling helpline and the crisis line.",
@@ -11099,6 +12442,103 @@
         "summary": "Edit a bet",
         "tags": [
           "bets"
+        ]
+      }
+    },
+    "/v1/bets/{bet_id}/placement-prices": {
+      "get": {
+        "description": "For each leg: the best open, non-stale price overall and at your books from the archive as of the bet's `placed_at`, or `cannot_price` with the reason. Your books come from `books`, else from the books of your own recorded bets. Behind the `snapshot_archive` flag.",
+        "operationId": "get_bet_placement_prices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bet_id",
+            "required": true,
+            "schema": {
+              "title": "Bet Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated sportsbook keys, at most 20, such as `northline,summit`.",
+            "in": "query",
+            "name": "books",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated sportsbook keys, at most 20, such as `northline,summit`.",
+              "title": "Books"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetPlacementPricesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The feature is switched off, or not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The retention prune kept changing the rows this read needs; try again"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The best price at your books when you placed a bet",
+        "tags": [
+          "archive"
         ]
       }
     },
@@ -15613,6 +17053,10 @@
     {
       "description": "Research discussion behind the `community` flag (off by default): opt-in profiles, structured picks graded from final scores, comments, follows, likes, blocks and reports. No money, no stakes, no paid picks, no links and no direct messages.",
       "name": "community"
+    },
+    {
+      "description": "Snapshot archive behind the `snapshot_archive` flag (off by default): book prices, event state and status records as captured at or before a time, and the best price at your books when you placed a bet. Read-only.",
+      "name": "archive"
     },
     {
       "description": "Administrator routes: overview, users (including the export and the deletion of an account on its owner's behalf), feature flags, audit log, email outbox and community moderation. Every change is audited.",

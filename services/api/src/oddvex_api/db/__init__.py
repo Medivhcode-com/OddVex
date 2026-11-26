@@ -1,6 +1,11 @@
 from .base import Base, new_id, utcnow
 from .models import (
+    ARCHIVE_MODELS,
     AlertRule,
+    ArchivedEvent,
+    ArchivedOdds,
+    ArchivedProp,
+    ArchivedStatus,
     AuditLog,
     Bet,
     BetLeg,
@@ -16,6 +21,7 @@ from .models import (
     FeatureFlag,
     Notification,
     NotificationPreference,
+    SnapshotRun,
     StakeReminder,
     SyncConnection,
     SyncImportRun,
@@ -25,7 +31,12 @@ from .models import (
 from .session import make_engine, make_session_factory
 
 __all__ = [
+    "ARCHIVE_MODELS",
     "AlertRule",
+    "ArchivedEvent",
+    "ArchivedOdds",
+    "ArchivedProp",
+    "ArchivedStatus",
     "AuditLog",
     "Base",
     "Bet",
@@ -42,6 +53,7 @@ __all__ = [
     "FeatureFlag",
     "Notification",
     "NotificationPreference",
+    "SnapshotRun",
     "StakeReminder",
     "SyncConnection",
     "SyncImportRun",

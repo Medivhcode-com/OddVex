@@ -29,3 +29,24 @@ Status: accepted (M1)
   Founder approval. See `docs/research/DATA_PROVIDER_EVALUATION.md`.
 - PostgreSQL is the only datastore. Redis and ClickHouse are deferred until measured load requires them. Caching
   sits behind a small protocol with an in-memory implementation.
+
+## Amendment, 2026-11-26: the snapshot archive (P0.1, MED-72)
+
+Market data is now persisted, behind the `snapshot_archive` flag (off by default). `scripts/capture_snapshots.py`
+copies what the provider reports into five append-only tables (`snapshot_runs`, `event_snapshots`,
+`odds_snapshots`, `prop_snapshots`, `status_snapshots`, migration 0008), keyed on
+`(provider, event_id, market, sportsbook_id, captured_at)` for odds and
+`(provider, player_id, event_id, market, sportsbook_id, captured_at)` for prop offers, with the provider's own
+provenance columns.
+`captured_at` is the provider clock. Prop offers are captured only together with the odds capture of the same pass
+and only for the games that capture holds, so an offer row always has its game's event row of the same capture
+beside it. The live board still reads the provider directly; the archive is read only
+when a time T is asked for, through `ArchiveView`, a read-only `SportsDataProvider` that answers from rows captured
+at or before T. Staleness as of T is judged by the same `Board.is_stale` rule, with the thresholds stored on the
+capture run, so a later change of `ODDVEX_STALE_*_SECONDS` does not rewrite history. Rows are never updated; the only
+deletion is the retention prune (7 days at full resolution; 400 days for each game's first, closing and last
+captures and at most six captures per game that stored bets point at; a game's rows leave together, so a kept
+capture is always whole). The prune records how far it will go before it deletes anything and removes a game's
+rows in one transaction, and a read checks afterwards that no prune changed the rows under it, so an answer given
+beside a running prune, or after one was cut short, is never built from a capture without its quotes. On PostgreSQL the same job rebuilds archive indexes the prune has left mostly empty, so
+the files stay within a stated factor of the data. Details, storage bounds and limits: `docs/features/p0-1.md`.

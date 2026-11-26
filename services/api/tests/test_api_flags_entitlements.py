@@ -24,6 +24,7 @@ DEFAULTS = {
     "tracker_analytics": True,
     "email_flows": True,
     "premium_gating": False,
+    "snapshot_archive": False,
 }
 
 

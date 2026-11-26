@@ -127,6 +127,7 @@ log records the deploys in D-021. Every deploy so far:
 | 2026-11-19 | `855991c` | Redeploy from `main` |
 | 2026-11-19 16:46 | `4092395` | First deploy with the current ops script: the services were renamed to `oddvex-api` and `oddvex-web`, the contact address `support@oddvex.com` was set in `/opt/oddvex/.env`, a pre-deploy dump was taken, no migration was pending |
 | 2026-11-21 05:29 | `2b0c7c1` | Database revision 0005 to 0007. Pre-deploy dump `predeploy-20261121T052923Z-4092395-to-2b0c7c1.dump`. Result `ok`. The images of `4092395` are kept on the server for a rollback |
+| 2026-11-21 08:21 | `4026ddc` | No migration was pending; the database stays at revision 0007. Pre-deploy dump `predeploy-20261121T082044Z-2b0c7c1-to-4026ddc.dump`. Result `ok`. The images of `2b0c7c1` and `4092395` are kept on the server for a rollback |
 
 Checks after the `2b0c7c1` deploy, at 2026-11-21 05:33 UTC:
 
@@ -136,6 +137,16 @@ Checks after the `2b0c7c1` deploy, at 2026-11-21 05:33 UTC:
 - An extreme input to a quant calculator answers 422.
 - The other sites on the server answer 200 or 307 (their normal redirect).
 - The name `api` no longer resolves to an OddVex container on the shared proxy network.
+
+Checks after the `4026ddc` deploy, at 2026-11-21 08:22 UTC:
+
+- `preview.oddvex.com` answers 401 without the password.
+- The API health check and the web home page answer 200.
+- `/v1/props?market=*` answers an empty list, and the full prop board still loads.
+- The other sites on the server answer 200 or 307.
+- The name `api` does not resolve to an OddVex container on the shared proxy network.
+
+No deploy has been made since (as of 2026-11-26): the preview runs `4026ddc`.
 
 Earlier records, still true:
 

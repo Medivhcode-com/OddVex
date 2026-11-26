@@ -76,8 +76,9 @@ services:
     mem_limit: 256m
 
   # Evaluates alert rules and grades community picks every two minutes, so an alert fires even
-  # when nobody has the app open. Delivery is still in-app only. A failed pass is logged and the
-  # loop carries on.
+  # when nobody has the app open. Delivery is still in-app only. It also runs the snapshot archive
+  # capture (P0.1), which writes nothing while the `snapshot_archive` flag is off. A failed pass
+  # is logged and the loop carries on.
   worker:
     image: oddvex-api:${ODDVEX_RELEASE:-local}
     restart: unless-stopped
@@ -89,6 +90,7 @@ services:
         while true; do
           python scripts/evaluate_alerts.py || echo "evaluate_alerts failed"
           python scripts/grade_picks.py || echo "grade_picks failed"
+          python scripts/capture_snapshots.py || echo "capture_snapshots failed"
           sleep 120
         done
     healthcheck: { disable: true }
