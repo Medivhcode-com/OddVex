@@ -826,6 +826,81 @@ def test_a_pruned_game_that_comes_back_into_scope_is_not_read_as_whole(
     assert len(again[0]) == len(p.fixed) and again[1] == []
 
 
+def test_a_game_a_props_capture_has_back_in_scope_is_not_pruned_under_it(
+    archive_env: ArchiveEnv,
+) -> None:
+    """Found by the reference model in review round 5 (seed 614). A game is captured,
+    moved days on and listed again. The first pass that sees it again captures props
+    only (the odds capture is not due in that pass), so the game has fresh prop rows but
+    its newest event row is still the old one, past the cutoff. The prune of that pass
+    took the game for finished and deleted the fresh prop rows with everything else: the
+    props read then answered ``captured`` without the game's offers and without naming
+    it. An open offer stored inside the full-resolution window now keeps the game from
+    being pruned, and the reads know it was left alone. Once that offer has aged out, a
+    game that never got another event row is pruned after all. (Retention is one day
+    here: the synthetic schedule lists a game for three days after its date.)"""
+    env = archive_env
+    env.settings = env.settings.model_copy(
+        update={"snapshot_props_interval_seconds": 60, "snapshot_retention_days": 1}
+    )
+    p = MovedGameProvider()
+    env.provider = p
+    keys = len(p.fixed)
+    for offset in (0, 360, 720):
+        env.capture(at(offset))
+    p.moved_to = T0 + timedelta(days=3)
+    env.capture(at(1080))  # out of scope: its offers are tombstoned
+    first_stay = _props_of_the_game(env, p, at(800))
+    assert len(first_stay[0]) == keys
+
+    # Two days on the game is within 36 hours of its new start. The provider does not
+    # list it yet when the odds are captured, and does two minutes later, when only the
+    # props are due.
+    back = T0 + timedelta(days=2)
+    p.hide(PREGAME)
+    p.current = back
+    report = capture_pass(env.engine, p, env.settings, force=True, prune=False)
+    assert report.odds is not None and report.odds.status == "ok"
+    p._hidden.discard(PREGAME)
+    p.current = back + timedelta(seconds=120)
+    report = capture_pass(env.engine, p, env.settings, force_prune=True)
+    assert report.odds is None  # not due: no event row is written in this pass
+    assert report.props is not None and report.props.status == "ok"
+    assert report.prune is not None and report.prune.status == "ok"
+    # The game is whole: the prune left it alone.
+    assert report.prune.rows_deleted == 0
+    assert captured(env, ArchivedEvent, PREGAME) == [at(0), at(360), at(720)]
+    now = _props_of_the_game(env, p, p.current)
+    assert len(now[0]) == keys and now[1] == []
+    assert {o["captured_at"] for o in now[0]} == {p.current}
+    assert _props_of_the_game(env, p, at(800)) == first_stay
+    with env.session_factory() as db:
+        name = p.name
+        assert coverage_at(db, name, PREGAME, at(400), env.settings).status == "captured"
+        assert coverage_at(db, name, PREGAME, p.current, env.settings).status == "not_captured"
+
+    # The provider drops the game again for good, before any odds capture saw it: its
+    # offers are tombstoned. A day after the open offers were stored they have aged
+    # out, and the prune reduces the game to its kept captures.
+    p.hide(PREGAME)
+    gone = back + timedelta(seconds=240)
+    p.current = gone
+    report = capture_pass(env.engine, p, env.settings, force_prune=True)
+    assert report.props is not None and report.prune is not None
+    assert report.prune.rows_deleted == 0  # the open offers of two minutes ago still count
+    p.current = back + timedelta(days=1, seconds=300)
+    summary = prune_archive(env.engine, p, env.settings, force=True)
+    assert summary is not None and summary.status == "ok" and summary.rows_deleted > 0
+    assert captured(env, ArchivedEvent, PREGAME) == [at(0), at(720)]
+    assert captured(env, ArchivedProp, PREGAME) == [at(0)]
+    with env.session_factory() as db:
+        assert coverage_at(db, p.name, PREGAME, at(400), env.settings).status == "archive_pruned"
+    # The read of the moment the props capture had the game: its rows are gone now, and
+    # the game is named, not left out silently.
+    assert _props_of_the_game(env, p, back + timedelta(seconds=130)) == ([], [PREGAME])
+    assert orphan_rows(env) == 0
+
+
 # ------------------------------------------- a prune that is cut short, or races a read
 GAMES = (PREGAME, PREGAME_2, OTHER_PREGAME, LIVE)
 REFUSALS = {"not_captured", "archive_gap", "archive_pruned"}

@@ -73,12 +73,20 @@ from .fakes import ControlledProvider
 
 __all__ = ["archive_env"]
 
-#: The default run. 322 and 368 are the scenarios that showed, in review round 4, an
-#: offer unchanged for a day missing from the props read at a 12-hour horizon; 7 and 27
-#: are the only ones among the first forty that catch two deliberate defects of the
-#: props read (the gap limit's boundary; the keep-horizon check without the look-back).
-#: Four of the eight use the 36-hour horizon the product ships with: 5, 6, 7 and 27.
-DEFAULT_SEEDS = (1, 2, 5, 6, 7, 27, 322, 368)
+#: The default run: nine scenarios, of which the first six and the last each catch at
+#: least one defect made on purpose in a copy of the source (docs/features/p0-1.md,
+#: "Tests"). 1, 12, 40 and 64
+#: catch the prune of review round 4 (a game's odds, prop and event rows deleted with a
+#: commit each, cut in between); 3 and 40 the props look-back that did not cover the daily
+#: refresh; 56 the props keep-horizon check without the look-back; all six catch reads
+#: that ignore a prune that has started but not finished, and several each the props gap
+#: limit's boundary and a live game that never leaves scope. 322 and 368 are the two
+#: seeds at which review round 4 first saw the look-back defect; with the scope rule for
+#: live games added since, they are other scenarios now and are kept as two more. 614 is
+#: where this model, in round 5, found the prune deleting the fresh prop rows of a game
+#: that a props capture had back in scope before any odds capture did.
+#: Three use the 36-hour horizon the product ships with: 12, 56 and 64.
+DEFAULT_SEEDS = (1, 3, 12, 40, 56, 64, 322, 368, 614)
 SCENARIOS = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SCENARIOS", "0"))
 FIRST_SEED = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SEED", "1"))
 SEEDS = (
@@ -616,7 +624,19 @@ class Scenario:
             self.sweep()
             # Capture is down for a while (a deploy, a crash, the flag off): the clock
             # crosses the retention and keep horizons.
-            world.current += timedelta(hours=rng.choice((3, 9, 20, 26, 31, 47)))
+            later = self.now + timedelta(hours=rng.choice((3, 9, 20, 26, 31, 47)))
+            if self.truth.props and rng.random() < 0.35:
+                # Or it comes back a few minutes before the offers one of the last props
+                # captures stored are a day old: an unchanged offer is stored again only
+                # at the first props capture after that, so the next burst reads rows
+                # that are as old as a row gets.
+                stored = rng.choice(self.truth.props[-8:]).at
+                day_on = stored + timedelta(
+                    hours=PROP_REFRESH_HOURS, seconds=-rng.randint(120, 900)
+                )
+                if day_on > self.now:
+                    later = day_on
+            world.current = later
         self.turn()
         self.sweep(last=True)
 

@@ -3,7 +3,12 @@
 Full-resolution odds, prop and event rows are kept ``snapshot_retention_days`` (7). The
 prune handles an event once, when all of its rows are older than that (its last event
 row has aged out), so a read at any time after the cutoff never misses a row that an
-unchanged quote carried forward. It then keeps, for ``snapshot_keep_days`` (400):
+unchanged quote carried forward. An event with an open prop offer stored inside the
+full-resolution window is left alone as well (``view.open_offer_stored``): a props
+capture has it in scope, although no odds capture has written an event row for it yet
+(a game listed again days later, seen first by a props capture) or since. Its rows are
+reduced once that offer has aged out too. The prune then keeps, for
+``snapshot_keep_days`` (400):
 
 - **The first capture.** The event's first event row and its odds rows. It marks when the
   event entered scope, whatever its start time was then or became later.
@@ -44,9 +49,9 @@ read right at every such point:
   older capture's rows (review round 4). So a game's event, odds and prop rows are
   deleted together and committed once, at the 7-day reduction and at the keep horizon
   alike; a prune that stops inside a game leaves that game as it was. One game is a few
-  thousand rows (about 8,600 on the synthetic schedule), deleted ``DELETE_BATCH`` ids
-  per statement; the rows are old and nothing else writes them, so the transaction holds
-  no lock anything waits for.
+  thousand rows (about 4,800 on the synthetic schedule, measured: 0.1 s a game), deleted
+  ``DELETE_BATCH`` ids per statement; the rows are old and nothing else writes them, so
+  the transaction holds no lock anything waits for.
 
 **The keep horizon** (``keep_sweep``) works per game, because a kept capture holds rows
 older than itself (a quote unchanged since an earlier capture is stored once). A game's
@@ -91,7 +96,7 @@ from ..flags import service as flags
 from ..providers import SportsDataProvider
 from .capture import FLAG, RunSummary, guarded, is_due, new_run
 from .placement import structured_leg_condition
-from .view import prune_cutoffs
+from .view import open_offer_stored, prune_cutoffs
 
 #: Ids deleted per statement.
 DELETE_BATCH = 1000
@@ -247,12 +252,13 @@ def _prune_event(session: Session, provider_name: str, event_id: str, settings: 
 
 @dataclass(frozen=True)
 class PrunePlan:
-    """How far one prune goes. ``cutoff`` and ``keep_cutoff`` are what it records, never
+    """How far one prune at ``now`` goes. ``cutoff`` and ``keep_cutoff`` are what it records, never
     earlier than any prune before it recorded, started or finished. ``window_from`` is
     where it starts looking for games to reduce: the cutoff of the last prune that
     finished (``None``: from the beginning), so the games a cut-short prune did not
     reach are reduced now."""
 
+    now: datetime
     cutoff: datetime
     keep_cutoff: datetime
     window_from: datetime | None
@@ -396,7 +402,7 @@ def plan_prune(session: Session, settings: Settings, now: datetime) -> PrunePlan
             SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
         )
     )
-    return PrunePlan(cutoff, keep_cutoff, finished)
+    return PrunePlan(now, cutoff, keep_cutoff, finished)
 
 
 def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneResult:
@@ -404,16 +410,20 @@ def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneRe
     cutoffs are recorded and committed (``prune_pass`` does)."""
     cutoff = plan.cutoff
     e = ArchivedEvent
-    # Events with a row in the window that aged out since the last prune that finished;
-    # of those, the ones whose rows have all aged out. The others are handled when their
-    # last row ages out, in a later pass.
-    in_window = select(e.provider, e.event_id).where(e.captured_at < cutoff)
-    if plan.window_from is not None:
-        in_window = in_window.where(e.captured_at >= plan.window_from - WINDOW_OVERLAP)
-    candidates = sorted(set(session.execute(in_window.distinct()).tuples()))
+    # Events with an event row or a prop row in the window that aged out since the last
+    # prune that finished; of those, the ones whose rows have all aged out. The others
+    # are handled when their last row ages out, in a later pass. (The prop rows are in
+    # the window for the event that was left alone because of an open offer: it comes
+    # up again when that offer ages out.)
+    candidates: set[tuple[str, str]] = set()
+    for model in (e, ArchivedProp):
+        in_window = select(model.provider, model.event_id).where(model.captured_at < cutoff)
+        if plan.window_from is not None:
+            in_window = in_window.where(model.captured_at >= plan.window_from - WINDOW_OVERLAP)
+        candidates |= set(session.execute(in_window.distinct()).tuples())
     session.commit()
     deleted = 0
-    for provider_name, event_id in candidates:
+    for provider_name, event_id in sorted(candidates):
         last = session.scalar(
             select(func.max(e.captured_at)).where(
                 e.provider == provider_name, e.event_id == event_id
@@ -421,6 +431,8 @@ def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneRe
         )
         if last is None or last >= cutoff:
             continue
+        if open_offer_stored(session, provider_name, event_id, cutoff, plan.now) is not None:
+            continue  # a props capture has the game in scope: its rows are not all old
         deleted += _prune_event(session, provider_name, event_id, settings)
     deleted += keep_sweep(session, plan.keep_cutoff)
     return PruneResult(deleted, cutoff, plan.keep_cutoff)

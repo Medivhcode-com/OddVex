@@ -74,7 +74,8 @@ READ_ATTEMPTS = 4
 class ArchiveBusy(RuntimeError):
     """A read was made ``READ_ATTEMPTS`` times and a prune changed the rows under it
     every time. One prune can do that three times at most (it starts, it reduces the
-    game, the keep horizon removes the game), and prunes are an hour apart."""
+    game, the keep horizon removes the game), and two prunes are at least a worker turn
+    (120 s) apart."""
 
 
 def prune_marker(session: Session) -> int | None:
@@ -177,18 +178,45 @@ def _event_bounds(
     return row[0], row[1]
 
 
+def open_offer_stored(
+    session: Session, provider_name: str, event_id: str, start: datetime, end: datetime
+) -> datetime | None:
+    """When the event's earliest open prop offer (any row that is not a tombstone)
+    captured from ``start`` to ``end`` was stored, or ``None``. The prune leaves an event
+    alone while one is stored at or after its cutoff: a props capture then has the event
+    in scope, whatever its event rows say (they are written by the odds capture, which
+    can run in another pass)."""
+    return session.scalar(
+        select(func.min(ArchivedProp.captured_at)).where(
+            ArchivedProp.provider == provider_name,
+            ArchivedProp.event_id == event_id,
+            ArchivedProp.captured_at >= start,
+            ArchivedProp.captured_at <= end,
+            ArchivedProp.status != "unavailable",
+        )
+    )
+
+
 def reduced_until(session: Session, provider_name: str, event_id: str) -> datetime | None:
     """The time up to which the event's rows are only the kept ones, or ``None`` when the
     prune has never handled it (every row of it is still there).
 
-    A prune handles an event when its last event row is before that prune's cutoff, and
-    then reduces every row the event has at that moment. So prune i (run at ``now_i``,
-    cutoff ``c_i``) handled the event exactly when the event had a row before ``c_i`` and
-    none in ``[c_i, now_i]``: a gap in its event rows, or the open end after its last
-    one, that holds a prune. Rows captured after ``now_i`` (the game came back into
-    scope) were never touched by it. The latest such ``now_i`` is the answer. A cutoff is
-    at least a day before its prune (``snapshot_retention_days`` is at least 1), so only
-    gaps longer than a day are looked at.
+    A prune handles an event when its last event row is before that prune's cutoff and
+    no open prop offer of it is stored from the cutoff on, and then reduces every row the
+    event has at that moment. So prune i (run at ``now_i``, cutoff ``c_i``) handled the
+    event exactly when the event had a row before ``c_i``, none in ``[c_i, now_i]``, and
+    no open offer stored in ``[c_i, now_i]`` (:func:`open_offer_stored`): a gap in its
+    event rows, or the open end after its last one, that holds such a prune. Rows
+    captured after ``now_i`` (the game came back into scope) were never touched by it.
+    The latest such ``now_i`` is the answer. A cutoff is at least a day before its prune
+    (``snapshot_retention_days`` is at least 1), so only gaps longer than a day are
+    looked at.
+
+    Whether an open offer was stored in ``[c_i, now_i]`` can be read now: a prune that
+    handles the event deletes every such row (the kept closing offers are older than its
+    cutoff), a prune that left the event alone deletes none, and no row is ever written
+    with an earlier capture time. An offer stored at ``t`` stops every prune from ``t``
+    until it has aged out, so the search goes on among the prunes before ``t``.
 
     A prune counts from its start (``PRUNE_REACH``): one that is running, or was cut
     short, may or may not have reached the event yet, and the event is read as reduced
@@ -209,19 +237,28 @@ def reduced_until(session: Session, provider_name: str, event_id: str) -> dateti
     ]
     gaps.append((times[-1], None))
     for earlier, later in reversed(gaps):
-        conditions = [SnapshotRun.kind == "prune", SnapshotRun.status.in_(PRUNE_REACH)]
-        if later is not None:
-            conditions.append(SnapshotRun.captured_at < later)
-        # Cutoffs never move back, so the last prune before the gap's end has the
-        # largest: if any prune in the gap handled the event, this one did.
-        prune = session.execute(
-            select(SnapshotRun.captured_at, SnapshotRun.prune_cutoff)
-            .where(*conditions)
-            .order_by(SnapshotRun.captured_at.desc(), SnapshotRun.id.desc())
-            .limit(1)
-        ).first()
-        if prune is not None and prune.prune_cutoff is not None and prune.prune_cutoff > earlier:
-            return prune.captured_at  # type: ignore[no-any-return]
+        before = later
+        while True:
+            conditions = [SnapshotRun.kind == "prune", SnapshotRun.status.in_(PRUNE_REACH)]
+            if before is not None:
+                conditions.append(SnapshotRun.captured_at < before)
+            # Cutoffs never move back, so the last prune before the bound has the
+            # largest: if a prune before it handled the event, this one did, unless an
+            # open offer stopped it.
+            prune = session.execute(
+                select(SnapshotRun.captured_at, SnapshotRun.prune_cutoff)
+                .where(*conditions)
+                .order_by(SnapshotRun.captured_at.desc(), SnapshotRun.id.desc())
+                .limit(1)
+            ).first()
+            if prune is None or prune.prune_cutoff is None or prune.prune_cutoff <= earlier:
+                break
+            stopped_at = open_offer_stored(
+                session, provider_name, event_id, prune.prune_cutoff, prune.captured_at
+            )
+            if stopped_at is None:
+                return prune.captured_at  # type: ignore[no-any-return]
+            before = stopped_at
     return None
 
 
@@ -880,6 +917,7 @@ __all__ = [
     "event_from",
     "latest_odds_rows",
     "latest_prop_rows",
+    "open_offer_stored",
     "prop_lookback",
     "props_at",
     "props_max_gap_seconds",

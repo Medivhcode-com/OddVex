@@ -347,7 +347,7 @@ def test_two_passes_never_overlap_on_postgresql(archive_env: ArchiveEnv) -> None
     assert env.capture(T0).odds is not None
 
 
-def test_the_capturecapture_script(archive_env: ArchiveEnv) -> None:
+def test_the_capture_script(archive_env: ArchiveEnv) -> None:
     env = archive_env
     enable_archive(env.session_factory, False)
     off = capture_script(env)
