@@ -1,7 +1,8 @@
 """Index space on PostgreSQL (``archive/reclaim.py``) and the ceiling on the archive's
 files: the stated factor over prune cycles, both directions of the ceiling, what an
-interrupted rebuild leaves and how the next pass cleans it up, the locks a rebuild holds,
-the record of a run, and the no-op on SQLite."""
+interrupted rebuild leaves and how the next pass cleans it up (a rebuild whose database
+session is ended included), the locks a rebuild holds, when a pass rebuilds and when it
+does not, the record of a run, and the no-op on SQLite."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import pytest
 from sqlalchemy import Connection, func, select, text
 from sqlalchemy.exc import DBAPIError
 
+from oddvex_api.archive import prune as prune_module
 from oddvex_api.archive import reclaim
 from oddvex_api.archive.capture import (
     ADVISORY_LOCK_KEY,
@@ -37,8 +39,8 @@ from oddvex_api.archive.reclaim import (
     reclaim_pass,
 )
 from oddvex_api.archive.service import archive_stats, archived_odds
-from oddvex_api.db import ARCHIVE_MODELS, ArchivedOdds, SnapshotRun
-from oddvex_api.providers import Event
+from oddvex_api.db import ARCHIVE_MODELS, ArchivedOdds, ArchivedProp, SnapshotRun
+from oddvex_api.providers import Event, OddsSnapshot
 
 from .archive_support import PREGAME, T0, ArchiveEnv, archive_env
 from .conftest import EXTERNAL_DATABASE_URL
@@ -52,9 +54,9 @@ postgres_only = pytest.mark.skipif(
 sqlite_only = pytest.mark.skipif(
     bool(EXTERNAL_DATABASE_URL), reason="the no-op is what every other database gets"
 )
-#: The empty tables, their free-space maps and one page per index: what the files hold
-#: before a single row, allowed on top of the stated factor in these small archives.
-EMPTY_FILES_BYTES = 524_288
+#: An index is a whole number of 8 kB pages, so in these small archives it may be a page
+#: over a figure worked out per row.
+PAGE_BYTES = 8192
 
 
 def at(seconds: float) -> datetime:
@@ -70,7 +72,8 @@ def sizes(env: ArchiveEnv) -> tuple[int, int]:
 
 
 def vacuum(env: ArchiveEnv) -> None:
-    """A plain VACUUM of every archive table: what autovacuum does."""
+    """A plain VACUUM of every archive table: what autovacuum does once it runs (it waits
+    for a fifth of a table's rows to be dead or new; docs/features/p0-1.md, "Bounds")."""
     with env.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         for model in ARCHIVE_MODELS:
             connection.execute(text(f"VACUUM {model.__tablename__}"))
@@ -161,14 +164,28 @@ def test_the_files_stay_within_the_stated_factor_of_the_counted_size_over_prune_
     the largest counted size so far. (The long version of this measurement, eight cycles
     of two synthetic days, is a documented script: docs/features/p0-1.md, "Bounds".)"""
     env = few_games
+    # What the files hold before a single row (empty tables, one or two pages per index),
+    # measured here: that much is allowed on top of the factor in these small archives.
+    empty = sizes(env)[1]
+    assert 0 < empty < 262_144
     largest = 0
     for number in range(CYCLES):
         counted, disk, report = cycle(env, T0 + timedelta(days=9 * number), reclaim_indexes=True)
         largest = max(largest, counted)
-        assert disk <= STATED_FILES_FACTOR * largest + EMPTY_FILES_BYTES, (number, counted, disk)
+        assert disk <= STATED_FILES_FACTOR * largest + empty, (number, counted, disk)
         assert report.reclaim is not None and report.reclaim.status == "ok", report
         detail = report.reclaim.detail or {}
         assert detail["rebuilt"] and detail["freed_bytes"] > 0 and not detail["failed"]
+        # After the pass no index is larger than 1.3 times the size its rows need: every
+        # one that was has been rebuilt, not only the first or the largest.
+        with env.session_factory() as db:
+            rows = {
+                model.__tablename__: db.scalar(select(func.count()).select_from(model)) or 0
+                for model in ARCHIVE_MODELS
+            }
+        for state in states(env):
+            needed = expected_bytes(state.name, rows[state.table])[0]
+            assert state.size <= 1.3 * needed + PAGE_BYTES, (number, state, needed)
     assert leftover_indexes(states(env)) == []
     assert all(state.valid for state in states(env))
 
@@ -180,13 +197,14 @@ def test_without_the_reclaim_the_same_cycles_leave_the_stated_factor(
     """The measurement above can fail: the same cycles with the reclaim switched off (the
     code as it was at review round 3) leave the stated factor by the third peak."""
     env = few_games
+    empty = sizes(env)[1]
     largest = 0
     ratios = []
     for number in range(3):
         counted, disk, report = cycle(env, T0 + timedelta(days=9 * number), reclaim_indexes=False)
         assert report.reclaim is None
         largest = max(largest, counted)
-        ratios.append((disk - EMPTY_FILES_BYTES) / largest)
+        ratios.append((disk - empty) / largest)
     assert ratios[-1] > STATED_FILES_FACTOR and ratios == sorted(ratios), ratios
 
 
@@ -332,18 +350,35 @@ def test_an_interrupted_rebuild_is_cleaned_up_by_the_next_pass_and_nothing_is_un
     assert odds.coverage.status == "captured" and odds.quotes
 
 
-def _rebuild_backend(connection: Connection) -> list[tuple[str, str, bool]]:
-    """(lock type, mode, granted) of every lock held or awaited by a REINDEX backend."""
+def _rebuild_backend(connection: Connection) -> list[tuple[int, str, str, bool]]:
+    """(backend pid, lock type, mode, granted) of every lock held or awaited by a REINDEX
+    backend of this database (another database of the same server may be rebuilding)."""
     return [
-        (row[0], row[1], row[2])
+        (row[0], row[1], row[2], row[3])
         for row in connection.execute(
             text(
-                "SELECT l.locktype, l.mode, l.granted FROM pg_locks l "
+                "SELECT a.pid, l.locktype, l.mode, l.granted FROM pg_locks l "
                 "JOIN pg_stat_activity a ON a.pid = l.pid "
-                "WHERE a.query LIKE 'REINDEX INDEX CONCURRENTLY%' AND a.pid <> pg_backend_pid()"
+                "WHERE a.datname = current_database() "
+                "AND a.query LIKE 'REINDEX INDEX CONCURRENTLY%' AND a.pid <> pg_backend_pid()"
             )
         )
     ]
+
+
+def _wait_for_a_waiting_rebuild(probe: Connection) -> list[tuple[int, str, str, bool]]:
+    """The locks of the rebuild once it waits for the older transaction (it then holds
+    one lock it has not been granted)."""
+    deadline = time.monotonic() + 15
+    locks: list[tuple[int, str, str, bool]] = []
+    while time.monotonic() < deadline:
+        locks = _rebuild_backend(probe)
+        probe.rollback()
+        if any(not granted for _pid, _type, _mode, granted in locks):
+            break
+        time.sleep(0.05)
+    assert any(not granted for _pid, _type, _mode, granted in locks), locks
+    return locks
 
 
 @postgres_only
@@ -351,8 +386,8 @@ def test_a_rebuild_that_has_to_wait_blocks_neither_reads_nor_writes(
     bloated: ArchiveEnv, wait_twenty_seconds: None
 ) -> None:
     """While a rebuild waits for an older transaction it holds SHARE UPDATE EXCLUSIVE on
-    the table and the index and nothing stronger: a read and an insert, each allowed one
-    second for its locks, go through at once."""
+    the table and the index and nothing stronger: a read and an insert go through, each
+    with a ``lock_timeout`` of one second, which a lock they had to wait for would end."""
     env = bloated
     blocker = Blocker(env)
     done: list[Any] = []
@@ -364,19 +399,10 @@ def test_a_rebuild_that_has_to_wait_blocks_neither_reads_nor_writes(
     worker.start()
     try:
         with env.engine.connect() as probe:
-            deadline = time.monotonic() + 15
-            locks: list[tuple[str, str, bool]] = []
-            while time.monotonic() < deadline:
-                locks = _rebuild_backend(probe)
-                probe.rollback()
-                if any(not granted for _type, _mode, granted in locks):
-                    break  # it is waiting for the older transaction
-                time.sleep(0.05)
-            assert any(not granted for _type, _mode, granted in locks), locks
-            held = {mode for kind, mode, granted in locks if granted and kind == "relation"}
+            locks = _wait_for_a_waiting_rebuild(probe)
+            held = {mode for _pid, kind, mode, granted in locks if granted and kind == "relation"}
             assert held == {"ShareUpdateExclusiveLock"}
             probe.execute(text("SET lock_timeout = '1s'"))
-            started = time.monotonic()
             assert probe.execute(text("SELECT count(*) FROM odds_snapshots")).scalar()
             probe.execute(
                 text(
@@ -386,7 +412,6 @@ def test_a_rebuild_that_has_to_wait_blocks_neither_reads_nor_writes(
                 )
             )
             probe.commit()
-            assert time.monotonic() - started < 1
             probe.execute(text("DELETE FROM odds_snapshots WHERE provider = 'scratch'"))
             probe.commit()
     finally:
@@ -475,6 +500,263 @@ def test_a_reclaim_is_recorded_for_administrators(bloated: ArchiveEnv) -> None:
     report = capture_pass(env.engine, env.provider, env.settings, capture=False, force_prune=True)
     assert report.prune is not None and report.reclaim is None
     assert len(reclaim_runs(env)) == 1
+
+
+@postgres_only
+def test_a_rebuild_whose_database_session_is_ended_is_recorded_and_cleaned_up(
+    bloated: ArchiveEnv, wait_twenty_seconds: None
+) -> None:
+    """Regression (review round 4, blocking). A database restart, a dropped connection or
+    ``pg_terminate_backend`` ends the rebuild's session. The pass then tried to clean up
+    on the dead connection and to detach it, both of which raise errors that are not the
+    driver's: the script ended with a traceback and no ``reclaim`` run was written, so
+    the administrators' statistics kept showing the previous one.
+
+    Here the rebuild waits for an older transaction and its backend is terminated from a
+    second connection. The pass ends normally with a ``failed`` reclaim run that names
+    the index and the error's class; the invalid index it left is dropped by the next
+    pass, once the older transaction has ended."""
+    env = bloated
+    blocker = Blocker(env)
+    done: list[Any] = []
+
+    def one_pass() -> None:
+        try:
+            done.append(
+                capture_pass(
+                    env.engine,
+                    env.provider,
+                    env.settings,
+                    capture=False,
+                    prune=False,
+                    force_reclaim=True,
+                )
+            )
+        except BaseException as exc:  # the defect: the pass raised instead of recording
+            done.append(exc)
+
+    worker = threading.Thread(target=one_pass)
+    worker.start()
+    try:
+        with env.engine.connect() as probe:
+            locks = _wait_for_a_waiting_rebuild(probe)
+            (pid,) = {pid for pid, _type, _mode, _granted in locks}
+            assert probe.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid}).scalar()
+            probe.commit()
+        worker.join(timeout=30)
+        assert not worker.is_alive()
+        (report,) = done
+        assert isinstance(report, PassReport), repr(report)
+        assert report.failed and report.reclaim is not None
+        assert report.reclaim.status == "failed"
+        detail = report.reclaim.detail or {}
+        assert detail["failed"] == {"uq_odds_snapshots_key": "AdminShutdown"}
+        assert detail["rebuilt"] == {} and detail["dropped"] == {}
+        (run,) = reclaim_runs(env)
+        assert run.status == "failed" and run.detail == detail and run.finished_at is not None
+        with env.session_factory() as db:
+            (shown,) = [r for r in archive_stats(db, env.settings).last_runs if r.kind == "reclaim"]
+        assert (shown.status, shown.indexes_failed, shown.indexes_rebuilt) == ("failed", 1, 0)
+        # The terminated rebuild left its invalid copy; the working index is untouched.
+        (left,) = leftover_indexes(states(env))
+        assert left.name.startswith("uq_odds_snapshots_key_cc") and not left.valid
+        assert {s.name for s in states(env) if s.valid} == set(INDEX_ROW_BYTES)
+        # Nothing of the dead session reached the pool.
+        with env.engine.connect() as connection:
+            assert connection.execute(text("SHOW statement_timeout")).scalar() == "0"
+    finally:
+        blocker.release()
+        worker.join(timeout=30)
+
+    # The older transaction has ended: the next pass drops the leftover. The index whose
+    # rebuild failed is left alone for a while (the back-off), unless the check is forced.
+    report = capture_pass(env.engine, env.provider, env.settings, capture=False, force_prune=True)
+    assert report.reclaim is not None and report.reclaim.status == "ok", report
+    detail = report.reclaim.detail or {}
+    assert list(detail["dropped"]) == [left.name] and detail["rebuilt"] == {}
+    assert leftover_indexes(states(env)) == []
+    report = capture_pass(env.engine, env.provider, env.settings, force_reclaim=True)
+    assert report.reclaim is not None and report.reclaim.status == "ok", report
+    assert "uq_odds_snapshots_key" in (report.reclaim.detail or {})["rebuilt"]
+    assert {s.name for s in states(env) if s.valid} == set(INDEX_ROW_BYTES)
+    assert leftover_indexes(states(env)) == []
+
+
+@postgres_only
+def test_a_pass_stops_rebuilding_at_its_first_failure(
+    bloated: ArchiveEnv, wait_one_second: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two indexes are planned and an older transaction makes every rebuild wait. The
+    first fails at ``lock_timeout``; the second is not tried in this pass (it would fail
+    the same way, and leave a second invalid index), only named as skipped."""
+    env = bloated
+    monkeypatch.setitem(reclaim.INDEX_ROW_BYTES, "uq_prop_snapshots_key", (0.001, 0.001))
+    with env.session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ArchivedProp))
+    blocker = Blocker(env)
+    try:
+        summary = reclaim_pass(env.engine, env.provider, env.settings, due=True, force=True)
+    finally:
+        blocker.release()
+    assert summary is not None and summary.status == "failed"
+    detail = summary.detail or {}
+    planned = ["uq_odds_snapshots_key", "uq_prop_snapshots_key"]
+    tried = [name for name in planned if name in detail["failed"]]
+    assert len(tried) == 1 and detail["skipped"] == [n for n in planned if n not in tried]
+    assert detail["rebuilt"] == {}
+    # One rebuild was tried, so at most one invalid index is left (none, if it could be
+    # dropped at once: the older transaction holds no lock on that index's table).
+    assert len(leftover_indexes(states(env))) <= 1
+
+
+@postgres_only
+def test_indexes_are_checked_after_a_prune_and_not_on_every_capture(bloated: ArchiveEnv) -> None:
+    """Counting the rows of every table and reading the catalog is the prune's
+    follow-up, once an hour: a capture pass without a prune rebuilds nothing, however
+    large an index is. The pass with the prune does."""
+    env = bloated
+    env.provider.current = at(360)
+    report = capture_pass(env.engine, env.provider, env.settings, force=True, prune=False)
+    assert report.odds is not None and report.odds.status == "ok"
+    assert report.prune is None and report.reclaim is None
+    assert reclaim_runs(env) == []
+    env.provider.current = at(720)
+    report = capture_pass(env.engine, env.provider, env.settings, force=True, force_prune=True)
+    assert report.prune is not None and report.prune.status == "ok"
+    assert report.reclaim is not None and report.reclaim.status == "ok"
+    assert "uq_odds_snapshots_key" in (report.reclaim.detail or {})["rebuilt"]
+
+
+class NoOddsProvider(ControlledProvider):
+    """The feed is down: every odds call fails."""
+
+    def get_odds(self, event_id: str, market: str) -> list[OddsSnapshot]:
+        raise ConnectionError("feed dropped")
+
+
+@postgres_only
+def test_after_a_failed_pass_nothing_is_rebuilt_but_a_leftover_is_dropped(
+    bloated: ArchiveEnv, wait_one_second: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pass whose capture or prune failed starts no rebuild (the feed or the database is
+    in trouble, and a rebuild is heavy work), whatever is due: here the files are over
+    the ceiling and the prune fails. What an interrupted rebuild left is still dropped:
+    a feed that is down for hours must not keep an invalid index on the disk."""
+    env = bloated
+    blocker = Blocker(env)
+    try:
+        summary = reclaim_pass(env.engine, env.provider, env.settings, due=True, force=True)
+        assert summary is not None and summary.status == "failed"
+    finally:
+        blocker.release()
+    (left,) = leftover_indexes(states(env))
+
+    # A failed capture: the leftover goes, nothing is rebuilt.
+    good, env.provider = env.provider, NoOddsProvider()
+    report = env.capture(at(360))
+    assert report.odds is not None and report.odds.status == "failed" and report.prune is None
+    assert report.reclaim is not None and report.reclaim.status == "ok"
+    detail = report.reclaim.detail or {}
+    assert list(detail["dropped"]) == [left.name] and detail["rebuilt"] == {}
+    assert leftover_indexes(states(env)) == []
+    assert len(reclaim_runs(env)) == 2
+
+    # A failed prune with the files over the ceiling: no rebuild either, and with no
+    # leftover there is nothing to record.
+    env.provider = good
+    env.settings = env.settings.model_copy(update={"snapshot_max_disk_bytes": 1})
+
+    def failing(*args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("connection lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(prune_module, "prune_rows", failing)
+        report = capture_pass(env.engine, env.provider, env.settings, force=True, force_prune=True)
+    assert report.over_ceiling is True
+    assert report.prune is not None and report.prune.status == "failed"
+    assert report.reclaim is None and len(reclaim_runs(env)) == 2
+    # The same pass without the failure rebuilds (over the ceiling, the back-off after
+    # the failed rebuild above is an hour; the provider's clock has not moved that far,
+    # so the check is forced here).
+    report = capture_pass(env.engine, env.provider, env.settings, force_reclaim=True)
+    assert report.reclaim is not None and report.reclaim.status == "ok"
+    detail = report.reclaim.detail or {}
+    assert detail["over_ceiling"] is True and "uq_odds_snapshots_key" in detail["rebuilt"]
+
+
+@postgres_only
+def test_a_pass_starts_no_rebuild_once_its_time_is_used_up(
+    bloated: ArchiveEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``BUDGET_SECONDS``: with none left the planned index is named as skipped and left
+    for a later pass; the run is recorded, and nothing failed."""
+    env = bloated
+    monkeypatch.setattr(reclaim, "BUDGET_SECONDS", -1)
+    before = {s.name: s.size for s in states(env)}
+    summary = reclaim_pass(env.engine, env.provider, env.settings, due=True)
+    assert summary is not None and summary.status == "ok"
+    detail = summary.detail or {}
+    assert detail["skipped"] == ["uq_odds_snapshots_key"]
+    assert detail["rebuilt"] == {} and detail["failed"] == {} and detail["freed_bytes"] == 0
+    assert {s.name: s.size for s in states(env)} == before
+    monkeypatch.setattr(reclaim, "BUDGET_SECONDS", 60)
+    summary = reclaim_pass(env.engine, env.provider, env.settings, due=True)
+    assert summary is not None and list((summary.detail or {})["rebuilt"]) == [
+        "uq_odds_snapshots_key"
+    ]
+
+
+@postgres_only
+def test_a_rebuild_that_takes_too_long_is_ended_by_the_configured_timeout(
+    bloated: ArchiveEnv, wait_twenty_seconds: None
+) -> None:
+    """``ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS`` is the rebuild's ``statement_timeout``.
+    Here the rebuild waits for an older transaction (it may wait 20 s for that) and the
+    timeout is one second: it is cancelled, recorded as failed with the error's class,
+    and its leftover is dropped by the next pass."""
+    env = bloated
+    assert env.settings.snapshot_reclaim_timeout_seconds == 120
+    env.settings = env.settings.model_copy(update={"snapshot_reclaim_timeout_seconds": 1})
+    blocker = Blocker(env)
+    started = time.monotonic()
+    try:
+        summary = reclaim_pass(env.engine, env.provider, env.settings, due=True, force=True)
+    finally:
+        blocker.release()
+    assert time.monotonic() - started < 15  # far less than the 20 s it may wait for a lock
+    assert summary is not None and summary.status == "failed"
+    detail = summary.detail or {}
+    assert detail["failed"]["uq_odds_snapshots_key"] == "QueryCanceled"
+    report = capture_pass(env.engine, env.provider, env.settings, force_reclaim=True)
+    assert report.reclaim is not None and report.reclaim.status == "ok", report
+    assert leftover_indexes(states(env)) == []
+
+
+@postgres_only
+def test_a_forced_check_uses_the_lower_bar_while_the_files_are_over_the_ceiling(
+    archive_env: ArchiveEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--reclaim`` captures nothing, so its pass has not compared the files with the
+    ceiling before the check; it does so itself. An index that is under 1.3 times its
+    normal size but over 1.1 times its dense size is rebuilt only over the ceiling."""
+    env = archive_env
+    report = capture_pass(env.engine, env.provider, env.settings, force=True, reclaim=False)
+    assert report.odds is not None and report.odds.status == "ok"
+    monkeypatch.setattr(reclaim, "MIN_EXCESS_BYTES", 0)
+    # As normally written this index "needs" a megabyte a row; freshly rebuilt, nearly
+    # nothing: only the over-the-ceiling bar asks for a rebuild.
+    monkeypatch.setitem(reclaim.INDEX_ROW_BYTES, "uq_odds_snapshots_key", (1_000_000.0, 0.001))
+    report = capture_pass(
+        env.engine, env.provider, env.settings, capture=False, prune=False, force_reclaim=True
+    )
+    assert report.reclaim is None
+    env.settings = env.settings.model_copy(update={"snapshot_max_disk_bytes": 1})
+    report = capture_pass(
+        env.engine, env.provider, env.settings, capture=False, prune=False, force_reclaim=True
+    )
+    assert report.reclaim is not None and report.reclaim.status == "ok"
+    detail = report.reclaim.detail or {}
+    assert detail["over_ceiling"] is True and "uq_odds_snapshots_key" in detail["rebuilt"]
 
 
 # ------------------------------------------------------------------ the plan
@@ -583,6 +865,67 @@ def test_which_indexes_the_plan_rebuilds(archive_env: ArchiveEnv) -> None:
             assert [r.name for r in found] == expected
             # Without that rebuild's figure the smaller size would already be over.
         assert fat_normal + reclaim.MIN_EXCESS_BYTES > limit
+
+
+def test_an_index_whose_rebuild_failed_is_left_alone_for_a_while(archive_env: ArchiveEnv) -> None:
+    """A rebuild that cannot finish on this server (too slow for the timeout, or always
+    in the way of a long transaction) would otherwise write and discard a full copy of
+    the index after every prune. After a failure the index is not planned for
+    ``FAILURE_BACKOFF`` (6 hours), or ``FAILURE_BACKOFF_FULL`` (1 hour) while the files
+    are over the ceiling; a forced check (``--reclaim``) ignores it; a rebuild that
+    succeeded since ends it. Checked on every database, with sizes written by hand."""
+    env = archive_env
+    name = "uq_odds_snapshots_key"
+    huge = 50_000_000
+    now = T0 + timedelta(days=30)
+    backoffs = (reclaim.FAILURE_BACKOFF, reclaim.FAILURE_BACKOFF_FULL)
+    assert backoffs == (timedelta(hours=6), timedelta(hours=1))
+    with env.session_factory() as db:
+
+        def planned(at_time: datetime, **options: Any) -> list[str]:
+            found = plan_rebuilds(
+                db,
+                env.provider.name,
+                [IndexState(name, "odds_snapshots", huge, True)],
+                at_time,
+                **options,
+            )
+            return [rebuild.name for rebuild in found]
+
+        assert planned(now) == [name]
+        run = new_run(env.provider, env.settings, "reclaim", now, status="failed")
+        # The leftover's own failed drop is not the index's failure.
+        run.detail = {"failed": {name: "QueryCanceled", name + "_ccnew": "LockNotAvailable"}}
+        db.add(run)
+        db.commit()
+        us = timedelta(microseconds=1)
+        assert planned(now + timedelta(hours=6) - us) == []
+        assert planned(now + timedelta(hours=6)) == [name]
+        assert planned(now + timedelta(hours=1) - us, over_ceiling=True) == []
+        assert planned(now + timedelta(hours=1), over_ceiling=True) == [name]
+        assert planned(now + timedelta(minutes=1), force=True) == [name]
+        # An invalid index of the schema waits out the back-off too.
+        invalid = [IndexState(name, "odds_snapshots", 8192, False)]
+        assert plan_rebuilds(db, env.provider.name, invalid, now + timedelta(hours=1)) == []
+        assert [
+            r.name for r in plan_rebuilds(db, env.provider.name, invalid, now + timedelta(hours=6))
+        ] == [name]
+        # A failure of another index changes nothing for this one.
+        other = new_run(env.provider, env.settings, "reclaim", now + timedelta(hours=7))
+        other.status = "failed"
+        other.detail = {"failed": {"uq_prop_snapshots_key": "QueryCanceled"}}
+        db.add(other)
+        db.commit()
+        assert planned(now + timedelta(hours=7, minutes=1)) == [name]
+        # A rebuild that succeeded after the failure ends the back-off (and starts the
+        # once-a-day rule instead, which over the ceiling does not apply).
+        fixed = new_run(env.provider, env.settings, "reclaim", now + timedelta(minutes=30))
+        fixed.detail = {"rebuilt": {name: [huge, 1_000_000, 100]}}
+        db.add(fixed)
+        db.commit()
+        assert planned(now + timedelta(minutes=40), over_ceiling=True) == [name]
+        assert planned(now + timedelta(minutes=40)) == []
+        assert planned(now + timedelta(hours=25)) == [name]
 
 
 # -------------------------------------------------------------------- SQLite

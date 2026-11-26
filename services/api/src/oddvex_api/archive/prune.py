@@ -23,12 +23,30 @@ unchanged quote carried forward. It then keeps, for ``snapshot_keep_days`` (400)
   one user's single earlier capture can still take the last slot from another user's
   later one.)
 
-Every other row of the event is deleted, in batches of ``DELETE_BATCH`` ids with a commit
-each, so no long lock is held and the write-ahead log stays small. That includes prop rows
-captured after the event's last event row (the tombstones written when it left scope),
-which therefore go up to about an hour before they are 7 days old; the props read
-(``view.props_at``) serves the kept closing offers only for times at which they are still
-the answer, and names the game as pruned otherwise.
+Every other row of the event is deleted. That includes prop rows captured after the
+event's last event row (the tombstones written when it left scope), which therefore go up
+to about an hour before they are 7 days old; the props read (``view.props_at``) serves the
+kept closing offers only for times at which they are still the answer, and names the game
+as pruned otherwise.
+
+**A prune can stop anywhere** (the worker container is replaced on every deploy, a
+connection drops, the database restarts), and reads go on beside it. Two rules keep every
+read right at every such point:
+
+- *It says how far it will go before it deletes anything.* ``prune_pass`` first commits a
+  ``prune`` run with status ``started`` that carries both cutoffs. From then on the reads
+  (``view.prune_cutoffs``, ``view.reduced_until``) treat every game and every time the
+  prune may reach as reduced, whether the prune has got there, is still running or was
+  cut short. When it ends it writes its ``ok`` run (or a ``failed`` one). The next prune
+  starts its window from the last ``ok`` run, so what a cut-short prune left is done then.
+- *A game is reduced in one transaction.* Its event rows are the coverage record: a
+  capture's event row without its quotes would read as ``captured`` and be priced from an
+  older capture's rows (review round 4). So a game's event, odds and prop rows are
+  deleted together and committed once, at the 7-day reduction and at the keep horizon
+  alike; a prune that stops inside a game leaves that game as it was. One game is a few
+  thousand rows (about 8,600 on the synthetic schedule), deleted ``DELETE_BATCH`` ids
+  per statement; the rows are old and nothing else writes them, so the transaction holds
+  no lock anything waits for.
 
 **The keep horizon** (``keep_sweep``) works per game, because a kept capture holds rows
 older than itself (a quote unchanged since an earlier capture is stored once). A game's
@@ -37,11 +55,13 @@ event, odds and prop rows leave together, once its last event row is older than
 by its own age (each record stands alone). A capture run past the horizon is deleted
 only when no remaining row refers to it; the last successful odds and props capture
 before the horizon also stays, so a later time with no capture since still reads as a
-gap. Each prune run records its two cutoffs (``prune_cutoff``, ``keep_cutoff``); neither
-ever moves back, so a later change of setting cannot make a read trust what an earlier
-prune removed. The reads (``view.py``) answer nothing from capture runs before
-``keep_cutoff``: runs are thinned there, so "the latest capture at or before T" is no
-longer knowable.
+gap. Each prune records its two cutoffs (``prune_cutoff``, ``keep_cutoff``) when it
+starts and again when it ends; neither ever moves back, so a later change of setting
+cannot make a read trust what an earlier prune removed. The reads (``view.py``) answer
+nothing from capture runs before ``keep_cutoff``: runs are thinned there, so "the latest
+capture at or before T" is no longer knowable. Status rows, rows of a game without an
+event row and capture runs past the horizon are deleted in batches with a commit each:
+no read answers from before the horizon once the prune has started.
 """
 
 from __future__ import annotations
@@ -73,7 +93,7 @@ from .capture import FLAG, RunSummary, guarded, is_due, new_run
 from .placement import structured_leg_condition
 from .view import prune_cutoffs
 
-#: Ids deleted per statement, each batch in its own transaction.
+#: Ids deleted per statement.
 DELETE_BATCH = 1000
 #: Each pass re-examines the events whose last row aged out this long before the
 #: previous pass's cutoff.
@@ -83,9 +103,10 @@ MAX_ANCHORS_PER_EVENT = 6
 
 
 def _delete_ids(session: Session, model: type[Any], ids: Sequence[int]) -> int:
+    """Delete these rows, ``DELETE_BATCH`` ids per statement. Not committed: the caller
+    decides what has to go together (module docstring)."""
     for start in range(0, len(ids), DELETE_BATCH):
         session.execute(delete(model).where(model.id.in_(ids[start : start + DELETE_BATCH])))
-        session.commit()
     return len(ids)
 
 
@@ -147,7 +168,9 @@ def _bet_anchors(
 
 def _prune_event(session: Session, provider_name: str, event_id: str, settings: Settings) -> int:
     """Delete every row of an event whose rows have all aged out, except the first
-    capture, the closing capture, the last capture and the bounded bet anchors."""
+    capture, the closing capture, the last capture and the bounded bet anchors: in one
+    transaction, committed here, so the event is never left with a capture's event row
+    and without its quotes."""
     e, o, p = ArchivedEvent, ArchivedOdds, ArchivedProp
     events = session.execute(
         select(e.id, e.captured_at, e.status)
@@ -213,12 +236,26 @@ def _prune_event(session: Session, provider_name: str, event_id: str, settings: 
     ]
     event_ids = [r.id for r in events if r.captured_at not in keep_events]
     odds_ids = [r.id for r in odds if r.id not in keep_odds]
-    session.commit()
-    return (
-        _delete_ids(session, o, odds_ids)
+    deleted = (
+        _delete_ids(session, e, event_ids)
+        + _delete_ids(session, o, odds_ids)
         + _delete_ids(session, p, prop_ids)
-        + _delete_ids(session, e, event_ids)
     )
+    session.commit()
+    return deleted
+
+
+@dataclass(frozen=True)
+class PrunePlan:
+    """How far one prune goes. ``cutoff`` and ``keep_cutoff`` are what it records, never
+    earlier than any prune before it recorded, started or finished. ``window_from`` is
+    where it starts looking for games to reduce: the cutoff of the last prune that
+    finished (``None``: from the beginning), so the games a cut-short prune did not
+    reach are reduced now."""
+
+    cutoff: datetime
+    keep_cutoff: datetime
+    window_from: datetime | None
 
 
 @dataclass(frozen=True)
@@ -231,14 +268,15 @@ class PruneResult:
 
 
 def _sweep_event(session: Session, provider_name: str, event_id: str, cutoff: datetime) -> int:
-    """Delete a game whose last event row is past the keep horizon: its odds, prop and
-    event rows together. (Prop rows of it captured at or after the cutoff, which only a
-    provider that briefly listed the game again could have left, stay until they age.)"""
+    """Delete a game whose last event row is past the keep horizon: its event, odds and
+    prop rows together, in one transaction committed here. (Prop rows of it captured at
+    or after the cutoff, which only a provider that briefly listed the game again could
+    have left, stay until they age.)"""
     deleted = 0
     for model, conditions in (
+        (ArchivedEvent, ()),
         (ArchivedOdds, ()),
         (ArchivedProp, (ArchivedProp.captured_at < cutoff,)),
-        (ArchivedEvent, ()),
     ):
         ids = list(
             session.scalars(
@@ -247,19 +285,21 @@ def _sweep_event(session: Session, provider_name: str, event_id: str, cutoff: da
                 )
             )
         )
-        session.commit()
         deleted += _delete_ids(session, model, ids)
+    session.commit()
     return deleted
 
 
 def _delete_where(session: Session, model: type[Any], *conditions: Any) -> int:
+    """Delete the rows that match, a batch and a commit at a time."""
     deleted = 0
     while True:
         ids = list(session.scalars(select(model.id).where(*conditions).limit(DELETE_BATCH)))
-        session.commit()
         if not ids:
+            session.commit()
             return deleted
         deleted += _delete_ids(session, model, ids)
+        session.commit()
 
 
 def keep_sweep(session: Session, cutoff: datetime) -> int:
@@ -335,11 +375,13 @@ def keep_sweep(session: Session, cutoff: datetime) -> int:
         if run_id not in referenced
     ]
     session.commit()
-    return deleted + _delete_ids(session, SnapshotRun, run_ids)
+    deleted += _delete_ids(session, SnapshotRun, run_ids)
+    session.commit()
+    return deleted
 
 
-def prune_rows(session: Session, settings: Settings, now: datetime) -> PruneResult:
-    """Delete what has aged out. The cutoffs never move back from an earlier prune's."""
+def plan_prune(session: Session, settings: Settings, now: datetime) -> PrunePlan:
+    """How far a prune at ``now`` goes (:class:`PrunePlan`)."""
     previous, previous_keep = prune_cutoffs(session)
     cutoff = now - timedelta(days=settings.snapshot_retention_days)
     keep_cutoff = now - timedelta(
@@ -349,13 +391,25 @@ def prune_rows(session: Session, settings: Settings, now: datetime) -> PruneResu
         cutoff = max(cutoff, previous)
     if previous_keep is not None:
         keep_cutoff = max(keep_cutoff, previous_keep)
+    finished = session.scalar(
+        select(func.max(SnapshotRun.prune_cutoff)).where(
+            SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
+        )
+    )
+    return PrunePlan(cutoff, keep_cutoff, finished)
+
+
+def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneResult:
+    """Delete what has aged out, as far as ``plan`` says. Call it only once the plan's
+    cutoffs are recorded and committed (``prune_pass`` does)."""
+    cutoff = plan.cutoff
     e = ArchivedEvent
-    # Events with a row in the window that aged out since the previous pass; of those,
-    # the ones whose rows have all aged out. The others are handled when their last row
-    # ages out, in a later pass.
+    # Events with a row in the window that aged out since the last prune that finished;
+    # of those, the ones whose rows have all aged out. The others are handled when their
+    # last row ages out, in a later pass.
     in_window = select(e.provider, e.event_id).where(e.captured_at < cutoff)
-    if previous is not None:
-        in_window = in_window.where(e.captured_at >= previous - WINDOW_OVERLAP)
+    if plan.window_from is not None:
+        in_window = in_window.where(e.captured_at >= plan.window_from - WINDOW_OVERLAP)
     candidates = sorted(set(session.execute(in_window.distinct()).tuples()))
     session.commit()
     deleted = 0
@@ -368,15 +422,17 @@ def prune_rows(session: Session, settings: Settings, now: datetime) -> PruneResu
         if last is None or last >= cutoff:
             continue
         deleted += _prune_event(session, provider_name, event_id, settings)
-    deleted += keep_sweep(session, keep_cutoff)
-    return PruneResult(deleted, cutoff, keep_cutoff)
+    deleted += keep_sweep(session, plan.keep_cutoff)
+    return PruneResult(deleted, cutoff, plan.keep_cutoff)
 
 
 def prune_pass(
     session: Session, provider: SportsDataProvider, settings: Settings, *, force: bool = False
 ) -> RunSummary | None:
-    """Prune when the last prune is at least ``snapshot_prune_interval_seconds`` old, and
-    record it as a ``prune`` run. ``None`` when it was not due."""
+    """Prune when the last prune that finished is at least
+    ``snapshot_prune_interval_seconds`` old. It is recorded twice: a ``started`` run with
+    the cutoffs, committed before anything is deleted, and the ``ok`` run when it ends (a
+    ``failed`` one when it raised). ``None`` when it was not due."""
     now = provider.now()
     if not force and not is_due(
         session, provider.name, "prune", now, settings.snapshot_prune_interval_seconds
@@ -385,7 +441,13 @@ def prune_pass(
         return None
 
     def work() -> SnapshotRun:
-        result = prune_rows(session, settings, now)
+        plan = plan_prune(session, settings, now)
+        started = new_run(provider, settings, "prune", now, status="started")
+        started.prune_cutoff = plan.cutoff
+        started.keep_cutoff = plan.keep_cutoff
+        session.add(started)
+        session.commit()
+        result = prune_rows(session, settings, plan)
         run = new_run(provider, settings, "prune", now)
         run.rows_deleted = result.deleted
         run.prune_cutoff = result.cutoff
@@ -412,8 +474,10 @@ def prune_archive(
 __all__ = [
     "DELETE_BATCH",
     "MAX_ANCHORS_PER_EVENT",
+    "PrunePlan",
     "PruneResult",
     "keep_sweep",
+    "plan_prune",
     "prune_archive",
     "prune_pass",
     "prune_rows",

@@ -15,7 +15,9 @@ from overlapping, and after each prune the pass rebuilds bloated archive indexes
 whatever an interrupted rebuild left (``oddvex_api/archive/reclaim.py``); ``--reclaim``
 does only that, now. It reads only the configured provider (synthetic unless set), never a
 sportsbook. Exit status 1 when a capture, prune or rebuild failed; the failure is recorded
-as a ``failed`` run with the exception's class name only.
+as a ``failed`` run with the exception's class name only (a rebuild whose database session
+was ended included; only a database that cannot be reached at all leaves no record). Exit
+status 2, with nothing done, when the archive settings cannot work together.
 """
 
 from __future__ import annotations
@@ -103,6 +105,10 @@ def main(argv: list[str]) -> int:
     settings = get_settings()
     if "--stats" in argv:
         return _stats(settings)
+    problem = settings.snapshot_settings_problem()
+    if problem is not None:
+        print(f"Snapshot archive settings: {problem}.", file=sys.stderr)
+        return 2
     if not _enabled(settings):
         print(OFF_MESSAGE)
         return 0

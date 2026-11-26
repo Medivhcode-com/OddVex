@@ -7,8 +7,11 @@ back; a player with two games inside the window; games that are delayed, moved, 
 and shown again, live and final; missed and failed passes; the flag off and on; the
 storage cap and the file ceiling reached and released; bets by three users with
 different books, recorded at any moment with a placement time exactly at a capture, one
-microsecond either side, in a gap or long after the last quote; and the retention prune
-and the keep horizon, both shortened so that a scenario crosses them several times.
+microsecond either side, in a gap or long after the last quote; the retention prune
+and the keep horizon, both shortened so that a scenario crosses them several times; and
+prunes that are cut short after any number of their deletes, by an error the pass
+records or by the worker being killed, with a bet recorded late on a pruned game before
+the next prune finishes the work.
 
 Beside the archive the scenario keeps a **truth log** that is never pruned: at every
 capture pass, a frozen copy of what the provider showed (:class:`Shot`).
@@ -22,11 +25,18 @@ captured after T. Whenever it does not, it says so with a named reason and retur
 quotes; ``archive_gap`` and ``not_captured`` are given only when they are true.
 
 **Liveness**, so that "always refuse" does not pass: right after a successful capture a
-read at that time is ``captured`` and matches the truth; and for any T whose latest
-capture is not older than the newest prune cutoff the answer is exactly the truth's.
+read at that time is ``captured`` and matches the truth; and for a game no prune has
+started on, or a time after its last one, the answer is exactly the truth's. That is all
+the model asks once a prune has reached a game: from then on ``archive_pruned`` is
+accepted for any time up to that prune, and a game named in ``pruned_event_ids`` is not
+compared. So the model would not notice a prune that kept nothing, or a read that
+refused every kept capture of a pruned game; that the first, closing and last captures
+and the bet anchors survive and are served is what the hand-written tests in
+``test_archive_prune.py`` and ``test_archive_placement.py`` check.
 
 The scenarios are random but deterministic: a fixed seed each, the provider's clock only
-(no wall clock, no sleeps). The default run is short; a longer one:
+(no wall clock, no sleeps). The default run is the seeds in ``DEFAULT_SEEDS``; a longer
+one:
 
     ODDVEX_ARCHIVE_MODEL_SCENARIOS=300 .venv/bin/python -m pytest tests/test_archive_model.py
 
@@ -46,6 +56,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from oddvex_api.archive import prune as prune_module
 from oddvex_api.archive.capture import PassReport, StatusRecord, capture_pass, capture_status
 from oddvex_api.archive.placement import placement_prices
 from oddvex_api.archive.service import archived_odds, archived_props, archived_status
@@ -62,8 +73,19 @@ from .fakes import ControlledProvider
 
 __all__ = ["archive_env"]
 
-SCENARIOS = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SCENARIOS", "4"))
+#: The default run. 322 and 368 are the scenarios that showed, in review round 4, an
+#: offer unchanged for a day missing from the props read at a 12-hour horizon; 7 and 27
+#: are the only ones among the first forty that catch two deliberate defects of the
+#: props read (the gap limit's boundary; the keep-horizon check without the look-back).
+#: Four of the eight use the 36-hour horizon the product ships with: 5, 6, 7 and 27.
+DEFAULT_SEEDS = (1, 2, 5, 6, 7, 27, 322, 368)
+SCENARIOS = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SCENARIOS", "0"))
 FIRST_SEED = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SEED", "1"))
+SEEDS = (
+    tuple(range(FIRST_SEED, FIRST_SEED + SCENARIOS))
+    if SCENARIOS or "ODDVEX_ARCHIVE_MODEL_SEED" in os.environ
+    else DEFAULT_SEEDS
+)
 
 START = datetime(2026, 3, 14, 12, 0, tzinfo=UTC)
 US = timedelta(microseconds=1)
@@ -84,12 +106,27 @@ type StatusValue = tuple[str, str, datetime | None, str]
 #: The scope rule's grace for a game still ``upcoming`` after its start, in hours
 #: (``capture.UPCOMING_GRACE_HOURS``), written out here so the model is its own statement.
 GRACE_HOURS = 6
+#: The same for a game still ``live`` after its start (``capture.LIVE_GRACE_HOURS``).
+LIVE_GRACE_HOURS = 24
 #: Hours the props read looks back beyond the capture horizon (``view.PROP_GAME_HOURS``).
 PROP_GAME_HOURS = 12
+#: An unchanged offer is stored again at the first props capture after its row is this
+#: many hours old (``capture.PROP_REFRESH_HOURS``); the props read looks back at least
+#: this far plus its gap limit.
+PROP_REFRESH_HOURS = 24
 
 
 class Divergence(AssertionError):
     """The archive answered something the reference model does not."""
+
+
+class Killed(BaseException):
+    """The worker is killed in the middle of a prune (a deploy replaces its container):
+    no handler of the pass runs, nothing is recorded, open work is rolled back."""
+
+
+class Dropped(ConnectionError):
+    """The prune's connection drops: an error the pass catches and records."""
 
 
 # ------------------------------------------------------------------ the world
@@ -350,13 +387,15 @@ class Shot:
     horizon: timedelta
 
     def in_scope(self, event_id: str) -> Event | None:
-        """The capture's scope rule, stated here on its own: a live game, or an upcoming
-        one that starts within the horizon and started at most six hours ago."""
+        """The capture's scope rule, stated here on its own: a live game that started at
+        most a day ago, or an upcoming one that starts within the horizon and started at
+        most six hours ago."""
         event = self.games.get(event_id)
         if event is None:
             return None
         if event.status == "live":
-            return event
+            started = self.at - timedelta(hours=LIVE_GRACE_HOURS) <= event.start_time
+            return event if started else None
         if event.status == "upcoming" and (
             self.at - timedelta(hours=GRACE_HOURS) <= event.start_time <= self.at + self.horizon
         ):
@@ -411,8 +450,10 @@ class Truth:
     status_times: list[datetime] = field(default_factory=list)
     prune_cutoff: datetime | None = None
     keep_cutoff: datetime | None = None
-    #: Per game the prune has handled: when it last did. The game's rows captured up to
-    #: then are only the kept ones; rows captured later (it came back) are all there.
+    #: Per game a prune has started on: when the last one did. From then on the game's
+    #: rows captured up to that time may be only the kept ones (they are, once a prune
+    #: has finished the game; a prune that was cut short may not have reached it); rows
+    #: captured later (it came back) are all there.
     reduced: dict[str, datetime] = field(default_factory=dict)
 
     @staticmethod
@@ -438,8 +479,8 @@ class Truth:
         return None
 
     def pruned(self, now: datetime, settings: Settings, event_ids: list[str]) -> None:
-        """A prune ran at ``now``. Its cutoffs never move back; it handles every game whose
-        last capture is before the cutoff."""
+        """A prune started at ``now``, whether or not it got to the end. Its cutoffs never
+        move back; it handles every game whose last capture is before the cutoff."""
         cutoff = now - timedelta(days=settings.snapshot_retention_days)
         keep = now - timedelta(days=settings.snapshot_keep_days)
         self.prune_cutoff = max(cutoff, self.prune_cutoff or cutoff)
@@ -496,16 +537,28 @@ class Scenario:
         self.rng = random.Random(seed)
         rng = self.rng
         self.env = env
+        #: A second stream, for everything about cutting prunes short: the first one's
+        #: draws, and so the world of every seed, are the same with and without it.
+        self.cuts = random.Random(f"cuts of {seed}")
         self.world = World(rng)
         env.provider = self.world
+        keep_days = rng.choice((2, 3))
+        props_interval = rng.choice((360, 720, 3600))
+        horizon_hours = rng.choice((12, 36))
+        if horizon_hours == 36:
+            # The props read looks back 48 hours and answers nothing once that reaches
+            # past the keep horizon: a day more, so that it answers at all, and for
+            # pruned games too.
+            keep_days += 1
         self.base = env.settings.model_copy(
             update={
                 "snapshot_retention_days": 1,
-                "snapshot_keep_days": rng.choice((2, 3)),
-                "snapshot_props_interval_seconds": rng.choice((360, 720, 3600)),
-                "snapshot_horizon_hours": rng.choice((12, 36)),
+                "snapshot_keep_days": keep_days,
+                "snapshot_props_interval_seconds": props_interval,
+                "snapshot_horizon_hours": horizon_hours,
             }
         )
+        assert self.base.snapshot_settings_problem() is None
         self.settings = self.base
         self.truth = Truth()
         self.flag_on = True
@@ -514,6 +567,9 @@ class Scenario:
         self.checks = {"captured": 0, "refused": 0, "priced": 0, "cannot_price": 0}
         self.reports: list[PassReport] = []
         self.step = 0
+        #: Prunes cut short, by kind, and whether one still waits for a prune to finish.
+        self.cut_short = {"dropped": 0, "killed": 0}
+        self.unfinished = False
         with env.session_factory() as db:
             for i in range(len(USER_BOOKS)):
                 user = User(
@@ -531,6 +587,11 @@ class Scenario:
     @property
     def now(self) -> datetime:
         return self.world.current
+
+    @property
+    def props_gap(self) -> timedelta:
+        """A props capture covers this long: two props intervals and one worker turn."""
+        return timedelta(seconds=2 * self.settings.snapshot_props_interval_seconds + 120)
 
     def fail(self, where: str, as_of: datetime, message: str) -> Divergence:
         return Divergence(
@@ -600,27 +661,81 @@ class Scenario:
     def capture(self) -> None:
         env, world = self.env, self.world
         shot = world.freeze(self.settings)
-        report = capture_pass(env.engine, world, self.settings)
-        self.reports.append(report)
+        # Now and then the pass's prune, if one is due, is cut short after some of its
+        # deletes: by an error the pass records, or by the worker being killed.
+        cut_after = self.cuts.randint(0, 14) if self.cuts.random() < 0.4 else None
+        kill = self.cuts.random() < 0.5
+        deletes = 0
+        real_delete = prune_module._delete_ids
+
+        def delete_or_stop(session: Any, model: Any, ids: Any) -> int:
+            nonlocal deletes
+            if cut_after is not None and deletes == cut_after:
+                raise Killed() if kill else Dropped("connection lost")
+            deletes += 1
+            return real_delete(session, model, ids)
+
+        prune_module._delete_ids = delete_or_stop  # type: ignore[assignment]
+        report: PassReport | None = None
+        try:
+            report = capture_pass(env.engine, world, self.settings)
+        except Killed:
+            pass
+        finally:
+            prune_module._delete_ids = real_delete
         broken, world.broken = world.broken, set()
+        # What the pass recorded, read from its runs: a killed pass returns nothing.
+        with env.session_factory() as db:
+            ran: dict[str, list[str]] = {}
+            for kind, status in db.execute(
+                select(SnapshotRun.kind, SnapshotRun.status)
+                .where(SnapshotRun.captured_at == self.now, SnapshotRun.provider == world.name)
+                .order_by(SnapshotRun.id)
+            ):
+                ran.setdefault(kind, []).append(status)
         if not self.flag_on:
-            assert report.enabled is False and report.odds is None and report.prune is None
+            assert report is not None and report.enabled is False
+            assert report.odds is None and report.prune is None
+            assert not {"odds", "props", "prune"} & set(ran)
             return
+        if report is not None:
+            self.reports.append(report)
+            for kind in ("odds", "props"):
+                summary = getattr(report, kind)
+                assert ran.get(kind, []) == ([] if summary is None else [summary.status])
+                if summary is None:
+                    continue
+                if report.full:
+                    assert summary.status == "skipped_full", (kind, summary)
+                elif kind == "props" and kind in broken:
+                    assert summary.status == "failed", (kind, summary)
+                if summary.status == "ok":
+                    assert summary.captured_at == shot.at
         for kind, shots in (("odds", self.truth.odds), ("props", self.truth.props)):
-            summary = getattr(report, kind)
-            if summary is None:
-                continue
-            if report.full:
-                assert summary.status == "skipped_full", (kind, summary)
-            elif kind == "props" and kind in broken:
-                assert summary.status == "failed", (kind, summary)
-            if summary.status == "ok":
-                assert summary.captured_at == shot.at
+            if ran.get(kind) == ["ok"]:
                 shots.append(shot)
-        if report.prune is not None and report.prune.status == "ok":
+        # A prune says how far it will go before it deletes anything (its ``started``
+        # run). From then on the truth counts every game it may reach as reduced.
+        prune = ran.get("prune", [])
+        if prune:
+            assert prune[0] == "started", prune
             self.truth.pruned(self.now, self.settings, sorted(world.games))
+            if prune == ["started", "ok"]:
+                assert report is not None and report.prune is not None
+                finished_a_cut, self.unfinished = self.unfinished, False
+                if finished_a_cut:
+                    self.audit()  # the prune after a cut one: every answer again
+            else:
+                # Cut short: recorded as failed, or (killed) not at all.
+                assert prune == (["started"] if report is None else ["started", "failed"]), prune
+                self.cut_short["killed" if report is None else "dropped"] += 1
+                self.unfinished = True
+                self.place_late_bet()
+                self.audit()
+        elif report is None:
+            raise AssertionError("the pass was killed outside a prune")
         # Liveness: right after a successful capture, a read at that time is captured.
-        if report.odds is not None and report.odds.status == "ok":
+        if ran.get("odds") == ["ok"]:
             scope = [event_id for event_id in shot.games if shot.in_scope(event_id) is not None]
             for event_id in self.rng.sample(scope, min(len(scope), 2)):
                 answer = self.check_odds(event_id, self.rng.choice(MARKETS), self.now)
@@ -628,13 +743,59 @@ class Scenario:
                     raise self.fail(
                         f"odds of {event_id}", self.now, f"just captured, answered {answer}"
                     )
-        if report.props is not None and report.props.status == "ok":
+        if ran.get("props") == ["ok"]:
             player = self.rng.choice(world.roster)
             answer = self.check_props(player.id, self.now)
             if answer != "captured":
                 raise self.fail(
                     f"props of {player.id}", self.now, f"just captured, answered {answer}"
                 )
+
+    def audit(self) -> None:
+        """Right after a prune was cut short, and again after the prune that finishes its
+        work: every game around its own captures, every player, every stored bet. Drawn
+        from the second stream."""
+        rng = self.cuts
+        world = self.world
+        asked = self.times(3, rng)
+        for event_id in sorted(world.games):
+            mine = [shot.at for shot in self.truth.odds if shot.in_scope(event_id) is not None]
+            around = mine[:1] + mine[-1:] + rng.sample(mine, min(len(mine), 3))
+            around = [at + timedelta(seconds=rng.choice((0, 0, 60, 700))) for at in around]
+            for as_of in asked[:1] + around:
+                self.check_odds(event_id, rng.choice(MARKETS), min(as_of, self.now))
+        for player in world.roster:
+            for as_of in asked:
+                self.check_props(player.id, as_of)
+        for bet in self.bets:
+            self.check_bet(bet)
+
+    def place_late_bet(self) -> None:
+        """A bet recorded late (an import), between a prune that was cut short and the one
+        that finishes its work: on a game that prune had started on, placed a moment
+        after one of the game's captures."""
+        rng = self.cuts
+        reduced = sorted(self.truth.reduced)
+        if not reduced:
+            return
+        event_id = rng.choice(reduced)
+        shots = [shot for shot in self.truth.odds if shot.in_scope(event_id) is not None]
+        if not shots:
+            return
+        shot = rng.choice(shots)
+        market = rng.choice(MARKETS)
+        quoted = [
+            (outcome.key, outcome.line)
+            for snap in shot.quotes.get((event_id, market), [])
+            for outcome in snap.outcomes
+        ]
+        if not quoted:
+            return
+        side, line = rng.choice(quoted)
+        placed_at = min(shot.at + timedelta(seconds=rng.choice((0, 10, 130, 700))), self.now)
+        self.store_bet(
+            rng.randrange(len(USER_BOOKS)), placed_at, [(0, event_id, market, side, line)]
+        )
 
     def capture_status(self) -> None:
         rng = self.rng
@@ -727,6 +888,14 @@ class Scenario:
             else:
                 side, line = rng.choice(("over", "under")), rng.choice(TOTALS)
             legs.append((position, event_id, market, side, line))
+        self.store_bet(user, placed_at, legs)
+
+    def store_bet(
+        self,
+        user: int,
+        placed_at: datetime,
+        legs: list[tuple[int, str, str, str | None, float | None]],
+    ) -> None:
         with self.env.session_factory() as db:
             bet = Bet(
                 id=new_id(),
@@ -754,10 +923,10 @@ class Scenario:
             self.bets.append(StoredBet(bet.id, user, placed_at))
 
     # --------------------------------------------------------------- checks
-    def times(self, count: int) -> list[datetime]:
+    def times(self, count: int, rng: random.Random | None = None) -> list[datetime]:
         """Times worth asking about: captures and the microsecond either side, the edge of
         the gap limit, the prune cutoffs, placement times, and anywhere at all."""
-        rng = self.rng
+        rng = rng or self.rng
         truth = self.truth
         pool: list[datetime] = [self.now, START - timedelta(hours=1)]
         for shots in (truth.odds, truth.props):
@@ -765,6 +934,10 @@ class Scenario:
                 pool += [shot.at, shot.at - US, shot.at + US]
                 pool.append(shot.at + timedelta(seconds=rng.randint(1, 840)))
                 pool += [shot.at + timedelta(seconds=840), shot.at + timedelta(seconds=841)]
+        # The last moment a props capture covers, and the first it does not: where an
+        # offer's stored row is oldest when it is read.
+        for shot in rng.sample(truth.props, min(len(truth.props), 4)):
+            pool += [shot.at + self.props_gap, shot.at + self.props_gap + US]
         for at in rng.sample(truth.status_times, min(len(truth.status_times), 3)):
             pool += [at, at - US]
         for cutoff in (truth.prune_cutoff, truth.keep_cutoff):
@@ -800,8 +973,13 @@ class Scenario:
             for as_of in asked[:2] + around:
                 self.check_odds(event_id, rng.choice(MARKETS), min(as_of, self.now))
             self.check_status(event_id, asked[0])
+        edges = [
+            min(shot.at + self.props_gap, self.now)
+            for shot in self.truth.props[-1:]
+            + rng.sample(self.truth.props, min(len(self.truth.props), 2))
+        ]
         for player in world.roster:
-            for as_of in asked:
+            for as_of in asked + edges:
                 self.check_props(player.id, as_of)
         bets = self.bets if last else rng.sample(self.bets, min(len(self.bets), 6))
         for bet in bets:
@@ -810,7 +988,7 @@ class Scenario:
     def may_say_pruned(self, event_id: str, shot: Shot | None, as_of: datetime) -> bool:
         """Whether ``archive_pruned`` is an honest answer for the event at T: T is within
         the gap limit of the keep horizon or before it (capture runs are thinned there),
-        or the prune has reduced the game and the latest capture at or before T is not
+        or a prune has started on the game and the latest capture at or before T is not
         later than that. Anywhere else the archive must answer exactly what the truth
         says."""
         keep = self.truth.keep_cutoff
@@ -884,7 +1062,7 @@ class Scenario:
         with self.env.session_factory() as db:
             answer = archived_props(db, self.world, settings, player_id, None, as_of)
         status = answer.coverage.status
-        gap = 2 * settings.snapshot_props_interval_seconds + 120
+        gap = int(self.props_gap.total_seconds())
         shot = Truth.latest(self.truth.props, as_of)
         if shot is None:
             expected = "not_captured"
@@ -893,9 +1071,12 @@ class Scenario:
         else:
             expected = "captured"
         keep = self.truth.keep_cutoff
+        # The read looks back as far as an open offer's latest row can be: the horizon
+        # and the game, and never less than the age at which an unchanged offer is
+        # stored again plus the gap limit.
         reach = max(
             timedelta(hours=settings.snapshot_horizon_hours + PROP_GAME_HOURS),
-            timedelta(seconds=gap),
+            timedelta(hours=PROP_REFRESH_HOURS, seconds=gap),
         )
         if status != "captured":
             if status not in REFUSALS or answer.offers or answer.pruned_event_ids:
@@ -946,7 +1127,7 @@ class Scenario:
         if named & set(found):
             raise self.fail(where, as_of, f"offers of a game named as pruned: {named & set(found)}")
         for event_id in named:
-            # A game is named only once the prune has reduced it to its kept captures.
+            # A game is named only once a prune has started on it.
             if event_id not in self.truth.reduced:
                 raise self.fail(where, as_of, f"{event_id} named as pruned, but it was not pruned")
         for event_id in (set(found) | set(truth_offers)) - named:
@@ -1114,10 +1295,11 @@ def _without_gone_books(odds: dict[str, Any]) -> dict[str, Any]:
 
 
 # -------------------------------------------------------------------- the test
-@pytest.mark.parametrize("seed", range(FIRST_SEED, FIRST_SEED + SCENARIOS))
+@pytest.mark.parametrize("seed", SEEDS)
 def test_the_archive_agrees_with_the_reference_model(archive_env: ArchiveEnv, seed: int) -> None:
     scenario = Scenario(seed, archive_env)
     scenario.run()
+    print(f"seed {seed}: prunes cut short {scenario.cut_short}, checks {scenario.checks}")
     # The scenario did something: captures, prunes, and answers of both kinds.
     assert len(scenario.truth.odds) >= 5
     with archive_env.session_factory() as db:

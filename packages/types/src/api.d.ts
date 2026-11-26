@@ -455,7 +455,7 @@ export interface paths {
         };
         /**
          * One player's archived prop offers as of a time
-         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the 48 hours before it, and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`. Behind the `snapshot_archive` flag.
+         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the look-back before it (48 hours with the default settings), and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`. Behind the `snapshot_archive` flag.
          */
         get: operations["get_archived_player_props"];
         put?: never;
@@ -2338,7 +2338,10 @@ export interface components {
             rows_deleted: number;
             /** Rows Written */
             rows_written: number;
-            /** Status */
+            /**
+             * Status
+             * @description `ok`, `skipped_full` (capture stopped at a limit) or `failed`. A prune is recorded when it starts (`started`) and again when it ends: `started` as the latest prune means one is running, or was cut short and will be finished by the next pass.
+             */
             status: string;
         };
         /** ArchiveStatsOut */
@@ -5021,7 +5024,7 @@ export interface components {
             captured_at?: string | null;
             /**
              * Status
-             * @description Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the 48 hours before the time reach past the keep horizon. Offers are returned only when `captured`.
+             * @description Read from the latest successful props capture at or before the requested time. `captured`: it is at most two props intervals plus one worker turn before it (7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before the first props capture. `archive_pruned`: the look-back before the time (48 hours with the default settings) reaches past the keep horizon. Offers are returned only when `captured`.
              * @enum {string}
              */
             status: "captured" | "not_captured" | "archive_gap" | "archive_pruned";
@@ -6888,6 +6891,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The retention prune kept changing the rows this read needs; try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_archived_event_status: {
@@ -6986,6 +6998,15 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The retention prune kept changing the rows this read needs; try again */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7897,6 +7918,15 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The retention prune kept changing the rows this read needs; try again */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -7,10 +7,14 @@ hand-written quotes, so every expected price in the tests can be worked out by h
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -26,6 +30,7 @@ from oddvex_api.flags import service as flags
 from .conftest import FROZEN_NOW, SettingsFactory
 from .fakes import ControlledProvider, moneyline, spread, total
 
+API_ROOT = Path(__file__).resolve().parents[1]
 T0 = FROZEN_NOW
 #: An NHL game that starts at 21:00 and stays upcoming through every capture below.
 PREGAME = "evt_nhl_20260314_3"
@@ -72,6 +77,28 @@ def archive_env(make_settings: SettingsFactory) -> Iterator[ArchiveEnv]:
     enable_archive(session_factory)
     yield ArchiveEnv(settings, engine, session_factory, ControlledProvider())
     engine.dispose()
+
+
+def capture_script(
+    env: ArchiveEnv, *args: str, extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run ``scripts/capture_snapshots.py`` on the test database, as the worker does."""
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "DATABASE_URL": env.settings.database_url,
+        "ODDVEX_ENV": "test",
+        "ODDVEX_LOG_LEVEL": "WARNING",
+        **(extra or {}),
+    }
+    return subprocess.run(
+        [sys.executable, str(API_ROOT / "scripts" / "capture_snapshots.py"), *args],
+        cwd=API_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
 
 
 # ------------------------------------------------------------------ quotes
@@ -273,6 +300,7 @@ __all__ = [
     "archive_env",
     "capture_schedule",
     "capture_schedule_on",
+    "capture_script",
     "enable_archive",
     "make_bet",
     "make_user",

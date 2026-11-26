@@ -9,6 +9,7 @@ archive tables it drops and creates:
     ODDVEX_MEASURE_DATABASE_URL=postgresql+psycopg://oddvex:oddvex@localhost:5432/oddvex_measure \\
         .venv/bin/python tests/measure_archive_files.py cycles 9
     ODDVEX_MEASURE_DATABASE_URL=... .venv/bin/python tests/measure_archive_files.py rolling 8
+    ODDVEX_MEASURE_DATABASE_URL=... .venv/bin/python tests/measure_archive_files.py autovacuum 9
 
 ``cycles N`` repeats the measurement of review round 3 (the one that showed the indexes
 growing with every prune): N times, 480 capture passes 360 s apart on the whole synthetic
@@ -20,7 +21,18 @@ About two minutes a cycle.
 ``rolling D`` runs the worker's pass every 360 s for D synthetic days with retention
 shortened to 1 day and the keep period to 3 days, so that rows arrive and leave at the
 same rate within the run, and prints the sizes every six synthetic hours and every
-reclaim run. About a minute a day.
+reclaim run. It runs a plain VACUUM after every prune, which is more often than a server
+does. About a minute a day.
+
+``autovacuum D`` is the same run with the tables vacuumed as a server with the default
+settings vacuums them (review round 4): a table only once its dead rows exceed 50 plus a
+fifth of its rows, or the rows inserted since its last vacuum exceed 1,000 plus a fifth
+(``autovacuum_vacuum_scale_factor`` and ``autovacuum_vacuum_insert_scale_factor``, 0.2 in
+PostgreSQL 16 and 17). The script counts both itself after every pass and runs the
+VACUUM then; the server's own autovacuum is switched off for the five tables, because a
+synthetic day passes in about a minute here and the server's launcher would look at them
+once a synthetic day instead of once a minute. The sizes are sampled after every pass.
+About a minute and a half a day.
 
 Everything else is the production default: no test overrides. The provider is the
 synthetic one; nothing is fetched from anywhere.
@@ -85,10 +97,46 @@ def set_up(settings: Settings) -> tuple[Engine, sessionmaker[Session]]:
 
 
 def vacuum(engine: Engine) -> None:
-    """A plain VACUUM of every archive table: what autovacuum does."""
+    """A plain VACUUM of every archive table: what autovacuum does once it runs."""
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         for model in ARCHIVE_MODELS:
             connection.execute(text(f"VACUUM {model.__tablename__}"))
+
+
+class AutovacuumStandIn:
+    """Vacuums each archive table when a server with the default autovacuum settings
+    would: counted here, pass by pass, from the table's largest id and its row count."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+        self.tables = {
+            model.__tablename__: {
+                "largest_id": 0,
+                "rows": 0,
+                "inserted": 0,
+                "dead": 0,
+                "vacuums": 0,
+            }
+            for model in ARCHIVE_MODELS
+        }
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            for name in self.tables:
+                connection.execute(text(f"ALTER TABLE {name} SET (autovacuum_enabled = off)"))
+
+    def after_a_pass(self) -> None:
+        with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            for name, seen in self.tables.items():
+                largest_id, rows = connection.execute(
+                    text(f"SELECT coalesce(max(id), 0), count(*) FROM {name}")
+                ).one()
+                new = largest_id - seen["largest_id"]
+                seen["inserted"] += new
+                seen["dead"] += seen["rows"] + new - rows
+                seen["largest_id"], seen["rows"] = largest_id, rows
+                if seen["dead"] > 50 + 0.2 * rows or seen["inserted"] > 1000 + 0.2 * rows:
+                    connection.execute(text(f"VACUUM {name}"))
+                    seen["inserted"] = seen["dead"] = 0
+                    seen["vacuums"] += 1
 
 
 def sizes(sessions: sessionmaker[Session]) -> tuple[int, int, int, int, int]:
@@ -163,7 +211,7 @@ def cycles(count: int) -> None:
             print(f"  rows in {model.__tablename__}: {rows}")
 
 
-def rolling(days: int) -> None:
+def rolling(days: int, *, as_autovacuum: bool = False) -> None:
     settings = Settings(
         _env_file=None,
         env="test",
@@ -176,13 +224,25 @@ def rolling(days: int) -> None:
     provider = SyntheticProvider(seed=20260101, clock=lambda: now[0])
     worst = (0.0, 0.0)
     slowest = 0.0
+    stand_in = AutovacuumStandIn(engine) if as_autovacuum else None
+    largest = 0
+    worst_of_largest = (0.0, 0.0)
     for turn in range(days * 240):
         started = time.perf_counter()
         report = capture_pass(engine, provider, settings)
         took = time.perf_counter() - started
         slowest = max(slowest, took)
         day = (now[0] - START).total_seconds() / 86400
-        if report.prune is not None:
+        if stand_in is not None:
+            stand_in.after_a_pass()
+            counted, disk, _heap, _indexes, _games = sizes(sessions)
+            largest = max(largest, counted)
+            if day >= 2:
+                if disk / counted > worst[0]:
+                    worst = (disk / counted, day)
+                if disk / largest > worst_of_largest[0]:
+                    worst_of_largest = (disk / largest, day)
+        elif report.prune is not None:
             vacuum(engine)
         if report.reclaim is not None:
             detail = report.reclaim.detail or {}
@@ -193,11 +253,12 @@ def rolling(days: int) -> None:
                 flush=True,
             )
         if turn % 60 == 59:
-            counted, disk, _heap, _indexes, _games = sizes(sessions)
-            if day >= 2 and disk / counted > worst[0]:
+            counted, disk, heap, indexes, _games = sizes(sessions)
+            if stand_in is None and day >= 2 and disk / counted > worst[0]:
                 worst = (disk / counted, day)
             print(
-                f"day {day:.2f}: counted {counted / MB:.1f} MB, files {disk / MB:.1f} MB, "
+                f"day {day:.2f}: counted {counted / MB:.1f} MB, files {disk / MB:.1f} MB "
+                f"(tables {heap / MB:.1f}, indexes {indexes / MB:.1f}), "
                 f"files / counted = {disk / counted:.3f}",
                 flush=True,
             )
@@ -213,14 +274,23 @@ def rolling(days: int) -> None:
         f"largest files / counted after day 2: {worst[0]:.3f} at day {worst[1]:.2f} "
         f"(stated: {STATED_FILES_FACTOR}); slowest pass {slowest:.2f} s"
     )
+    if stand_in is not None:
+        print(
+            "sampled after every pass; largest files / largest counted so far after day 2: "
+            f"{worst_of_largest[0]:.3f} at day {worst_of_largest[1]:.2f} "
+            f"(largest counted {largest / MB:.1f} MB)"
+        )
+        print(
+            "vacuums per table:", {name: seen["vacuums"] for name, seen in stand_in.tables.items()}
+        )
 
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    if mode not in ("cycles", "rolling"):
+    if mode not in ("cycles", "rolling", "autovacuum"):
         raise SystemExit(__doc__)
     amount = int(sys.argv[2]) if len(sys.argv) > 2 else (9 if mode == "cycles" else 8)
     if mode == "cycles":
         cycles(amount)
     else:
-        rolling(amount)
+        rolling(amount, as_autovacuum=mode == "autovacuum")

@@ -11,6 +11,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEV_JWT_SECRET = "dev-only-insecure-secret-change-me-0123456789"
 DEV_DEMO_PASSWORD = "oddvex-demo-2026"
 
+#: Snapshot archive (P0.1): fixed figures the archive settings below are checked against.
+#: Hours a game lasts at most, for the props look-back.
+SNAPSHOT_PROP_GAME_HOURS = 12
+#: An unchanged prop offer is stored again once its latest row is this many hours old.
+SNAPSHOT_PROP_REFRESH_HOURS = 24
+#: The worker loop's period, in seconds.
+SNAPSHOT_WORKER_TURN_SECONDS = 120
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -149,6 +157,50 @@ class Settings(BaseSettings):
     snapshot_max_gap_seconds: int = Field(default=840, ge=60)
     #: Minimum seconds between two prune passes.
     snapshot_prune_interval_seconds: int = Field(default=3600, ge=60)
+    #: PostgreSQL only: seconds one index rebuild of the archive may take
+    #: (``statement_timeout`` of ``archive/reclaim.py``). 120 s is about eight times what
+    #: the largest index took at the size of the cap on the development machine; raise it
+    #: if rebuilds on a slower server are recorded as failed with ``QueryCanceled``.
+    snapshot_reclaim_timeout_seconds: int = Field(default=120, ge=1, le=3600)
+
+    @property
+    def snapshot_props_max_gap_seconds(self) -> int:
+        """A time more than this after the last props capture is a gap for the props
+        read: two props intervals plus one worker turn (7,320 s with hourly props)."""
+        return 2 * self.snapshot_props_interval_seconds + SNAPSHOT_WORKER_TURN_SECONDS
+
+    @property
+    def snapshot_prop_lookback_seconds(self) -> int:
+        """How far back from T the props read looks for an offer's latest row.
+
+        Two rules, and the look-back is the longer. An offer is stored when its game
+        enters scope, ``snapshot_horizon_hours`` before the start, and can stay valid
+        until the game ends (``SNAPSHOT_PROP_GAME_HOURS``). And an unchanged offer is
+        stored again at the first props capture after its row is
+        ``SNAPSHOT_PROP_REFRESH_HOURS`` old, while a read is answered from a props capture
+        up to ``snapshot_props_max_gap_seconds`` before T: so an open offer's latest row
+        is less than the refresh age plus that gap before T. The second rule holds at
+        every setting; with the first alone, a horizon of 14 hours or less left an offer
+        unchanged for a day out of the read (review round 4)."""
+        return max(
+            (self.snapshot_horizon_hours + SNAPSHOT_PROP_GAME_HOURS) * 3600,
+            SNAPSHOT_PROP_REFRESH_HOURS * 3600 + self.snapshot_props_max_gap_seconds,
+        )
+
+    def snapshot_settings_problem(self) -> str | None:
+        """Why the archive settings cannot work together, or ``None``. The props read
+        answers ``archive_pruned`` whenever its look-back reaches past the keep horizon;
+        with a keep period no longer than the look-back that is every time."""
+        keep_seconds = max(self.snapshot_keep_days, self.snapshot_retention_days) * 86_400
+        lookback = self.snapshot_prop_lookback_seconds
+        if keep_seconds <= lookback:
+            return (
+                "ODDVEX_SNAPSHOT_KEEP_DAYS (or ODDVEX_SNAPSHOT_RETENTION_DAYS, when larger) "
+                f"must be longer than the props look-back of {lookback} seconds "
+                "(ODDVEX_SNAPSHOT_HORIZON_HOURS plus 12 hours, or 24 hours plus two props "
+                "intervals and 120 seconds): otherwise no archived props read ever answers"
+            )
+        return None
 
     @property
     def is_production(self) -> bool:
@@ -170,7 +222,11 @@ class Settings(BaseSettings):
         return not self.is_production
 
     def validate_for_startup(self) -> None:
-        """Refuse insecure configuration in production."""
+        """Refuse configuration that cannot work, and insecure configuration in
+        production."""
+        problem = self.snapshot_settings_problem()
+        if problem is not None:
+            raise RuntimeError(problem)
         if self.data_provider == "replay" and not self.replay_data_path:
             raise RuntimeError(
                 "ODDVEX_REPLAY_DATA_PATH must point to a replay dataset when "

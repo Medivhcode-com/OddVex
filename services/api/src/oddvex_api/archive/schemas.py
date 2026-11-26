@@ -105,7 +105,8 @@ class PropsCoverageOut(BaseModel):
             "Read from the latest successful props capture at or before the requested time. "
             "`captured`: it is at most two props intervals plus one worker turn before it "
             "(7,320 s with hourly props). `archive_gap`: it is older. `not_captured`: before "
-            "the first props capture. `archive_pruned`: the 48 hours before the time reach "
+            "the first props capture. `archive_pruned`: the look-back before the time (48 hours "
+            "with the default settings) reaches "
             "past the keep horizon. Offers are returned only when `captured`."
         )
     )
@@ -233,7 +234,14 @@ class ArchiveRowCountsOut(BaseModel):
 class ArchiveRunOut(BaseModel):
     kind: str = Field(description="`odds`, `props`, `status`, `prune` or `reclaim`.")
     captured_at: datetime
-    status: str
+    status: str = Field(
+        description=(
+            "`ok`, `skipped_full` (capture stopped at a limit) or `failed`. A prune is "
+            "recorded when it starts (`started`) and again when it ends: `started` as the "
+            "latest prune means one is running, or was cut short and will be finished by "
+            "the next pass."
+        )
+    )
     rows_written: int
     rows_deleted: int
     finished_at: datetime | None = Field(default=None, description="Wall-clock time the run ended.")

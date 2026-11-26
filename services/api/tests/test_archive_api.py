@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from oddvex_api.archive import view as view_module
 from oddvex_api.archive.capture import capture_pass
 
 from .archive_support import (
@@ -175,6 +176,39 @@ def test_as_of_needs_an_offset_and_cannot_be_in_the_future(
     assert bad_market.status_code == 422
     nobody = client.get("/v1/archive/players/nobody/props", params={"as_of": near}, headers=headers)
     assert nobody.status_code == 404 and nobody.json()["error"]["code"] == "not_found"
+
+
+def test_a_read_the_prune_keeps_disturbing_answers_503_and_never_a_guess(
+    archived: tuple[TestClient, FastAPI, ControlledProvider], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read that a prune changes the rows under is made again; if that happens every
+    time (it cannot in operation: one prune disturbs a read three times at most), the
+    three reading routes answer 503 ``archive_busy`` with ``Retry-After``, not an answer
+    built from rows that were not there together."""
+    client, _, provider = archived
+    headers = auth_headers(client)
+    bet_id = place(client, headers, bet_body("Summit"))
+    player = provider.list_players()[0]
+    as_of = (T0 + timedelta(seconds=100)).isoformat()
+    urls: list[tuple[str, dict[str, str]]] = [
+        (f"/v1/archive/events/{PREGAME}/odds", {"market": "moneyline", "as_of": as_of}),
+        (f"/v1/archive/players/{player.id}/props", {"as_of": as_of}),
+        (f"/v1/bets/{bet_id}/placement-prices", {}),
+    ]
+    for url, params in urls:
+        assert client.get(url, params=params, headers=headers).status_code == 200
+    readings = iter(range(10_000))
+    monkeypatch.setattr(view_module, "prune_marker", lambda session: next(readings))
+    for url, params in urls:
+        busy = client.get(url, params=params, headers=headers)
+        assert busy.status_code == 503, url
+        assert busy.json()["error"]["code"] == "archive_busy"
+        assert busy.headers["Retry-After"] == "5"
+    # The status route reads its rows in one statement and is never refused.
+    status = client.get(
+        f"/v1/archive/events/{PREGAME}/status", params={"as_of": as_of}, headers=headers
+    )
+    assert status.status_code == 200
 
 
 def test_admin_stats_show_the_archive_whatever_the_flag(

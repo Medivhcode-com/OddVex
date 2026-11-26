@@ -8,6 +8,7 @@ behind the flag, so an administrator can see the archive's size whatever its sta
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
@@ -30,6 +31,7 @@ from .schemas import (
     ArchiveStatsOut,
     BetPlacementPricesOut,
 )
+from .view import ArchiveBusy
 
 _FLAGGED: dict[int | str, dict[str, Any]] = {
     **AUTH_ERROR_RESPONSES,
@@ -48,6 +50,29 @@ AsOfQuery = Annotated[
         )
     ),
 ]
+
+
+_BUSY: dict[int | str, dict[str, Any]] = {
+    503: {
+        "model": ErrorResponse,
+        "description": "The retention prune kept changing the rows this read needs; try again",
+    }
+}
+
+
+def _read[T](read: Callable[[], T]) -> T:
+    """An archive read gives up rather than answer from rows a prune changed under it
+    (``view.settled``). It is made several times first, so this is not expected in
+    operation: one prune can disturb a read three times at most."""
+    try:
+        return read()
+    except ArchiveBusy:
+        raise ApiError(
+            503,
+            "archive_busy",
+            "The archive is being pruned. Try again in a moment.",
+            headers={"Retry-After": "5"},
+        ) from None
 
 
 def _as_of(value: datetime, provider: ProviderDep) -> datetime:
@@ -69,6 +94,7 @@ def _as_of(value: datetime, provider: ProviderDep) -> datetime:
         "only when the event is covered. Behind the `snapshot_archive` flag."
     ),
     dependencies=_FLAG,
+    responses=_BUSY,
 )
 def get_archived_event_odds(
     event_id: str,
@@ -79,7 +105,8 @@ def get_archived_event_odds(
     provider: ProviderDep,
     settings: SettingsDep,
 ) -> ArchivedOddsOut:
-    return service.archived_odds(db, provider, settings, event_id, market, _as_of(as_of, provider))
+    moment = _as_of(as_of, provider)
+    return _read(lambda: service.archived_odds(db, provider, settings, event_id, market, moment))
 
 
 @router.get(
@@ -89,7 +116,8 @@ def get_archived_event_odds(
     summary="One player's archived prop offers as of a time",
     description=(
         "The latest offer per game, market and book captured at or before `as_of`, for "
-        "each of the player's games with an offer in the 48 hours before it, and the "
+        "each of the player's games with an offer in the look-back before it (48 hours "
+        "with the default settings), and the "
         "props coverage then. A game whose offers were all withdrawn or that had left "
         "scope is left out. A game the retention prune has reduced to its closing offers "
         "is served only where those are still the answer; otherwise its offers are left "
@@ -97,6 +125,7 @@ def get_archived_event_odds(
         "flag."
     ),
     dependencies=_FLAG,
+    responses=_BUSY,
 )
 def get_archived_player_props(
     player_id: str,
@@ -109,9 +138,8 @@ def get_archived_player_props(
 ) -> ArchivedPropsOut:
     if provider.get_player(player_id) is None:
         raise not_found("Player", player_id)
-    return service.archived_props(
-        db, provider, settings, player_id, market, _as_of(as_of, provider)
-    )
+    moment = _as_of(as_of, provider)
+    return _read(lambda: service.archived_props(db, provider, settings, player_id, market, moment))
 
 
 @router.get(
@@ -149,7 +177,10 @@ def get_archived_event_status(
         "the `snapshot_archive` flag."
     ),
     dependencies=_FLAG,
-    responses={422: {"model": ErrorResponse, "description": "Unknown or too many sportsbooks"}},
+    responses={
+        422: {"model": ErrorResponse, "description": "Unknown or too many sportsbooks"},
+        **_BUSY,
+    },
 )
 def get_bet_placement_prices(
     bet_id: str,
@@ -175,7 +206,7 @@ def get_bet_placement_prices(
         books=keys,
         books_source=source,  # type: ignore[arg-type]
         data_mode=provider.data_mode,  # type: ignore[arg-type]
-        legs=placement_prices(db, provider, settings, bet, keys),
+        legs=_read(lambda: placement_prices(db, provider, settings, bet, keys)),
     )
 
 

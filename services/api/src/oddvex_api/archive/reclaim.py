@@ -21,29 +21,38 @@ the disk. On any other database (SQLite) this module does nothing.
   and the index: reads, inserts and deletes go on; only ``VACUUM`` of that table and
   schema changes wait. It waits for older transactions at three points; ``lock_timeout``
   (``LOCK_TIMEOUT_SECONDS``) ends such a wait, and ``statement_timeout``
-  (``STATEMENT_TIMEOUT_SECONDS``) ends a rebuild that takes too long.
-- *Never with a capture or a prune.* It runs only inside ``capture.capture_pass``, which
-  holds the archive's advisory lock for the whole pass, after the capture and the prune
-  have committed.
+  (``Settings.snapshot_reclaim_timeout_seconds``) ends a rebuild that takes too long.
+- *Never started beside a capture or a prune.* It runs only inside
+  ``capture.capture_pass``, which holds the archive's advisory lock for the whole pass,
+  after the capture and the prune have committed. One exception, which is safe: when the
+  worker is killed while a rebuild runs, the database server finishes the rebuild on its
+  own and the lock goes with the dead connection, so the next pass can capture beside
+  it (a concurrent rebuild is made to run beside writes).
 - *Never in a transaction.* It opens its own connection in autocommit mode and checks
   that before every statement (``_require_autocommit``); PostgreSQL also refuses
   ``REINDEX CONCURRENTLY`` inside a transaction block. The connection is closed for
   good afterwards, so its settings never reach the pool.
-- *Interrupted.* A rebuild that is cancelled or killed leaves an invalid index named
-  ``<name>_ccnew`` (or ``_ccold``) beside the working one. Queries ignore it; inserts
-  still maintain it. Every capture pass looks for invalid indexes on the archive tables
-  and drops them (``DROP INDEX CONCURRENTLY``) before anything is rebuilt. If one cannot
-  be dropped yet (an old transaction is still open) nothing is rebuilt in that pass, and
-  a pass stops rebuilding at its first failure, so at most one such index exists.
+- *Interrupted.* A rebuild that is cancelled, that times out or whose database session is
+  ended leaves an invalid index named ``<name>_ccnew`` (or ``_ccold``) beside the working
+  one. Queries ignore it; inserts still maintain it. Every capture pass looks for invalid
+  indexes on the archive tables and drops them (``DROP INDEX CONCURRENTLY``) before
+  anything is rebuilt. If one cannot be dropped yet (an old transaction is still open)
+  nothing is rebuilt in that pass, and a pass stops rebuilding at its first failure, so
+  at most one such index exists.
 - *Bounded.* One index at a time: the extra disk is one new copy of that index plus the
   sort's temporary files, the write-ahead log about one copy. ``maintenance_work_mem``
   is set to ``WORK_MEM_MB`` and parallel workers are off, so a rebuild uses one core and
   a known amount of memory. A pass starts no new rebuild after ``BUDGET_SECONDS``, and
   an index is rebuilt at most once per ``MIN_INTERVAL`` unless the files are over the
-  ceiling. The measured figures are in docs/features/p0-1.md, "Bounds".
+  ceiling. An index whose rebuild failed is left alone for ``FAILURE_BACKOFF``
+  (``FAILURE_BACKOFF_FULL`` while the files are over the ceiling): a rebuild that cannot
+  finish on this server would otherwise write and discard a full copy after every prune.
+  The measured figures are in docs/features/p0-1.md, "Bounds".
 - *Recorded.* A pass that rebuilt, dropped or failed writes a ``reclaim`` run whose
   ``detail`` holds the index names and byte counts; the administrators' statistics show
-  the latest one.
+  the latest one. That includes a rebuild whose connection died (the server restarted,
+  the session was terminated): the run is ``failed`` with the error's class name. Only
+  when the database cannot be reached at all is there nowhere to record it.
 """
 
 from __future__ import annotations
@@ -55,7 +64,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Connection, Engine, func, select, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import Settings
@@ -84,19 +93,26 @@ MIN_EXCESS_BYTES = 1_048_576
 INDEX_BASE_BYTES = 16_384
 #: An index is rebuilt at most once in this time, unless the files are over the ceiling.
 MIN_INTERVAL = timedelta(hours=24)
+#: An index whose last rebuild failed is not tried again for this long, unless the check
+#: is forced (``--reclaim``). Without the files over the ceiling a rebuild is due once an
+#: hour, after the prune: this makes it four tries a day.
+FAILURE_BACKOFF = timedelta(hours=6)
+#: The same while the files are over the ceiling, where capture is stopped until a
+#: rebuild releases space and a pass would otherwise try again every capture interval.
+FAILURE_BACKOFF_FULL = timedelta(hours=1)
 #: Seconds a rebuild or a drop may wait for a lock or for older transactions.
 LOCK_TIMEOUT_SECONDS = 10
-#: Seconds one rebuild may take.
-STATEMENT_TIMEOUT_SECONDS = 120
 #: A pass starts no new rebuild once it has run this long.
 BUDGET_SECONDS = 60
 #: ``maintenance_work_mem`` for a rebuild, in megabytes (the database container has 512).
 WORK_MEM_MB = 32
 #: A rebuild of at least this many rows also tells what a dense index of this data needs
-#: per row; the larger of that and the measured figure below is used from then on, so a
-#: feed with longer identifiers does not make every check ask for a rebuild.
+#: per row; the larger of that and the measured figure below is used while that rebuild
+#: is among the last ``HISTORY_RUNS`` reclaim runs, so a feed with longer identifiers
+#: does not make every check ask for a rebuild.
 CALIBRATION_MIN_ROWS = 10_000
-#: Reclaim runs read back for the last rebuild of each index.
+#: Reclaim runs read back for the last rebuild, and the last failure, of each index. A
+#: rebuild that has left this window costs at most one more rebuild of that index.
 HISTORY_RUNS = 50
 
 #: Bytes per row of each archive index: (as normally written, freshly rebuilt). Measured
@@ -212,10 +228,14 @@ def expected_bytes(name: str, rows: int, calibrated: float | None = None) -> tup
     )
 
 
-def _history(session: Session, provider_name: str) -> dict[str, tuple[datetime, float | None]]:
-    """Per index, when it was last rebuilt and the bytes per row that rebuild produced
-    (``None`` when it held too few rows to tell)."""
+def _history(
+    session: Session, provider_name: str
+) -> tuple[dict[str, tuple[datetime, float | None]], dict[str, datetime]]:
+    """From the last ``HISTORY_RUNS`` reclaim runs: per index, when it was last rebuilt
+    and the bytes per row that rebuild produced (``None`` when it held too few rows to
+    tell); and, per index whose latest rebuild attempt failed, when that was."""
     found: dict[str, tuple[datetime, float | None]] = {}
+    failed: dict[str, datetime] = {}
     runs = session.execute(
         select(SnapshotRun.captured_at, SnapshotRun.detail)
         .where(SnapshotRun.kind == "reclaim", SnapshotRun.provider == provider_name)
@@ -223,13 +243,16 @@ def _history(session: Session, provider_name: str) -> dict[str, tuple[datetime, 
         .limit(HISTORY_RUNS)
     )
     for captured_at, detail in runs:
+        for name in (detail or {}).get("failed") or {}:
+            if name in INDEX_ROW_BYTES and name not in found:
+                failed.setdefault(name, captured_at)
         for name, figures in ((detail or {}).get("rebuilt") or {}).items():
             if name in found or len(figures) != 3:
                 continue
             _before, after, rows = figures
             per_row = (after - INDEX_BASE_BYTES) / rows if rows >= CALIBRATION_MIN_ROWS else None
             found[name] = (captured_at, per_row)
-    return found
+    return found, failed
 
 
 def plan_rebuilds(
@@ -243,12 +266,14 @@ def plan_rebuilds(
 ) -> list[Rebuild]:
     """The indexes to rebuild, largest excess first. An invalid index of the schema itself
     (which no interrupted concurrent rebuild leaves, but a failed manual one could) is
-    always rebuilt. ``force`` ignores ``MIN_INTERVAL``, not the sizes."""
+    always rebuilt, once its back-off after a failure has passed. ``force`` ignores
+    ``MIN_INTERVAL`` and the back-off, not the sizes."""
     counts = {
         model.__tablename__: int(session.scalar(select(func.count()).select_from(model)) or 0)
         for model in ARCHIVE_MODELS
     }
-    history = _history(session, provider_name)
+    history, failures = _history(session, provider_name)
+    backoff = FAILURE_BACKOFF_FULL if over_ceiling else FAILURE_BACKOFF
     wanted: list[tuple[int, Rebuild]] = []
     for state in states:
         if state.name not in INDEX_ROW_BYTES:
@@ -262,6 +287,9 @@ def plan_rebuilds(
             limit = max(int(RECLAIM_FACTOR * normal), normal + MIN_EXCESS_BYTES)
         recently = last is not None and now - last[0] < MIN_INTERVAL
         if state.valid and (state.size <= limit or (recently and not (over_ceiling or force))):
+            continue
+        failed_at = failures.get(state.name)
+        if failed_at is not None and now - failed_at < backoff and not force:
             continue
         wanted.append(
             (state.size - dense, Rebuild(state.name, state.table, state.size, rows, dense))
@@ -296,8 +324,15 @@ def drop_leftover(connection: Connection, name: str) -> None:
     connection.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS {_quoted(connection, name)}")
 
 
-def _error(exc: DBAPIError) -> str:
-    return type(exc.orig).__name__ if exc.orig is not None else type(exc).__name__
+def _error(exc: SQLAlchemyError) -> str:
+    orig = getattr(exc, "orig", None)
+    return type(orig).__name__ if orig is not None else type(exc).__name__
+
+
+def _alive(connection: Connection) -> bool:
+    """Whether the connection can still take a statement: not after the server ended its
+    session (a restart, ``pg_terminate_backend``, a dropped connection)."""
+    return not (connection.closed or connection.invalidated)
 
 
 def _drop_leftovers(connection: Connection, outcome: Outcome) -> bool:
@@ -310,46 +345,64 @@ def _drop_leftovers(connection: Connection, outcome: Outcome) -> bool:
         except DBAPIError as exc:
             outcome.failed[state.name] = _error(exc)
             clean = False
+            if exc.connection_invalidated or not _alive(connection):
+                break  # the server ended the session: nothing more can be sent on it
     return clean
 
 
-def execute(engine: Engine, plan: list[Rebuild]) -> Outcome:
-    """Drop leftovers, then rebuild the planned indexes one at a time, on a connection of
-    its own in autocommit mode."""
-    outcome = Outcome()
+def _rebuild_all(
+    connection: Connection, plan: list[Rebuild], outcome: Outcome, timeout_seconds: int
+) -> None:
     started = time.monotonic()
+    _require_autocommit(connection)
+    connection.exec_driver_sql(f"SET lock_timeout = '{LOCK_TIMEOUT_SECONDS}s'")
+    connection.exec_driver_sql(f"SET statement_timeout = '{int(timeout_seconds)}s'")
+    connection.exec_driver_sql(f"SET maintenance_work_mem = '{WORK_MEM_MB}MB'")
+    connection.exec_driver_sql("SET max_parallel_maintenance_workers = 0")
+    if not _drop_leftovers(connection, outcome):
+        outcome.skipped = [rebuild.name for rebuild in plan]
+        return
+    for position, rebuild in enumerate(plan):
+        if time.monotonic() - started > BUDGET_SECONDS:
+            outcome.skipped = [r.name for r in plan[position:]]
+            return
+        try:
+            rebuild_index(connection, rebuild.name)
+        except DBAPIError as exc:
+            outcome.failed[rebuild.name] = _error(exc)
+            outcome.skipped = [r.name for r in plan[position + 1 :]]
+            # What the failed rebuild left behind, if it can be dropped already: not on
+            # a connection the server has ended (the next pass drops it).
+            if not exc.connection_invalidated and _alive(connection):
+                _drop_leftovers(connection, outcome)
+            return
+        sizes = {state.name: state.size for state in index_states(connection)}
+        outcome.rebuilt[rebuild.name] = [
+            rebuild.size,
+            sizes.get(rebuild.name, rebuild.size),
+            rebuild.rows,
+        ]
+
+
+def execute(engine: Engine, plan: list[Rebuild], *, statement_timeout_seconds: int) -> Outcome:
+    """Drop leftovers, then rebuild the planned indexes one at a time, on a connection of
+    its own in autocommit mode. A rebuild that fails is in ``Outcome.failed`` under its
+    index's name; a pass stops at its first failure. When the connection itself is lost
+    (the server restarted, the session was terminated) nothing more is sent on it, and
+    whatever error that state raises is recorded under ``connection``."""
+    outcome = Outcome()
     with engine.connect() as pooled:
         connection = pooled.execution_options(isolation_level="AUTOCOMMIT")
         try:
-            _require_autocommit(connection)
-            connection.exec_driver_sql(f"SET lock_timeout = '{LOCK_TIMEOUT_SECONDS}s'")
-            connection.exec_driver_sql(f"SET statement_timeout = '{STATEMENT_TIMEOUT_SECONDS}s'")
-            connection.exec_driver_sql(f"SET maintenance_work_mem = '{WORK_MEM_MB}MB'")
-            connection.exec_driver_sql("SET max_parallel_maintenance_workers = 0")
-            if not _drop_leftovers(connection, outcome):
-                outcome.skipped = [rebuild.name for rebuild in plan]
-                return outcome
-            for position, rebuild in enumerate(plan):
-                if time.monotonic() - started > BUDGET_SECONDS:
-                    outcome.skipped = [r.name for r in plan[position:]]
-                    break
-                try:
-                    rebuild_index(connection, rebuild.name)
-                except DBAPIError as exc:
-                    outcome.failed[rebuild.name] = _error(exc)
-                    outcome.skipped = [r.name for r in plan[position + 1 :]]
-                    # What the failed rebuild left behind, if it can be dropped already.
-                    _drop_leftovers(connection, outcome)
-                    break
-                sizes = {state.name: state.size for state in index_states(connection)}
-                outcome.rebuilt[rebuild.name] = [
-                    rebuild.size,
-                    sizes.get(rebuild.name, rebuild.size),
-                    rebuild.rows,
-                ]
+            _rebuild_all(connection, plan, outcome, statement_timeout_seconds)
+        except SQLAlchemyError as exc:
+            outcome.failed.setdefault("connection", _error(exc))
         finally:
             # Not back to the pool: the session settings above end with the connection.
-            pooled.detach()
+            # A connection the server ended is discarded by the pool itself, and cannot
+            # be detached.
+            if _alive(pooled):
+                pooled.detach()
     return outcome
 
 
@@ -383,8 +436,11 @@ def reclaim_pass(
         return None
     run = new_run(provider, settings, "reclaim", now)
     try:
-        outcome = execute(engine, plan)
-    except DBAPIError as exc:
+        outcome = execute(
+            engine, plan, statement_timeout_seconds=settings.snapshot_reclaim_timeout_seconds
+        )
+    except SQLAlchemyError as exc:
+        # Whatever state the rebuild's connection was left in, the pass is recorded.
         outcome = Outcome(failed={"connection": _error(exc)})
     if outcome.failed:
         run.status = "failed"
@@ -399,6 +455,8 @@ def reclaim_pass(
 
 __all__ = [
     "BUDGET_SECONDS",
+    "FAILURE_BACKOFF",
+    "FAILURE_BACKOFF_FULL",
     "INDEX_ROW_BYTES",
     "LOCK_TIMEOUT_SECONDS",
     "MIN_EXCESS_BYTES",
@@ -406,7 +464,6 @@ __all__ = [
     "RECLAIM_FACTOR",
     "RECLAIM_FACTOR_FULL",
     "STATED_FILES_FACTOR",
-    "STATEMENT_TIMEOUT_SECONDS",
     "WORK_MEM_MB",
     "IndexState",
     "NotAutocommit",

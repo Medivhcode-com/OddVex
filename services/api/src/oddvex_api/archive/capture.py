@@ -15,18 +15,20 @@ One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the work
    On PostgreSQL capture also stops while the files themselves (tables and indexes) are
    at ``snapshot_max_disk_bytes``, a hard ceiling above anything the counted cap allows;
    index rebuilds (``archive/reclaim.py``) are what brings the files back under it.
-6. In scope: live events, and upcoming ones starting within ``snapshot_horizon_hours``
-   whose start time passed at most ``UPCOMING_GRACE_HOURS`` ago.
+6. In scope: live events whose start time passed at most ``LIVE_GRACE_HOURS`` ago, and
+   upcoming ones starting within ``snapshot_horizon_hours`` whose start time passed at
+   most ``UPCOMING_GRACE_HOURS`` ago.
 7. A quote or offer is written only when it differs from the latest stored row for its
    key; a key that disappears gets a tombstone row, and so does every prop offer of a
-   game that has left scope. An unchanged prop offer is stored again once its latest row
-   is ``PROP_REFRESH_HOURS`` old, so the 48-hour props read always finds it. Inserts go
-   in chunks of
-   ``INSERT_CHUNK``, one transaction per kind. A failed kind is rolled back and recorded
-   as a ``failed`` run with the exception's class name only.
+   game that has left scope. An unchanged prop offer is stored again at the first props
+   capture after its latest row is ``PROP_REFRESH_HOURS`` old; the props read looks back
+   at least that far plus its gap limit, so it finds every open offer. Inserts go in
+   chunks of ``INSERT_CHUNK``, one transaction per kind. A failed kind is rolled back
+   and recorded as a ``failed`` run with the exception's class name only.
 8. The prune (``archive/prune.py``) runs when it is due.
-9. On PostgreSQL, bloated indexes are rebuilt and anything an interrupted rebuild left
-   is dropped (``archive/reclaim.py``), still inside the pass's advisory lock.
+9. On PostgreSQL, anything an interrupted index rebuild left is dropped and, unless the
+   capture or the prune of this pass failed, bloated indexes are rebuilt
+   (``archive/reclaim.py``), still inside the pass's advisory lock.
 
 The run row is built before it is inserted, with its counters already set: archive rows,
 runs included, are never updated (``archive/guard.py``).
@@ -43,9 +45,10 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 from sqlalchemy import Engine, and_, func, insert, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ..config import Settings
+from ..config import SNAPSHOT_PROP_REFRESH_HOURS, Settings
 from ..db import (
     ARCHIVE_MODELS,
     ArchivedEvent,
@@ -79,14 +82,20 @@ ROW_BYTES: dict[str, int] = {
     "status_snapshots": 400,
     "snapshot_runs": 388,
 }
-#: An unchanged prop offer is stored again once its latest row is this old: well inside
-#: the props read's 48-hour look-back, with room for a missed props capture.
-PROP_REFRESH_HOURS = 24
+#: An unchanged prop offer is stored again at the first props capture after its latest
+#: row is this old. The props read's look-back is never shorter than this plus the props
+#: gap limit (``Settings.snapshot_prop_lookback_seconds``), so it finds every open offer.
+PROP_REFRESH_HOURS = SNAPSHOT_PROP_REFRESH_HOURS
 #: ``pg_try_advisory_lock`` key held for the length of one pass (72 for MED-72).
 ADVISORY_LOCK_KEY = 72001
 #: An event the provider still calls ``upcoming`` this many hours after its start time
 #: (a postponed game whose status was never updated) is no longer captured.
 UPCOMING_GRACE_HOURS = 6
+#: Nor is an event the provider still calls ``live`` this many hours after its start time
+#: (a finished game whose status was never updated). Without it such a game would never
+#: leave scope: the prune reduces a game only once its last capture has aged out, so its
+#: rows would stay at full resolution and grow until the cap stopped all capture.
+LIVE_GRACE_HOURS = 24
 
 RunKind = Literal["odds", "props", "status", "prune", "reclaim"]
 StatusKind = Literal["lineup", "injury", "news", "weather"]
@@ -181,14 +190,17 @@ class PassReport:
 def in_scope(provider: SportsDataProvider, now: datetime, settings: Settings) -> list[Event]:
     """Live events and upcoming events that start within the horizon. Final events are
     not captured: their last rows from before the start are the closing rows. An event
-    still ``upcoming`` more than ``UPCOMING_GRACE_HOURS`` after its start time is left
-    out, so a postponed game the provider never updates is not captured forever."""
+    still ``upcoming`` more than ``UPCOMING_GRACE_HOURS`` after its start time, or still
+    ``live`` more than ``LIVE_GRACE_HOURS`` after it, is left out, so a game whose status
+    the provider never updates is not captured forever."""
     horizon = now + timedelta(hours=settings.snapshot_horizon_hours)
     grace = now - timedelta(hours=UPCOMING_GRACE_HOURS)
+    live_grace = now - timedelta(hours=LIVE_GRACE_HOURS)
     return [
         e
         for e in provider.list_events()
-        if e.status == "live" or (e.status == "upcoming" and grace <= e.start_time <= horizon)
+        if (e.status == "live" and e.start_time >= live_grace)
+        or (e.status == "upcoming" and grace <= e.start_time <= horizon)
     ]
 
 
@@ -769,7 +781,10 @@ def capture_pass(
     is held on that connection for the whole pass (it survives the commits between kinds
     and is released when the pass ends or the connection drops); a pass that cannot take
     it does nothing. The index reclaim runs last, inside the same lock, once the capture
-    and the prune have committed: it never overlaps either."""
+    and the prune have committed, so it is never started beside either. (A rebuild whose
+    worker is killed goes on in the database server while the lock is released with the
+    dead connection: the next pass can then capture beside it, which is safe, a
+    concurrent rebuild being made to run beside writes.)"""
     from .reclaim import reclaim_pass  # reclaim imports helpers from this module
 
     with engine.connect() as connection:
@@ -799,16 +814,37 @@ def capture_pass(
             # The pass's own connection must hold no transaction now: a concurrent
             # index rebuild waits for every older transaction to end.
             connection.rollback()
-            if postgres and reclaim and not report.failed:
+            if postgres and reclaim:
+                # After a failed capture or prune nothing is rebuilt (the database or
+                # the feed is in trouble; a rebuild is heavy work), but what an
+                # interrupted rebuild left is still dropped.
+                healthy = not report.failed
                 pruned = report.prune is not None and report.prune.status == "ok"
-                report.reclaim = reclaim_pass(
-                    engine,
-                    provider,
-                    settings,
-                    due=pruned,
-                    over_ceiling=report.over_ceiling,
-                    force=force_reclaim,
-                )
+                over_ceiling = report.over_ceiling
+                if force_reclaim and healthy and not over_ceiling:
+                    # ``--reclaim`` captures nothing, so the pass has not looked at the
+                    # files yet: over the ceiling the lower bar applies here too.
+                    with Session(bind=connection) as session:
+                        disk = archive_disk_bytes(session)
+                        session.rollback()
+                    over_ceiling = disk is not None and disk >= settings.snapshot_max_disk_bytes
+                try:
+                    report.reclaim = reclaim_pass(
+                        engine,
+                        provider,
+                        settings,
+                        due=pruned and healthy,
+                        over_ceiling=over_ceiling and healthy,
+                        force=force_reclaim and healthy,
+                    )
+                except SQLAlchemyError as exc:
+                    if healthy:
+                        raise
+                    # The pass has already failed and is recorded as such; if the
+                    # database cannot even list its indexes, the clean-up waits.
+                    logger.warning(
+                        "snapshot_leftover_cleanup_skipped", extra={"error": type(exc).__name__}
+                    )
             return report
         finally:
             if postgres:
@@ -825,6 +861,7 @@ __all__ = [
     "FLAG",
     "INSERT_CHUNK",
     "INTERVAL_SLACK_SECONDS",
+    "LIVE_GRACE_HOURS",
     "PROP_REFRESH_HOURS",
     "ROW_BYTES",
     "UPCOMING_GRACE_HOURS",

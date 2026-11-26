@@ -1,10 +1,12 @@
 """The archive's read paths, as the routes answer them.
 
 Each is bounded to one event and market (at most one row per book), one player (one row
-per market and book of each of the player's games with an offer in the last 48 hours,
-at most two or three games, plus a few small queries per game of the player near T for
-the prune check) or one event's status records (at most ``MAX_STATUS_ENTRIES``), so one
-request reads a few hundred rows at most.
+per market and book of each of the player's games with an offer in the look-back, 48
+hours by default, at most two or three games, plus a few small queries per game of the
+player near T for the prune check) or one event's status records (at most
+``MAX_STATUS_ENTRIES``), so one request reads a few hundred rows at most. An odds, props
+or placement read that a prune changed the rows under is made again, at most
+``view.READ_ATTEMPTS`` times in all, so the bound is that many times the above.
 """
 
 from __future__ import annotations
@@ -41,7 +43,16 @@ from .schemas import (
     PropsCoverageOut,
     StatusCoverageOut,
 )
-from .view import ArchiveView, Coverage, board_at, latest_odds_rows, props_at, prune_cutoffs
+from .view import (
+    READ_ATTEMPTS,
+    ArchiveBusy,
+    ArchiveView,
+    Coverage,
+    board_at,
+    latest_odds_rows,
+    props_at,
+    prune_cutoffs,
+)
 
 #: Most status entries one request returns.
 MAX_STATUS_ENTRIES = 500
@@ -70,8 +81,18 @@ def archived_odds(
     as_of: datetime,
 ) -> ArchivedOddsOut:
     """Every book's stored quote for one event and market as of T, and the odds comparison
-    as of T when the event is covered then."""
-    view = ArchiveView(session, provider, as_of, settings)
+    as of T when the event is covered then. Built again on a new view when a prune
+    changed the archive while it was being read (``ArchiveView.settled``)."""
+    for _ in range(READ_ATTEMPTS):
+        view = ArchiveView(session, provider, as_of, settings)
+        answer = _archived_odds(view, event_id, market)
+        if view.settled():
+            return answer
+    raise ArchiveBusy("the prune kept changing the rows this read needs")
+
+
+def _archived_odds(view: ArchiveView, event_id: str, market: str) -> ArchivedOddsOut:
+    session, provider, as_of = view.session, view.base, view.as_of
     coverage = view.coverage(event_id)
     refs = _book_refs(provider)
     rows = (

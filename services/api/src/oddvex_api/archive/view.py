@@ -11,10 +11,21 @@ Two cutoffs recorded by the prune (``prune_cutoffs``) bound what a read may trus
 whose last capture is before ``prune_cutoff`` hold only their kept captures. Before
 ``keep_cutoff`` (the keep horizon) capture runs are thinned, so a read that would have to
 rely on a run from before it answers ``archive_pruned`` and returns nothing.
+
+**Reading beside a running prune.** A prune records how far it will go (a ``started``
+prune run with both cutoffs, committed before it deletes anything) and then removes each
+game's rows in one transaction, so no committed state holds a capture's event row without
+its quotes. A read is several statements, though, and on PostgreSQL each sees what was
+committed when it began, so a game's transaction can land between two of them. Every read
+therefore checks, after its last statement, that no prune has started since its first
+(:func:`prune_marker`) and that every capture it answered from is still held; if not it
+reads again (``READ_ATTEMPTS`` times at most, then :class:`ArchiveBusy`). An answer that
+passes was built from rows that were all there together.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from itertools import pairwise
@@ -25,7 +36,11 @@ from sqlalchemy.orm import Session
 
 from ..board import Board
 from ..cache import InMemoryTTLCache
-from ..config import Settings
+from ..config import (
+    SNAPSHOT_PROP_GAME_HOURS,
+    SNAPSHOT_WORKER_TURN_SECONDS,
+    Settings,
+)
 from ..db import ArchivedEvent, ArchivedOdds, ArchivedProp, SnapshotRun
 from ..providers import (
     Event,
@@ -45,9 +60,54 @@ from ..providers import (
 
 CoverageStatus = Literal["captured", "not_captured", "archive_gap", "archive_pruned"]
 #: Hours a game lasts at most, for the props look-back (:func:`prop_lookback`).
-PROP_GAME_HOURS = 12
+PROP_GAME_HOURS = SNAPSHOT_PROP_GAME_HOURS
 #: The worker loop's period: the gap limits allow two missed intervals plus one turn.
-WORKER_TURN_SECONDS = 120
+WORKER_TURN_SECONDS = SNAPSHOT_WORKER_TURN_SECONDS
+#: Statuses of a prune run that tell how far a prune reaches: ``started`` is written and
+#: committed before the prune deletes anything, ``ok`` when it has finished. A read
+#: trusts neither a game nor a time that a started prune may already have reduced.
+PRUNE_REACH = ("started", "ok")
+#: Times a read is made again when a prune changed the archive under it.
+READ_ATTEMPTS = 4
+
+
+class ArchiveBusy(RuntimeError):
+    """A read was made ``READ_ATTEMPTS`` times and a prune changed the rows under it
+    every time. One prune can do that three times at most (it starts, it reduces the
+    game, the keep horizon removes the game), and prunes are an hour apart."""
+
+
+def prune_marker(session: Session) -> int | None:
+    """The id of the newest prune start. A prune writes one, committed, before it deletes
+    anything, so two equal readings mean no prune began in between."""
+    return session.scalar(
+        select(func.max(SnapshotRun.id)).where(
+            SnapshotRun.kind == "prune", SnapshotRun.status == "started"
+        )
+    )
+
+
+def still_held(session: Session, snapshot_ids: set[int]) -> bool:
+    """Whether every one of these event rows is still in the archive."""
+    if not snapshot_ids:
+        return True
+    held = session.scalar(
+        select(func.count()).select_from(ArchivedEvent).where(ArchivedEvent.id.in_(snapshot_ids))
+    )
+    return int(held or 0) == len(snapshot_ids)
+
+
+def settled[T](session: Session, read: Callable[[], tuple[T, set[int]]]) -> T:
+    """``read()`` gives an answer and the ids of the event rows (captures) it was built
+    from. The answer is returned once no prune started while it was being read and those
+    captures are still held afterwards: the rows it read were then all there together
+    (module docstring). Otherwise it is read again."""
+    for _ in range(READ_ATTEMPTS):
+        marker = prune_marker(session)
+        answer, snapshot_ids = read()
+        if prune_marker(session) == marker and still_held(session, snapshot_ids):
+            return answer
+    raise ArchiveBusy("the prune kept changing the rows this read needs")
 
 
 @dataclass(frozen=True)
@@ -93,10 +153,12 @@ def _latest_odds_run_at(session: Session, provider_name: str, as_of: datetime) -
 def prune_cutoffs(session: Session) -> tuple[datetime | None, datetime | None]:
     """(prune_cutoff, keep_cutoff) reached by the prunes so far: the largest recorded, so
     a later change of the retention settings never makes a read trust what an earlier
-    prune removed. ``None`` before the first prune."""
+    prune removed. A prune that has started counts, finished or not: it records both
+    cutoffs before it deletes anything, so a prune that is running, or was cut short, is
+    never trusted less than one that ended. ``None`` before the first prune."""
     row = session.execute(
         select(func.max(SnapshotRun.prune_cutoff), func.max(SnapshotRun.keep_cutoff)).where(
-            SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
+            SnapshotRun.kind == "prune", SnapshotRun.status.in_(PRUNE_REACH)
         )
     ).one()
     return row[0], row[1]
@@ -126,7 +188,11 @@ def reduced_until(session: Session, provider_name: str, event_id: str) -> dateti
     one, that holds a prune. Rows captured after ``now_i`` (the game came back into
     scope) were never touched by it. The latest such ``now_i`` is the answer. A cutoff is
     at least a day before its prune (``snapshot_retention_days`` is at least 1), so only
-    gaps longer than a day are looked at."""
+    gaps longer than a day are looked at.
+
+    A prune counts from its start (``PRUNE_REACH``): one that is running, or was cut
+    short, may or may not have reached the event yet, and the event is read as reduced
+    either way. (Its transaction per game makes the two cases the only ones.)"""
     times = list(
         session.scalars(
             select(ArchivedEvent.captured_at)
@@ -143,7 +209,7 @@ def reduced_until(session: Session, provider_name: str, event_id: str) -> dateti
     ]
     gaps.append((times[-1], None))
     for earlier, later in reversed(gaps):
-        conditions = [SnapshotRun.kind == "prune", SnapshotRun.status == "ok"]
+        conditions = [SnapshotRun.kind == "prune", SnapshotRun.status.in_(PRUNE_REACH)]
         if later is not None:
             conditions.append(SnapshotRun.captured_at < later)
         # Cutoffs never move back, so the last prune before the gap's end has the
@@ -265,10 +331,11 @@ def latest_odds_rows(
 
 
 def prop_lookback(settings: Settings) -> timedelta:
-    """How far back an offer can still be current: an unchanged offer is stored once, when
-    its game enters scope (``snapshot_horizon_hours`` before the start), and stays valid
-    until the game ends; ``PROP_GAME_HOURS`` covers the game itself."""
-    return timedelta(hours=settings.snapshot_horizon_hours + PROP_GAME_HOURS)
+    """How far back from T an open offer's latest row can be
+    (``Settings.snapshot_prop_lookback_seconds``): the capture horizon plus the game, and
+    never less than the age at which an unchanged offer is stored again plus the props
+    gap limit, so the read finds every open offer at every allowed setting."""
+    return timedelta(seconds=settings.snapshot_prop_lookback_seconds)
 
 
 def latest_prop_rows(
@@ -322,7 +389,7 @@ def latest_prop_rows(
 def props_max_gap_seconds(settings: Settings) -> int:
     """Two props intervals plus one worker turn (7,320 s with hourly props), the props
     counterpart of ``snapshot_max_gap_seconds``."""
-    return 2 * settings.snapshot_props_interval_seconds + WORKER_TURN_SECONDS
+    return settings.snapshot_props_max_gap_seconds
 
 
 @dataclass(frozen=True)
@@ -500,12 +567,35 @@ def props_at(
     settings: Settings,
     team_id: str | None = None,
 ) -> PropsRead:
-    """The player's props as of T with their coverage (:class:`PropsRead`)."""
+    """The player's props as of T with their coverage (:class:`PropsRead`), read so that
+    a prune running beside it cannot change the answer (:func:`settled`). No event row
+    is named to the check: an offer row read before its game was reduced is the true
+    one, and a game reduced before the rows were read is known as reduced by the time
+    the prune check below runs."""
+    return settled(
+        session,
+        lambda: (
+            _props_at(session, provider_name, player_id, market, as_of, settings, team_id),
+            set(),
+        ),
+    )
+
+
+def _props_at(
+    session: Session,
+    provider_name: str,
+    player_id: str,
+    market: str | None,
+    as_of: datetime,
+    settings: Settings,
+    team_id: str | None,
+) -> PropsRead:
     prune_cutoff, keep_cutoff = prune_cutoffs(session)
     lookback = prop_lookback(settings)
     gap = timedelta(seconds=props_max_gap_seconds(settings))
     if keep_cutoff is not None and as_of - max(lookback, gap) < keep_cutoff:
-        # The rows and runs this read would look at reach past the keep horizon.
+        # The rows and runs this read would look at reach past the keep horizon (the
+        # look-back is never shorter than the gap limit; both are named for the reader).
         return PropsRead("archive_pruned", None, [], [])
     run_at = session.scalar(
         select(func.max(SnapshotRun.captured_at)).where(
@@ -590,6 +680,11 @@ class ArchiveView:
     it is static. Events, odds and prop offers come only from rows captured at or before
     ``as_of``. Line history, game logs and next events return nothing: they must never
     reveal data from after T, and their as-of reads belong to later items (F17, F34).
+
+    A view is made for one answer. Whoever builds an answer from its events and odds
+    asks :meth:`settled` afterwards and, when it says no, throws the answer away and
+    builds it again on a new view (module docstring, "Reading beside a running prune";
+    ``service.archived_odds`` and ``placement.placement_prices`` do).
     """
 
     def __init__(
@@ -601,6 +696,8 @@ class ArchiveView:
         self.settings = settings
         self.name = base.name
         self.data_mode = base.data_mode
+        #: Read first, before any row: :meth:`settled` compares it with a later reading.
+        self._marker = prune_marker(session)
         self._coverage: dict[str, Coverage] = {}
         self._cutoffs: tuple[datetime | None, datetime | None] | None = None
         self._book_order = {b.id: i for i, b in enumerate(base.list_sportsbooks())}
@@ -655,6 +752,17 @@ class ArchiveView:
         if self._cutoffs is None:
             self._cutoffs = prune_cutoffs(self.session)
         return self._cutoffs
+
+    def settled(self) -> bool:
+        """Whether everything this view has answered still stands: no prune has started
+        since the view was made, and every capture it called ``captured`` is still held.
+        Then the rows it read were all there together. Ask after the last read."""
+        held = {
+            coverage.snapshot.id
+            for coverage in self._coverage.values()
+            if coverage.status == "captured" and coverage.snapshot is not None
+        }
+        return prune_marker(self.session) == self._marker and still_held(self.session, held)
 
     def get_event(self, event_id: str) -> Event | None:
         coverage = self.coverage(event_id)
@@ -758,8 +866,11 @@ def board_at(view: ArchiveView, coverage: Coverage) -> Board:
 
 __all__ = [
     "PROP_GAME_HOURS",
+    "PRUNE_REACH",
+    "READ_ATTEMPTS",
     "WORKER_TURN_SECONDS",
     "ArchiveBoard",
+    "ArchiveBusy",
     "ArchiveView",
     "Coverage",
     "CoverageStatus",
@@ -773,5 +884,8 @@ __all__ = [
     "props_at",
     "props_max_gap_seconds",
     "prune_cutoffs",
+    "prune_marker",
     "reduced_until",
+    "settled",
+    "still_held",
 ]

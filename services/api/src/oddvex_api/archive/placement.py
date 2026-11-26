@@ -24,7 +24,7 @@ from ..schemas import price_out
 from ..textnorm import fold
 from .schemas import ArchivedBestOut, LegPlacementPriceOut
 from .service import coverage_out
-from .view import ArchiveView, board_at
+from .view import READ_ATTEMPTS, ArchiveBusy, ArchiveView, board_at
 
 CANNOT_PRICE_REASONS = (
     "leg_not_structured",
@@ -194,11 +194,17 @@ def placement_prices(
     bet: Bet,
     books: Sequence[str],
 ) -> list[LegPlacementPriceOut]:
-    """One answer per leg of ``bet``, in leg order. ``books`` are provider sportsbook keys."""
-    view = ArchiveView(session, provider, bet.placed_at, settings)
+    """One answer per leg of ``bet``, in leg order. ``books`` are provider sportsbook keys.
+    Built again on a new view when a prune changed the archive while the legs were being
+    read (``ArchiveView.settled``)."""
     ids = {b.key: b.id for b in provider.list_sportsbooks()}
     book_ids = {ids[key] for key in books if key in ids}
-    return [_leg_price(view, leg, book_ids, ids) for leg in bet.legs]
+    for _ in range(READ_ATTEMPTS):
+        view = ArchiveView(session, provider, bet.placed_at, settings)
+        legs = [_leg_price(view, leg, book_ids, ids) for leg in bet.legs]
+        if view.settled():
+            return legs
+    raise ArchiveBusy("the prune kept changing the rows this read needs")
 
 
 __all__ = [

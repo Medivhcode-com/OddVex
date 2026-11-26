@@ -3,11 +3,7 @@ append-only guard, data-mode isolation, the lock and the script."""
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from oddvex_api.archive.capture import (
     ADVISORY_LOCK_KEY,
+    LIVE_GRACE_HOURS,
     PROP_REFRESH_HOURS,
     UPCOMING_GRACE_HOURS,
     StatusRecord,
@@ -27,6 +24,8 @@ from oddvex_api.archive.capture import (
 from oddvex_api.archive.guard import ArchiveIsAppendOnly
 from oddvex_api.archive.prune import prune_archive
 from oddvex_api.archive.service import archived_odds, archived_props
+from oddvex_api.archive.view import prop_lookback, props_max_gap_seconds
+from oddvex_api.config import Settings
 from oddvex_api.db import (
     ARCHIVE_MODELS,
     ArchivedEvent,
@@ -38,11 +37,13 @@ from oddvex_api.db import (
 from oddvex_api.providers import Event, OddsSnapshot, PropOffer
 
 from .archive_support import (
+    LIVE,
     OTHER_PREGAME,
     PREGAME,
     T0,
     ArchiveEnv,
     archive_env,
+    capture_script,
     enable_archive,
     set_quotes,
 )
@@ -50,8 +51,6 @@ from .conftest import EXTERNAL_DATABASE_URL
 from .fakes import ControlledProvider, moneyline
 
 __all__ = ["archive_env"]
-
-API_ROOT = Path(__file__).resolve().parents[1]
 
 
 def count(env: ArchiveEnv, model: Any, *where: Any) -> int:
@@ -348,37 +347,16 @@ def test_two_passes_never_overlap_on_postgresql(archive_env: ArchiveEnv) -> None
     assert env.capture(T0).odds is not None
 
 
-def _script(
-    env: ArchiveEnv, *args: str, extra: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    environment = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "DATABASE_URL": env.settings.database_url,
-        "ODDVEX_ENV": "test",
-        "ODDVEX_LOG_LEVEL": "WARNING",
-        **(extra or {}),
-    }
-    return subprocess.run(
-        [sys.executable, str(API_ROOT / "scripts" / "capture_snapshots.py"), *args],
-        cwd=API_ROOT,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
-
-
-def test_the_capture_script(archive_env: ArchiveEnv) -> None:
+def test_the_capturecapture_script(archive_env: ArchiveEnv) -> None:
     env = archive_env
     enable_archive(env.session_factory, False)
-    off = _script(env)
+    off = capture_script(env)
     assert off.returncode == 0, off.stderr
     assert "Snapshot archive is off; nothing captured." in off.stdout
     assert total_rows(env) == 0
     # With the flag off the provider is never built: a replay provider pointed at a
     # missing dataset would fail if it were loaded.
-    replay = _script(
+    replay = capture_script(
         env,
         extra={"ODDVEX_DATA_PROVIDER": "replay", "ODDVEX_REPLAY_DATA_PATH": "/nonexistent/replay"},
     )
@@ -386,20 +364,28 @@ def test_the_capture_script(archive_env: ArchiveEnv) -> None:
     assert "Snapshot archive is off; nothing captured." in replay.stdout
 
     enable_archive(env.session_factory)
-    dry = _script(env, "--dry-run")
+    dry = capture_script(env, "--dry-run")
     assert dry.returncode == 0 and "Dry run, nothing saved" in dry.stdout, dry.stderr
     assert total_rows(env) == 0
 
-    captured = _script(env)
+    captured = capture_script(env)
     assert captured.returncode == 0, captured.stderr
     assert "odds ok" in captured.stdout and "props ok" in captured.stdout
-    again = _script(env)
+    again = capture_script(env)
     assert again.returncode == 0 and "odds not due" in again.stdout, again.stdout
 
-    stats = _script(env, "--stats")
+    stats = capture_script(env, "--stats")
     assert stats.returncode == 0 and "Snapshot archive on" in stats.stdout, stats.stderr
-    pruned = _script(env, "--prune-only", "--force")
+    pruned = capture_script(env, "--prune-only", "--force")
     assert pruned.returncode == 0 and "prune ok" in pruned.stdout, pruned.stdout
+    # ``--reclaim`` only checks the indexes (PostgreSQL), which are as small as they can
+    # be here; on SQLite there is nothing to check. It captures and prunes nothing.
+    rows = total_rows(env)
+    reclaimed = capture_script(env, "--reclaim")
+    assert reclaimed.returncode == 0, reclaimed.stderr
+    assert "odds not due; props not due; prune not due" in reclaimed.stdout
+    assert "reclaim: nothing to rebuild" in reclaimed.stdout
+    assert total_rows(env) == rows
 
 
 class NoScheduleProvider(ControlledProvider):
@@ -547,6 +533,26 @@ def test_a_game_still_upcoming_long_after_its_start_leaves_scope(
     assert [e.id for e in found] == [PREGAME, "delayed"]
 
 
+def test_a_game_still_live_long_after_its_start_leaves_scope(archive_env: ArchiveEnv) -> None:
+    """A game the provider keeps calling ``live`` would never leave scope, and the prune
+    reduces a game only once its last capture has aged out: its rows would stay at full
+    resolution and grow until the cap stopped capture for every game. It is captured for
+    at most ``LIVE_GRACE_HOURS`` after its start time, and then leaves like any other:
+    its prop offers are tombstoned and the prune handles it."""
+    env = archive_env
+    live = env.provider.get_event(LIVE)
+    assert live is not None and live.status == "live"
+    now = T0
+    inside = live.model_copy(
+        update={"id": "long", "start_time": now - timedelta(hours=LIVE_GRACE_HOURS)}
+    )
+    outside = live.model_copy(
+        update={"id": "stuck", "start_time": now - timedelta(hours=LIVE_GRACE_HOURS, seconds=1)}
+    )
+    found = in_scope(_Schedule([live, inside, outside]), now, env.settings)  # type: ignore[arg-type]
+    assert [e.id for e in found] == [LIVE, "long"]
+
+
 class DelayedGameProvider(ControlledProvider):
     """PREGAME keeps being pushed back: always upcoming, ten hours ahead of the clock, and
     the only game on the schedule. One player is offered on it, with the offers fixed as
@@ -606,3 +612,100 @@ def test_an_unchanged_offer_is_stored_again_once_a_day_so_the_props_read_keeps_i
     assert read.coverage.status == "captured"
     assert len(read.offers) == keys
     assert {o.captured_at for o in read.offers} == {T0 + timedelta(hours=48)}
+
+
+@pytest.mark.parametrize("props_interval", [360, 3600])
+@pytest.mark.parametrize("horizon", [12, 14, 36])
+def test_an_offer_unchanged_for_a_day_is_read_at_every_capture_horizon(
+    archive_env: ArchiveEnv, horizon: int, props_interval: int
+) -> None:
+    """Regression (review round 4, blocking). The props read looked back the capture
+    horizon plus 12 hours; an unchanged offer is stored again only at the first props
+    capture after its row is 24 hours old. With a horizon of 14 hours or less the
+    look-back was shorter than that, so between the row's 24th hour and the next props
+    capture the read answered ``captured`` without the offer.
+
+    The worst case: the offers are stored at T0, and the next props capture runs one
+    second before they are 24 hours old, so it stores nothing. That capture covers reads
+    up to the props gap limit after it, when the rows are almost 24 hours and the gap
+    limit old. Every offer must still be there, at every allowed horizon; one
+    microsecond later the answer is a gap."""
+    env = archive_env
+    env.settings = env.settings.model_copy(
+        update={
+            "snapshot_horizon_hours": horizon,
+            "snapshot_props_interval_seconds": props_interval,
+        }
+    )
+    p = DelayedGameProvider()  # one game, always ten hours ahead: in scope at every horizon
+    env.provider = p
+    keys = len(p.fixed)
+    second = T0 + timedelta(hours=PROP_REFRESH_HOURS, seconds=-1)
+    for moment in (T0, second):
+        report = env.capture(moment)
+        assert report.props is not None and report.props.status == "ok"
+    where = (ArchivedProp.player_id == p.player_id, ArchivedProp.event_id == PREGAME)
+    with env.session_factory() as db:
+        assert set(db.scalars(select(ArchivedProp.captured_at).where(*where))) == {T0}
+    gap = timedelta(seconds=props_max_gap_seconds(env.settings))
+    assert gap == timedelta(seconds=2 * props_interval + 120)
+    last_covered = second + gap
+    assert last_covered - T0 <= prop_lookback(env.settings)
+    with env.session_factory() as db:
+        at_capture = archived_props(db, p, env.settings, p.player_id, None, second)
+        at_the_edge = archived_props(db, p, env.settings, p.player_id, None, last_covered)
+        past_it = archived_props(
+            db, p, env.settings, p.player_id, None, last_covered + timedelta(microseconds=1)
+        )
+    for read in (at_capture, at_the_edge):
+        assert read.coverage.status == "captured" and read.coverage.captured_at == second
+        assert len(read.offers) == keys and {o.captured_at for o in read.offers} == {T0}
+    # The gap limit itself is inside: one microsecond more is a gap, with no offers.
+    assert past_it.coverage.status == "archive_gap" and past_it.offers == []
+
+
+def test_the_props_look_back_covers_the_refresh_at_every_allowed_setting() -> None:
+    """The look-back is the horizon plus the game, and never less than the refresh age
+    plus the props gap limit. The default (36 hours) is the documented 48 hours."""
+    assert Settings(_env_file=None).snapshot_prop_lookback_seconds == 48 * 3600
+    for horizon in range(1, 169):
+        for interval in (60, 360, 3600, 86_400):
+            settings = Settings(
+                _env_file=None,
+                snapshot_horizon_hours=horizon,
+                snapshot_props_interval_seconds=interval,
+            )
+            lookback = settings.snapshot_prop_lookback_seconds
+            gap = settings.snapshot_props_max_gap_seconds
+            assert gap == 2 * interval + 120
+            assert lookback >= PROP_REFRESH_HOURS * 3600 + gap, (horizon, interval)
+            assert lookback >= (horizon + 12) * 3600, (horizon, interval)
+            assert prop_lookback(settings) == timedelta(seconds=lookback)
+    assert Settings(_env_file=None, snapshot_horizon_hours=12).snapshot_prop_lookback_seconds == (
+        24 * 3600 + 7320
+    )
+
+
+def test_archive_settings_that_cannot_work_together_are_refused(archive_env: ArchiveEnv) -> None:
+    """With a keep period no longer than the props look-back every archived props read
+    would answer ``archive_pruned``. The application refuses to start with such settings
+    and the capture script does nothing."""
+    assert Settings(_env_file=None).snapshot_settings_problem() is None
+    # 48 hours of look-back at the default horizon: two days of keeping is not more.
+    short = Settings(_env_file=None, snapshot_keep_days=2, snapshot_retention_days=1)
+    problem = short.snapshot_settings_problem()
+    assert problem is not None and "ODDVEX_SNAPSHOT_KEEP_DAYS" in problem
+    with pytest.raises(RuntimeError, match="ODDVEX_SNAPSHOT_KEEP_DAYS"):
+        short.validate_for_startup()
+    # Three days is; and so is a shorter keep period under a longer retention.
+    assert Settings(_env_file=None, snapshot_keep_days=3).snapshot_settings_problem() is None
+    assert Settings(_env_file=None, snapshot_keep_days=1).snapshot_settings_problem() is None
+    week = Settings(_env_file=None, snapshot_horizon_hours=168, snapshot_keep_days=7)
+    assert week.snapshot_settings_problem() is not None  # 180 hours of look-back
+    refused = capture_script(
+        archive_env,
+        "--force",
+        extra={"ODDVEX_SNAPSHOT_KEEP_DAYS": "2", "ODDVEX_SNAPSHOT_RETENTION_DAYS": "1"},
+    )
+    assert refused.returncode == 2 and "ODDVEX_SNAPSHOT_KEEP_DAYS" in refused.stderr
+    assert total_rows(archive_env) == 0

@@ -226,11 +226,31 @@ the list holds an address: deploy a commit that has it, or empty the list first.
   times the largest counted size, and capture also stops at a ceiling of 2 GiB of files
   (`ODDVEX_SNAPSHOT_MAX_DISK_BYTES`). A rebuild needs extra disk while it runs: one new copy of the index, the
   sort's temporary files and as much write-ahead log, about 0.5 GiB and 0.2 GiB of log for the largest index with
-  the archive at its cap, for some seconds (14.5 s measured on the development machine). It waits for older
-  transactions, such as a dump in progress, for at most 10 s, then gives up until the next prune; a rebuild that is
-  cut short (a deploy restarts the worker) leaves an invalid index that the next pass drops. `GET
-  /v1/admin/archive/stats` shows the size of the files, the ceiling and the last rebuild. Turning the flag off stops
-  the growth, the prune and the rebuilds; the rows stay.
+  the archive at its cap, for some seconds (14.5 s measured on the development machine, with the table in memory;
+  this server's database has 512 MB, so expect longer, and raise `ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS`, 120 by
+  default, if the statistics show rebuilds failing with `QueryCanceled`). Run `scripts/capture_snapshots.py
+  --reclaim` once by hand, timed, after the flag is first turned on: the rebuilds were run on PostgreSQL 16 only
+  and this server runs 17. A rebuild waits for older transactions, such as a dump in progress, for at most 10 s,
+  then gives up; the index is tried again after 6 hours (1 hour while the files are over the ceiling). While a
+  dump holds the tables every pass therefore fails for 10 s and the worker logs `capture_snapshots failed` every
+  two minutes until the dump ends, with one extra copy of the index on the disk meanwhile; captures go on. A
+  rebuild that is cancelled, times out or loses its database session leaves an invalid index that the next pass
+  drops. A deploy does not cut a rebuild short: replacing the worker kills the script, the database server
+  finishes the rebuild on its own, and the next pass captures beside it. A pass that rebuilds delays that turn's
+  alert evaluation and pick grading by its length. `GET /v1/admin/archive/stats` shows the size of the files, the
+  ceiling and the last rebuild. Turning the flag off stops the growth, the prune and the rebuilds; the rows stay.
+  - A deploy replaces the worker in the middle of whatever it is doing. A capture or a prune is rolled back to its
+    last commit (the prune commits game by game and records how far it will go before it deletes, so reads are
+    right meanwhile) and the next pass finishes the work.
+  - A rollback (`ACTION=rollback`) applies and undoes no migration: the five archive tables and their rows stay. An
+    image from before P0.1 has no `scripts/capture_snapshots.py`, while the compose file from `main` still calls it, so the
+    worker logs `capture_snapshots failed` every two minutes and nothing captures, prunes or rebuilds until a newer
+    image runs again: stored rows then outlive their 7 and 400 days, and the time reads as an archive gap.
+  - A restore (`ACTION=restore`) loads the dump into a new database, with dense tables and indexes; captures made
+    after the dump are lost (an archive gap). The replaced database stays in the server as
+    `oddvex_replaced_<time>` and nothing drops it: with the archive at its cap that is up to about 1.9 GiB per
+    restore on the shared disk, outside the archive's own ceiling, plus the `prerestore-` dump. Drop it by hand
+    once the restore is confirmed.
 - The API container does not write uvicorn's access log. The application writes one line per request (time, method,
   path, status, duration, client address) and no query string. The API container that ran before this change did
   write uvicorn's access log, with query strings; the deploy that removes that container removes its log with it

@@ -643,7 +643,8 @@ class SnapshotRun(Base):
     #: Wall clock, for operators.
     started_at: Mapped[datetime] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    #: ok | skipped_full | failed
+    #: ok | skipped_full | failed; a prune also writes ``started``, with its cutoffs,
+    #: before it deletes anything (``archive/prune.py``).
     status: Mapped[str] = mapped_column(String(16))
     #: Changes when the capture rules change. 1 is the first.
     archive_version: Mapped[int] = mapped_column(Integer)
@@ -654,7 +655,8 @@ class SnapshotRun(Base):
     rows_unchanged: Mapped[int] = mapped_column(Integer, default=0)
     rows_deleted: Mapped[int] = mapped_column(Integer, default=0)
     #: Prune runs: games whose last capture is before this have been reduced to their kept
-    #: captures. It never moves back from one prune to the next, whatever the settings.
+    #: captures, or are being reduced by this prune (a ``started`` run). It never moves
+    #: back from one prune to the next, whatever the settings.
     prune_cutoff: Mapped[datetime | None] = mapped_column(UTCDateTime)
     #: Prune runs: games whose last capture is before this, and capture runs before it
     #: that no kept row refers to, have been removed (the keep horizon). Reads answer
