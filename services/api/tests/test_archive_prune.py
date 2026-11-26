@@ -3,7 +3,7 @@ can keep, how coverage reads after it, and what goes at the keep horizon."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -21,7 +21,7 @@ from oddvex_api.db import (
     Bet,
     SnapshotRun,
 )
-from oddvex_api.providers import Event, PropOffer
+from oddvex_api.providers import Event, Player, PropOffer
 
 from .archive_support import (
     OTHER_PREGAME,
@@ -458,6 +458,28 @@ def test_the_props_read_after_the_prune_never_shows_withdrawn_offers(
 
 
 # ------------------------------------------------------------ the keep horizon
+class OneGameProvider(ControlledProvider):
+    """Only PREGAME is on the schedule and only one of its home team's players has prop
+    offers, so a capture is a handful of rows: the tests below are about one game."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        event = self.get_event(PREGAME)
+        assert event is not None
+        self.player_id = ControlledProvider.list_players(self, team_id=event.home_team_id)[0].id
+
+    def list_events(
+        self, league: str | None = None, status: str | None = None, on_date: date | None = None
+    ) -> list[Event]:
+        return [e for e in super().list_events(league, status, on_date) if e.id == PREGAME]
+
+    def list_players(
+        self, league: str | None = None, team_id: str | None = None, query: str | None = None
+    ) -> list[Player]:
+        players = super().list_players(league=league, team_id=team_id, query=query)
+        return [player for player in players if player.id == self.player_id]
+
+
 def _capture_with_a_steady_book(env: ArchiveEnv, offset: int) -> None:
     """northline changes at every capture; summit keeps one price and one
     ``last_updated``, so its only stored row is the first capture's."""
@@ -482,6 +504,7 @@ def test_the_keep_horizon_never_takes_a_carried_forward_quote_from_a_kept_captur
     books with coverage ``captured``. A game's rows leave together, once its last capture
     is past the horizon; from then on the answer is ``archive_pruned`` with no quotes."""
     env = archive_env
+    env.provider = OneGameProvider()
     env.settings = env.settings.model_copy(update={"snapshot_keep_days": 10})
     for offset in (0, 360, 720):
         _capture_with_a_steady_book(env, offset)
@@ -543,15 +566,12 @@ def test_the_keep_horizon_never_takes_a_carried_forward_quote_from_a_kept_captur
     assert orphan_rows(env) == 0
 
 
-class SteadyPropsProvider(ControlledProvider):
-    """One player is offered on PREGAME with the offers fixed as they were at T0, except
-    that the first offer's line moves by ``bump``."""
+class SteadyPropsProvider(OneGameProvider):
+    """The one player is offered on PREGAME with the offers fixed as they were at T0,
+    except that the first offer's line moves by ``bump``."""
 
     def __init__(self) -> None:
         super().__init__()
-        event = self.get_event(PREGAME)
-        assert event is not None
-        self.player_id = self.list_players(team_id=event.home_team_id)[0].id
         self.fixed = [o for o in super().get_prop_offers(self.player_id) if o.event_id == PREGAME]
         self.bump = 0.0
 
