@@ -4,6 +4,7 @@ that is cut short, or that runs beside a read, leaves the reads to answer."""
 
 from __future__ import annotations
 
+import random
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -13,7 +14,14 @@ from sqlalchemy import delete, func, select
 from oddvex_api.archive import prune as prune_module
 from oddvex_api.archive import service as service_module
 from oddvex_api.archive import view as view_module
-from oddvex_api.archive.capture import StatusRecord, capture_pass, capture_status, new_run
+from oddvex_api.archive.capture import (
+    PassReport,
+    StatusRecord,
+    capture_pass,
+    capture_status,
+    is_due,
+    new_run,
+)
 from oddvex_api.archive.placement import placement_prices
 from oddvex_api.archive.prune import MAX_ANCHORS_PER_EVENT, prune_archive
 from oddvex_api.archive.service import archived_odds, archived_props, archived_status
@@ -28,7 +36,7 @@ from oddvex_api.db import (
     SnapshotRun,
     User,
 )
-from oddvex_api.providers import Event, Player, PropOffer
+from oddvex_api.providers import Event, Player, PropOffer, Score
 
 from .archive_support import (
     LIVE,
@@ -44,6 +52,8 @@ from .archive_support import (
     make_user,
 )
 from .fakes import ControlledProvider, moneyline
+from .test_archive_model import START as MODEL_START
+from .test_archive_model import World
 
 __all__ = ["archive_env"]
 
@@ -826,19 +836,21 @@ def test_a_pruned_game_that_comes_back_into_scope_is_not_read_as_whole(
     assert len(again[0]) == len(p.fixed) and again[1] == []
 
 
-def test_a_game_a_props_capture_has_back_in_scope_is_not_pruned_under_it(
+def test_a_game_listed_again_when_only_props_are_due_gets_its_odds_capture_too(
     archive_env: ArchiveEnv,
 ) -> None:
-    """Found by the reference model in review round 5 (seed 614). A game is captured,
-    moved days on and listed again. The first pass that sees it again captures props
-    only (the odds capture is not due in that pass), so the game has fresh prop rows but
-    its newest event row is still the old one, past the cutoff. The prune of that pass
-    took the game for finished and deleted the fresh prop rows with everything else: the
-    props read then answered ``captured`` without the game's offers and without naming
-    it. An open offer stored inside the full-resolution window now keeps the game from
-    being pruned, and the reads know it was left alone. Once that offer has aged out, a
-    game that never got another event row is pruned after all. (Retention is one day
-    here: the synthetic schedule lists a game for three days after its date.)"""
+    """Found by the reference model in review round 5 (seed 614), and one step further by
+    the round-5 review. A game is captured, moved days on and listed again, and the first
+    pass that sees it again is one in which only the props are due. That pass used to
+    store the game's offers with no event row beside them: the prune of the same pass
+    took the game for finished (its newest event row was the old one) and deleted the
+    fresh offers, and after a later prune the props read answered ``captured`` without
+    them and without naming the game.
+
+    A props capture now never runs without the odds capture of its pass: the pass
+    captures odds too, the game has its event row, the prune leaves it alone, and after
+    the game is reduced the kept closing offers answer for that moment. (Retention is
+    one day here: the synthetic schedule lists a game for three days after its date.)"""
     env = archive_env
     env.settings = env.settings.model_copy(
         update={"snapshot_props_interval_seconds": 60, "snapshot_retention_days": 1}
@@ -855,49 +867,314 @@ def test_a_game_a_props_capture_has_back_in_scope_is_not_pruned_under_it(
 
     # Two days on the game is within 36 hours of its new start. The provider does not
     # list it yet when the odds are captured, and does two minutes later, when only the
-    # props are due.
+    # props are due (60 s here; the odds interval is 360 s).
     back = T0 + timedelta(days=2)
     p.hide(PREGAME)
     p.current = back
     report = capture_pass(env.engine, p, env.settings, force=True, prune=False)
     assert report.odds is not None and report.odds.status == "ok"
     p._hidden.discard(PREGAME)
-    p.current = back + timedelta(seconds=120)
+    seen = back + timedelta(seconds=120)
+    p.current = seen
     report = capture_pass(env.engine, p, env.settings, force_prune=True)
-    assert report.odds is None  # not due: no event row is written in this pass
     assert report.props is not None and report.props.status == "ok"
     assert report.prune is not None and report.prune.status == "ok"
-    # The game is whole: the prune left it alone.
+    # The game is whole: the prune left it alone, and the read has its fresh offers.
     assert report.prune.rows_deleted == 0
-    assert captured(env, ArchivedEvent, PREGAME) == [at(0), at(360), at(720)]
-    now = _props_of_the_game(env, p, p.current)
+    now = _props_of_the_game(env, p, seen)
     assert len(now[0]) == keys and now[1] == []
-    assert {o["captured_at"] for o in now[0]} == {p.current}
+    assert {o["captured_at"] for o in now[0]} == {seen}
     assert _props_of_the_game(env, p, at(800)) == first_stay
+    # Because the pass captured odds as well: the game's event row of that moment.
+    assert report.odds is not None and report.odds.status == "ok"
+    assert captured(env, ArchivedEvent, PREGAME) == [at(0), at(360), at(720), seen]
     with env.session_factory() as db:
-        name = p.name
-        assert coverage_at(db, name, PREGAME, at(400), env.settings).status == "captured"
-        assert coverage_at(db, name, PREGAME, p.current, env.settings).status == "not_captured"
+        assert coverage_at(db, p.name, PREGAME, seen, env.settings).status == "captured"
 
-    # The provider drops the game again for good, before any odds capture saw it: its
-    # offers are tombstoned. A day after the open offers were stored they have aged
-    # out, and the prune reduces the game to its kept captures.
+    # The provider drops the game again for good. A day later the prune reduces it to
+    # its kept captures: the first, and the one of two days on (closing and last).
     p.hide(PREGAME)
-    gone = back + timedelta(seconds=240)
-    p.current = gone
+    p.current = back + timedelta(seconds=240)
     report = capture_pass(env.engine, p, env.settings, force_prune=True)
     assert report.props is not None and report.prune is not None
-    assert report.prune.rows_deleted == 0  # the open offers of two minutes ago still count
+    assert report.prune.rows_deleted == 0
     p.current = back + timedelta(days=1, seconds=300)
     summary = prune_archive(env.engine, p, env.settings, force=True)
     assert summary is not None and summary.status == "ok" and summary.rows_deleted > 0
-    assert captured(env, ArchivedEvent, PREGAME) == [at(0), at(720)]
-    assert captured(env, ArchivedProp, PREGAME) == [at(0)]
+    assert captured(env, ArchivedEvent, PREGAME) == [at(0), seen]
+    assert captured(env, ArchivedProp, PREGAME) == [seen]
+    # The read of the moment the game was back: exactly as before the prune.
+    assert _props_of_the_game(env, p, seen + timedelta(seconds=10)) == now
+    # After its offers were withdrawn again, and in its first stay: named, never shown.
+    assert _props_of_the_game(env, p, back + timedelta(seconds=300)) == ([], [PREGAME])
+    assert _props_of_the_game(env, p, at(800)) == ([], [PREGAME])
+    assert orphan_rows(env) == 0
+
+
+# ---------------------- a game listed several times, weeks apart (production settings)
+def _relisted_world(env: ArchiveEnv) -> tuple[World, str, str, Any]:
+    """The reference model's fictional schedule (``test_archive_model.World``) with one
+    game and one of its players, at the settings the product ships with: retention 7
+    days, keep 400 days, horizon 36 hours, odds every 360 s, props hourly."""
+    env.settings = env.settings.model_copy(update={"snapshot_props_interval_seconds": 3600})
+    settings = env.settings
+    assert (
+        settings.snapshot_retention_days,
+        settings.snapshot_keep_days,
+        settings.snapshot_horizon_hours,
+        settings.snapshot_odds_interval_seconds,
+    ) == (7, 400, 36, 360)
+    world = World(random.Random(7))
+    env.provider = world
+    game = world.add_game(world.teams[0], world.teams[1], MODEL_START + timedelta(hours=5))
+    player = world.roster[0]
+
+    def run(moment: datetime, *kinds: str) -> PassReport:
+        """One pass of the worker at ``moment``, with nothing forced."""
+        world.current = moment
+        report = capture_pass(env.engine, world, settings)
+        assert not report.failed, report
+        for kind in kinds:
+            summary = getattr(report, kind)
+            assert summary is not None and summary.status == "ok", (kind, report)
+        return report
+
+    return world, game, player.id, run
+
+
+def _relisted_read(env: ArchiveEnv, game: str, player_id: str, moment: datetime) -> Any:
+    """(props coverage, the game's open offers, games named as pruned, odds coverage)."""
+    world = env.provider
     with env.session_factory() as db:
-        assert coverage_at(db, p.name, PREGAME, at(400), env.settings).status == "archive_pruned"
-    # The read of the moment the props capture had the game: its rows are gone now, and
-    # the game is named, not left out silently.
-    assert _props_of_the_game(env, p, back + timedelta(seconds=130)) == ([], [PREGAME])
+        props = archived_props(db, world, env.settings, player_id, None, moment)
+        odds = archived_odds(db, world, env.settings, game, "moneyline", moment)
+    offers = sorted(
+        (o.market, o.sportsbook.key, o.line, o.captured_at)
+        for o in props.offers
+        if o.event_id == game and o.status != "unavailable"
+    )
+    return props.coverage.status, offers, props.pruned_event_ids, odds.coverage.status
+
+
+def test_a_game_listed_three_times_is_named_for_a_time_in_its_middle_stay(
+    archive_env: ArchiveEnv,
+) -> None:
+    """Regression (review round 5, blocking). A game is listed three times, twenty days
+    apart (postponed twice, the same event id), and every stay is captured normally by
+    odds and props. Once the prune has reduced the third stay the game holds its first
+    capture (day 0) and its closing and last captures (day 40): nothing of the second
+    stay is left, and nothing of the game within days of it. The props read chose the
+    games to check by a row near T, found none, and answered ``captured`` for a time in
+    the second stay with none of the game's offers and without naming it, while the odds
+    read at the same time said ``archive_pruned``. The games are now chosen by the span
+    of their kept first and last captures, which covers the second stay."""
+    env = archive_env
+    world, game, player_id, run = _relisted_world(env)
+    player = world.roster[0]
+
+    def stay(start: datetime) -> None:
+        """The provider lists the game for a start five hours on; three odds captures
+        and one props capture have it; then it is postponed (dropped from the list) and
+        the next props capture tombstones its offers."""
+        world.hidden.discard(game)
+        world.games[game] = world.games[game].model_copy(
+            update={"start_time": start + timedelta(hours=5)}
+        )
+        for market in player.prop_markets[:2]:
+            for book in world.book_ids[:2]:
+                world.set_offer(player_id, game, market, book)
+        run(start, "odds", "props")
+        run(start + timedelta(seconds=360), "odds")
+        run(start + timedelta(seconds=720), "odds")
+        world.hidden.add(game)
+        run(start + timedelta(seconds=1080), "odds")
+        run(start + timedelta(seconds=3600), "odds", "props")
+
+    first, second, third = (MODEL_START + timedelta(days=days) for days in (0, 20, 40))
+    stay(first)
+    run(first + timedelta(days=8), "prune")
+    stay(second)
+    in_second = second + timedelta(seconds=400)
+    truth = _relisted_read(env, game, player_id, in_second)
+    assert truth[0] == "captured" and len(truth[1]) >= 4 and truth[2] == []
+    assert truth[3] == "captured"
+    run(second + timedelta(days=8), "prune")
+    # Reduced once: the second stay's closing offers are still the answer then.
+    assert _relisted_read(env, game, player_id, in_second) == (*truth[:3], "archive_pruned")
+    stay(third)
+    in_third = third + timedelta(seconds=400)
+    third_truth = _relisted_read(env, game, player_id, in_third)
+    assert third_truth[0] == "captured" and len(third_truth[1]) >= 4
+    run(third + timedelta(days=8), "prune")
+    assert captured(env, ArchivedEvent, game) == [first, third + timedelta(seconds=720)]
+    assert captured(env, ArchivedProp, game) == [third]
+
+    # The second stay: its offers cannot be read back, and the answer says so.
+    assert _relisted_read(env, game, player_id, in_second) == (
+        "captured",
+        [],
+        [game],
+        "archive_pruned",
+    )
+    # After that stay's offers were withdrawn, and in the first stay: named as well.
+    for moment in (second + timedelta(seconds=3700), first + timedelta(seconds=400)):
+        assert _relisted_read(env, game, player_id, moment)[:3] == ("captured", [], [game])
+    # The third stay's closing offers are still the answer for a time inside it.
+    assert _relisted_read(env, game, player_id, in_third)[:3] == third_truth[:3]
+    assert orphan_rows(env) == 0
+
+
+def test_a_game_only_a_props_pass_saw_again_is_still_read_right_after_its_prune(
+    archive_env: ArchiveEnv,
+) -> None:
+    """Regression (review round 5, blocking, the second case). Ten days after its first
+    stay was reduced, the provider lists a game for one pass in which props are due and
+    odds are not, and drops it before the next odds capture. The props capture stored
+    the game's offers with no event row of that time; seven days later the prune deleted
+    them (22 rows), and the read of that moment answered ``captured`` with none of the
+    game's offers and without naming it.
+
+    The pass now captures odds whenever props are due, so the game has its event row of
+    that moment, and after the prune the kept closing offers are the answer for it."""
+    env = archive_env
+    world, game, player_id, run = _relisted_world(env)
+    player = world.roster[0]
+    # A second game, always upcoming, so that every capture has something in scope.
+    other = world.add_game(world.teams[2], world.teams[3], MODEL_START + timedelta(hours=5))
+    start = MODEL_START
+    run(start, "odds", "props", "prune")
+    run(start + timedelta(seconds=360), "odds")
+    run(start + timedelta(seconds=720), "odds")
+    world.hidden.add(game)
+    run(start + timedelta(seconds=1080), "odds")
+    run(start + timedelta(seconds=3600), "odds", "props")  # tombstones the game's offers
+    world.games[other] = world.games[other].model_copy(
+        update={"start_time": start + timedelta(days=30)}
+    )
+    assert run(start + timedelta(days=8), "prune").prune.rows_deleted > 0  # type: ignore[union-attr]
+
+    # Day 10: capture is running. One pass is due for props and not for odds (240 s
+    # after the last odds capture); just then the provider lists the game again.
+    back = start + timedelta(days=10)
+    run(back - timedelta(seconds=3600), "odds", "props")
+    report = run(back - timedelta(seconds=240), "odds")
+    assert report.props is None
+    world.hidden.discard(game)
+    world.games[game] = world.games[game].model_copy(
+        update={"start_time": back + timedelta(hours=5)}
+    )
+    for market in player.prop_markets[:2]:
+        for book in world.book_ids[:2]:
+            world.set_offer(player_id, game, market, book)
+    with env.session_factory() as db:
+        odds_due = is_due(db, world.name, "odds", back, env.settings.snapshot_odds_interval_seconds)
+    assert odds_due is False  # by its own interval the odds capture would not run
+    world.current = back
+    relisted = capture_pass(env.engine, world, env.settings)
+    assert relisted.props is not None and relisted.props.status == "ok"
+    world.hidden.add(game)  # gone again before the next pass
+    run(back + timedelta(seconds=360), "odds")
+    run(back + timedelta(seconds=3600), "odds", "props")  # tombstones
+
+    moment = back + timedelta(seconds=60)
+    before = _relisted_read(env, game, player_id, moment)
+    assert before[0] == "captured" and len(before[1]) >= 4 and before[2] == []
+
+    # Seven days and an hour on, everything of the game has aged out: it is reduced.
+    report = run(back + timedelta(days=7, seconds=3700), "prune")
+    assert report.prune is not None and report.prune.rows_deleted > 0
+    after = _relisted_read(env, game, player_id, moment)
+    # Safety: ``captured`` is the truth, or the game is named as pruned.
+    assert after[1] == before[1] or game in after[2], after
+    # And with the capture rule it is the truth: the pass captured odds too, so the
+    # game's closing capture is the one of that moment, and its offers were kept.
+    assert relisted.odds is not None and relisted.odds.status == "ok"
+    assert captured(env, ArchivedEvent, game) == [start, back]
+    assert after[:3] == before[:3] and after[3] == "captured"
+    # After the tombstones the game is named, not shown.
+    assert _relisted_read(env, game, player_id, back + timedelta(seconds=3700))[:3] == (
+        "captured",
+        [],
+        [game],
+    )
+
+
+def test_a_player_with_no_closing_offer_keeps_a_marker_row_so_the_game_is_named(
+    archive_env: ArchiveEnv,
+) -> None:
+    """The props read finds the games to check through the player's own prop rows, so
+    the prune keeps at least one row of every player who ever had an offer on a game: the
+    closing offer, or, for an offer with no row at or before the closing capture, the
+    offer's latest row as a marker. Two such games here, at production settings:
+
+    - one that is already live at the first capture (it has no closing capture; before
+      round 6 the prune kept none of its prop rows, and the read found it only through
+      the player's current team, so not at all for a player who had changed teams);
+    - one captured from before its start, on which the player's offers first appear
+      once it is in play.
+
+    After the prune a read inside either game's play names the game, and a read before
+    the in-play offers appeared is still answered: the player had none then."""
+    env = archive_env
+    world, live_game, player_id, run = _relisted_world(env)
+    player = world.roster[0]
+    start = MODEL_START
+    in_play = {
+        "status": "live",
+        "score": Score(home=0, away=0),
+        "score_updated_at": start,
+        "period_text": "Q1",
+    }
+    world.games[live_game] = world.games[live_game].model_copy(
+        update={**in_play, "start_time": start - timedelta(hours=1)}
+    )
+    later_game = world.add_game(world.teams[0], world.teams[2], start + timedelta(minutes=10))
+    for key in [key for key in world.offers[player_id] if key[0] == later_game]:
+        del world.offers[player_id][key]  # no offer on it before it starts
+
+    def read(game: str, moment: datetime) -> Any:
+        return _relisted_read(env, game, player_id, moment)[:3]
+
+    run(start, "odds", "props")
+    run(start + timedelta(seconds=360), "odds")  # the later game's closing capture
+    world.games[later_game] = world.games[later_game].model_copy(update=in_play)
+    for book in world.book_ids[:2]:
+        world.set_offer(player_id, later_game, player.prop_markets[0], book)
+    run(start + timedelta(seconds=3600), "odds", "props")  # the in-play offers are stored
+    for game in (live_game, later_game):
+        world.games[game] = world.games[game].model_copy(update={"status": "final"})
+    run(start + timedelta(seconds=7200), "odds", "props")  # both games' offers tombstoned
+
+    early, late = start + timedelta(seconds=400), start + timedelta(seconds=3700)
+    before = {(game, t): read(game, t) for game in (live_game, later_game) for t in (early, late)}
+    assert len(before[(live_game, early)][1]) >= 4 and len(before[(later_game, late)][1]) == 2
+    assert before[(later_game, early)] == ("captured", [], [])  # no offer on it yet
+
+    assert run(start + timedelta(days=8), "prune").prune.rows_deleted > 0  # type: ignore[union-attr]
+    # The live game: no closing capture, so each offer keeps its latest row (the
+    # tombstone of 7,200 s). The later game: nothing at or before its closing capture,
+    # so the two in-play offers keep theirs.
+    assert captured(env, ArchivedEvent, live_game) == [start, start + timedelta(seconds=3600)]
+
+    def kept(game: str) -> list[datetime]:
+        with env.session_factory() as db:
+            return sorted(
+                db.scalars(
+                    select(ArchivedProp.captured_at).where(
+                        ArchivedProp.player_id == player_id, ArchivedProp.event_id == game
+                    )
+                )
+            )
+
+    marked = start + timedelta(seconds=7200)
+    assert kept(live_game) == [marked] * len(before[(live_game, early)][1])
+    assert kept(later_game) == [marked] * 2
+    for game in (live_game, later_game):
+        assert read(game, late) == ("captured", [], [live_game, later_game])
+    # Before the in-play offers existed the later game's kept rows change nothing: it
+    # had none then, and only the live game is named.
+    for game in (live_game, later_game):
+        assert read(game, early) == ("captured", [], [live_game])
     assert orphan_rows(env) == 0
 
 
@@ -1191,7 +1468,9 @@ def test_a_prune_cut_short_after_any_delete_never_changes_an_answer(
     assert orphan_rows(env) == 0
 
 
-@pytest.mark.parametrize("started", ["inside the read", "before the read"])
+@pytest.mark.parametrize(
+    "started", ["inside the read", "before the read", "inside the read, still running"]
+)
 @pytest.mark.parametrize("read", ["odds", "bet", "props"])
 def test_a_prune_that_lands_inside_a_read_does_not_change_its_answer(
     archive_env: ArchiveEnv, monkeypatch: pytest.MonkeyPatch, read: str, started: str
@@ -1200,7 +1479,9 @@ def test_a_prune_that_lands_inside_a_read_does_not_change_its_answer(
     it began. Here a prune reduces the game after the read has found the capture that
     covers T and before it reads that capture's rows: a whole prune that starts and ends
     in that moment, or one that had started (and said how far it would go) before the
-    read began and reaches the game then.
+    read began and reaches the game then, or one that starts inside the read, reduces the
+    game and is still running when the read ends (so only its ``started`` record tells
+    the read that anything happened: the case review round 5 found no test for).
 
     - Odds at 730 s, and the placement prices of a bet placed then: the covering capture
       (720 s) is one the prune does not keep, so the quotes read afterwards are the
@@ -1228,7 +1509,7 @@ def test_a_prune_that_lands_inside_a_read_does_not_change_its_answer(
     real_prop_rows = view_module.latest_prop_rows
     pruned: list[str] = []
 
-    if read == "props" and started == "inside the read":
+    if read == "props" and started != "before the read":
         # As in the archive's first hour: no prune has run yet. (The captures' own passes
         # ran one each, with nothing to do; their records are removed here.) Otherwise the
         # props read, which looks at the prune records after its rows, needs no second
@@ -1249,14 +1530,22 @@ def test_a_prune_that_lands_inside_a_read_does_not_change_its_answer(
     def prune_first() -> None:
         if pruned:
             return
-        if plan is None:
+        if started == "inside the read":
             summary = prune_archive(env.engine, p, env.settings, force=True)
             assert summary is not None
             pruned.append(summary.status)
-        else:
-            with env.session_factory() as db:
-                assert prune_module.prune_rows(db, env.settings, plan).deleted > 0
-            pruned.append("running")
+            return
+        with env.session_factory() as db:
+            running = plan
+            if running is None:
+                # The prune begins now, inside the read: its record first, committed.
+                running = prune_module.plan_prune(db, env.settings, p.current)
+                begun = new_run(p, env.settings, "prune", p.current, status="started")
+                begun.prune_cutoff, begun.keep_cutoff = running.cutoff, running.keep_cutoff
+                db.add(begun)
+                db.commit()
+            assert prune_module.prune_rows(db, env.settings, running).deleted > 0
+        pruned.append("running")
 
     def odds_rows_after_a_prune(*args: Any) -> Any:
         prune_first()
@@ -1283,16 +1572,18 @@ def test_a_prune_that_lands_inside_a_read_does_not_change_its_answer(
             assert props.coverage.status == "captured"
             assert [o for o in props.offers if o.event_id == PREGAME] == []
             assert props.pruned_event_ids == [PREGAME]
-    assert pruned == (["ok"] if plan is None else ["running"])
+    assert pruned == (["ok"] if started == "inside the read" else ["running"])
     assert captured(env, ArchivedEvent, PREGAME) == [at(0), at(1800)]
+    if started != "inside the read":
+        assert _prune_runs(env)[-1] == "started"  # never finished
 
 
 def test_a_read_that_a_prune_disturbs_every_time_gives_up(
     archive_env: ArchiveEnv, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A read is made again at most ``READ_ATTEMPTS`` times; after that it refuses to
-    answer (the routes turn this into 503 ``archive_busy``). One prune can disturb a read
-    three times at most, so this is not expected in operation."""
+    answer (the routes turn this into 503 ``archive_busy``). For one game one prune can
+    disturb a read three times at most, so this is not expected of a one-game read."""
     env = archive_env
     p = _five_captures(env)
     readings = iter(range(1000))
@@ -1362,23 +1653,121 @@ def test_the_props_read_refuses_where_its_look_back_reaches_past_the_keep_horizo
     """A time just after the keep horizon is still answered from a props capture before
     it, when the game was in scope; but the horizon has taken the game's rows. The read
     must say so (``archive_pruned``), not answer ``captured`` with the game's offers
-    silently missing: the check covers the whole look-back, not only T itself."""
+    silently missing.
+
+    The refusal reaches one whole look-back past the horizon, not only the gap limit
+    (840 s for props in these tests): asked 900 s after the horizon, where a props
+    capture from after the horizon covers the time, the answer is still
+    ``archive_pruned``, and one look-back after the horizon it is ``captured`` again.
+    (Review round 5: the test used to ask only within the gap limit of the horizon, so
+    it passed with the check reduced to the gap limit.)"""
     env = archive_env
     env.settings = env.settings.model_copy(update={"snapshot_keep_days": 10})
     p = SteadyPropsProvider()
     env.provider = p
     env.capture(at(0))
     env.capture(at(360))
+    p.finish(PREGAME, 3, 2)
+    env.capture(at(1000))  # the game has left scope: its offers are tombstoned
+    lookback = view_module.prop_lookback(env.settings)
+    gap = timedelta(seconds=view_module.props_max_gap_seconds(env.settings))
+    horizon = at(400)
+    inside_the_gap, past_the_gap = at(500), horizon + gap + timedelta(seconds=60)
+    assert past_the_gap - gap > horizon and past_the_gap - lookback < horizon
+    env.capture(horizon + lookback)  # a capture to answer from, one look-back on
     with env.session_factory() as db:
-        before = archived_props(db, p, env.settings, p.player_id, None, at(500))
+        before = archived_props(db, p, env.settings, p.player_id, None, inside_the_gap)
+        later = archived_props(db, p, env.settings, p.player_id, None, past_the_gap)
     assert before.coverage.status == "captured" and len(before.offers) == len(p.fixed)
+    assert later.coverage.status == "captured" and later.coverage.captured_at == at(1000)
     # The horizon (now less 10 days) falls at 400 s: after the game's last capture, so
-    # its rows go, and before the time asked about.
+    # its rows go, and before the times asked about.
     p.current = T0 + timedelta(days=10, seconds=400)
     summary = prune_archive(env.engine, p, env.settings, force=True)
     assert summary is not None and summary.status == "ok"
     assert captured(env, ArchivedProp, PREGAME) == []
     with env.session_factory() as db:
-        after = archived_props(db, p, env.settings, p.player_id, None, at(500))
-    assert after.coverage.status == "archive_pruned"
-    assert after.offers == [] and after.pruned_event_ids == []
+        answers = {
+            moment: archived_props(db, p, env.settings, p.player_id, None, moment)
+            for moment in (
+                inside_the_gap,
+                past_the_gap,
+                horizon + lookback - timedelta(microseconds=1),
+                horizon + lookback,
+            )
+        }
+    for moment in (inside_the_gap, past_the_gap, horizon + lookback - timedelta(microseconds=1)):
+        assert answers[moment].coverage.status == "archive_pruned", moment
+        assert answers[moment].offers == [] and answers[moment].pruned_event_ids == []
+    assert answers[horizon + lookback].coverage.status == "captured"
+
+
+def test_status_rows_leave_oldest_first_so_a_cut_sweep_never_serves_an_older_record(
+    archive_env: ArchiveEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review round 5, a remark. Status rows past the keep horizon go in batches with a
+    commit each, and the status read serves whatever record of a subject it holds. The
+    batches must go oldest first: if a batch took a subject's newer row before its older
+    one, a read between two batches (or after a sweep that was cut short) would return
+    the older record as the latest.
+
+    Here the newer record is stored first, so it has the lower id and is the first the
+    database returns without an order. The sweep takes one row per batch and is stopped
+    after the first batch."""
+    env = archive_env
+    env.settings = env.settings.model_copy(update={"snapshot_keep_days": 10})
+    env.capture(T0)
+
+    def report(days: int, status: str) -> None:
+        with env.session_factory() as db:
+            run = capture_status(
+                db,
+                env.provider,
+                env.settings,
+                [
+                    StatusRecord(
+                        provider="synthetic",
+                        provider_id="injury:plr_one",
+                        fetched_at=T0,
+                        event_id=PREGAME,
+                        player_id="plr_one",
+                        kind="injury",
+                        status=status,  # type: ignore[arg-type]
+                        source="Fictional Desk",
+                    )
+                ],
+                now=T0 + timedelta(days=days),
+            )
+            assert run is not None and run.status == "ok"
+
+    report(3, "out")  # the newer record, stored first
+    report(0, "questionable")  # an older one, backfilled after it
+    asked = T0 + timedelta(days=3, hours=12)
+    with env.session_factory() as db:
+        before = archived_status(db, env.provider, env.settings, PREGAME, asked)
+    assert [(e.status, e.captured_at) for e in before.entries] == [("out", T0 + timedelta(days=3))]
+
+    # Fourteen days on both rows are past the horizon. One row per batch; the worker is
+    # killed when the sweep comes to its second status row.
+    env.provider.current = T0 + timedelta(days=14)
+    real = prune_module._delete_ids
+    status_batches = 0
+
+    def one_status_batch(session: Any, model: Any, ids: Any) -> int:
+        nonlocal status_batches
+        if model is ArchivedStatus:
+            if status_batches:
+                raise WorkerKilled()
+            status_batches += 1
+        return real(session, model, ids)
+
+    monkeypatch.setattr(prune_module, "DELETE_BATCH", 1)
+    monkeypatch.setattr(prune_module, "_delete_ids", one_status_batch)
+    with pytest.raises(WorkerKilled):
+        prune_archive(env.engine, env.provider, env.settings, force=True)
+    with env.session_factory() as db:
+        left = list(db.scalars(select(ArchivedStatus.captured_at)))
+        after = archived_status(db, env.provider, env.settings, PREGAME, asked)
+    assert left == [T0 + timedelta(days=3)]  # the older row went first
+    assert [(e.status, e.captured_at) for e in after.entries] == [("out", T0 + timedelta(days=3))]
+    assert after.coverage.kept_from == T0 + timedelta(days=4)

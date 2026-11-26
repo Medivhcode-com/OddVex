@@ -3,17 +3,19 @@
 Full-resolution odds, prop and event rows are kept ``snapshot_retention_days`` (7). The
 prune handles an event once, when all of its rows are older than that (its last event
 row has aged out), so a read at any time after the cutoff never misses a row that an
-unchanged quote carried forward. An event with an open prop offer stored inside the
-full-resolution window is left alone as well (``view.open_offer_stored``): a props
-capture has it in scope, although no odds capture has written an event row for it yet
-(a game listed again days later, seen first by a props capture) or since. Its rows are
-reduced once that offer has aged out too. The prune then keeps, for
-``snapshot_keep_days`` (400):
+unchanged quote carried forward. The event rows say all of that: a props capture takes
+a game only together with the odds capture of its pass (``capture.capture_props``), so
+no open prop offer of a game is ever stored later than its last event row. The prune
+then keeps, for ``snapshot_keep_days`` (400):
 
 - **The first capture.** The event's first event row and its odds rows. It marks when the
   event entered scope, whatever its start time was then or became later.
 - **The closing capture.** The event's last ``upcoming`` event row and, per (market, book)
-  and per (player, event, market, book), the latest row captured at or before it.
+  and per (player, event, market, book), the latest row captured at or before it. A prop
+  offer with no row that early (first offered once the game was in play, or a game never
+  captured as ``upcoming``) keeps its latest row instead. That row is a marker, not an
+  answer: every player who ever had an offer on the game keeps at least one prop row of
+  it, and that is how the props read finds the game (``view._pruned_prop_events``).
 - **The last capture.** The event's last event row and, per (market, book), the latest
   odds row at or before it. It marks when the event left scope, so coverage can tell
   ``archive_pruned`` from ``not_captured``, and it is a complete capture in its own right.
@@ -57,7 +59,9 @@ read right at every such point:
 older than itself (a quote unchanged since an earlier capture is stored once). A game's
 event, odds and prop rows leave together, once its last event row is older than
 ``snapshot_keep_days``; until then every kept capture of it is whole. A status row goes
-by its own age (each record stands alone). A capture run past the horizon is deleted
+by its own age (each record stands alone), oldest first, so a sweep that stops between
+two batches never leaves a subject's older record without its newer one. A capture run
+past the horizon is deleted
 only when no remaining row refers to it; the last successful odds and props capture
 before the horizon also stays, so a later time with no capture since still reads as a
 gap. Each prune records its two cutoffs (``prune_cutoff``, ``keep_cutoff``) when it
@@ -65,8 +69,11 @@ starts and again when it ends; neither ever moves back, so a later change of set
 cannot make a read trust what an earlier prune removed. The reads (``view.py``) answer
 nothing from capture runs before ``keep_cutoff``: runs are thinned there, so "the latest
 capture at or before T" is no longer knowable. Status rows, rows of a game without an
-event row and capture runs past the horizon are deleted in batches with a commit each:
-no read answers from before the horizon once the prune has started.
+event row and capture runs past the horizon are deleted in batches with a commit each.
+The odds and props reads answer nothing from before the horizon once the prune has
+started. The status read still serves the records it holds, whatever their age, with
+``kept_from``; because the batches go oldest first, what it holds for a subject at any
+moment is that subject's newest records, never an older one in place of a newer.
 """
 
 from __future__ import annotations
@@ -96,7 +103,7 @@ from ..flags import service as flags
 from ..providers import SportsDataProvider
 from .capture import FLAG, RunSummary, guarded, is_due, new_run
 from .placement import structured_leg_condition
-from .view import open_offer_stored, prune_cutoffs
+from .view import prune_cutoffs
 
 #: Ids deleted per statement.
 DELETE_BATCH = 1000
@@ -211,34 +218,23 @@ def _prune_event(session: Session, provider_name: str, event_id: str, settings: 
             if index:
                 keep_odds.add(rows[index - 1][1])
 
+    props = session.execute(
+        select(p.id, p.player_id, p.market, p.sportsbook_id, p.captured_at)
+        .where(p.provider == provider_name, p.event_id == event_id)
+        .order_by(p.captured_at)
+    ).all()
+    offers: dict[tuple[str, str, str], list[tuple[datetime, int]]] = defaultdict(list)
+    for prop in props:
+        offers[(prop.player_id, prop.market, prop.sportsbook_id)].append(
+            (prop.captured_at, prop.id)
+        )
     keep_props: set[int] = set()
-    if closing is not None:
-        newest = (
-            select(p.player_id, p.market, p.sportsbook_id, func.max(p.captured_at).label("at"))
-            .where(p.provider == provider_name, p.event_id == event_id, p.captured_at <= closing)
-            .group_by(p.player_id, p.market, p.sportsbook_id)
-            .subquery()
-        )
-        keep_props = set(
-            session.scalars(
-                select(p.id)
-                .join(
-                    newest,
-                    (p.player_id == newest.c.player_id)
-                    & (p.market == newest.c.market)
-                    & (p.sportsbook_id == newest.c.sportsbook_id)
-                    & (p.captured_at == newest.c.at),
-                )
-                .where(p.provider == provider_name, p.event_id == event_id)
-            )
-        )
-    prop_ids = [
-        pid
-        for pid in session.scalars(
-            select(p.id).where(p.provider == provider_name, p.event_id == event_id)
-        )
-        if pid not in keep_props
-    ]
+    for stored in offers.values():
+        # The offer's latest row at or before the closing capture: its closing offer.
+        # With none that early, its latest row of all, as a marker (module docstring).
+        index = bisect_right(stored, (closing, float("inf"))) if closing is not None else 0
+        keep_props.add(stored[index - 1][1] if index else stored[-1][1])
+    prop_ids = [prop.id for prop in props if prop.id not in keep_props]
     event_ids = [r.id for r in events if r.captured_at not in keep_events]
     odds_ids = [r.id for r in odds if r.id not in keep_odds]
     deleted = (
@@ -252,13 +248,12 @@ def _prune_event(session: Session, provider_name: str, event_id: str, settings: 
 
 @dataclass(frozen=True)
 class PrunePlan:
-    """How far one prune at ``now`` goes. ``cutoff`` and ``keep_cutoff`` are what it records, never
+    """How far one prune goes. ``cutoff`` and ``keep_cutoff`` are what it records, never
     earlier than any prune before it recorded, started or finished. ``window_from`` is
     where it starts looking for games to reduce: the cutoff of the last prune that
     finished (``None``: from the beginning), so the games a cut-short prune did not
     reach are reduced now."""
 
-    now: datetime
     cutoff: datetime
     keep_cutoff: datetime
     window_from: datetime | None
@@ -273,22 +268,16 @@ class PruneResult:
     keep_cutoff: datetime
 
 
-def _sweep_event(session: Session, provider_name: str, event_id: str, cutoff: datetime) -> int:
-    """Delete a game whose last event row is past the keep horizon: its event, odds and
-    prop rows together, in one transaction committed here. (Prop rows of it captured at
-    or after the cutoff, which only a provider that briefly listed the game again could
-    have left, stay until they age.)"""
+def _sweep_event(session: Session, provider_name: str, event_id: str) -> int:
+    """Delete a game whose last event row is past the keep horizon: every event, odds and
+    prop row of it, in one transaction committed here. (Its open prop rows are no later
+    than its last event row; the tombstones written when it left scope may be, and go
+    with it.)"""
     deleted = 0
-    for model, conditions in (
-        (ArchivedEvent, ()),
-        (ArchivedOdds, ()),
-        (ArchivedProp, (ArchivedProp.captured_at < cutoff,)),
-    ):
+    for model in (ArchivedEvent, ArchivedOdds, ArchivedProp):
         ids = list(
             session.scalars(
-                select(model.id).where(
-                    model.provider == provider_name, model.event_id == event_id, *conditions
-                )
+                select(model.id).where(model.provider == provider_name, model.event_id == event_id)
             )
         )
         deleted += _delete_ids(session, model, ids)
@@ -297,10 +286,18 @@ def _sweep_event(session: Session, provider_name: str, event_id: str, cutoff: da
 
 
 def _delete_where(session: Session, model: type[Any], *conditions: Any) -> int:
-    """Delete the rows that match, a batch and a commit at a time."""
+    """Delete the rows that match, a batch and a commit at a time, oldest first: stopped
+    between two batches, what is left of any subject is its newest rows."""
     deleted = 0
     while True:
-        ids = list(session.scalars(select(model.id).where(*conditions).limit(DELETE_BATCH)))
+        ids = list(
+            session.scalars(
+                select(model.id)
+                .where(*conditions)
+                .order_by(model.captured_at, model.id)
+                .limit(DELETE_BATCH)
+            )
+        )
         if not ids:
             session.commit()
             return deleted
@@ -328,9 +325,10 @@ def keep_sweep(session: Session, cutoff: datetime) -> int:
             )
         )
         if last is not None and last < cutoff:
-            deleted += _sweep_event(session, provider_name, event_id, cutoff)
-    # Odds and prop rows of a game with no event row at all (a props capture of a game
-    # no odds capture ever had, or rows a swept game left behind) go by their own age.
+            deleted += _sweep_event(session, provider_name, event_id)
+    # Odds and prop rows of a game with no event row at all go by their own age. The
+    # capture writes none (a quote or an offer is stored beside its game's event row),
+    # so this only clears what a restore or a manual repair could leave.
     for model in (ArchivedOdds, ArchivedProp):
         has_event = (
             select(e.id).where(e.provider == model.provider, e.event_id == model.event_id).exists()
@@ -402,7 +400,7 @@ def plan_prune(session: Session, settings: Settings, now: datetime) -> PrunePlan
             SnapshotRun.kind == "prune", SnapshotRun.status == "ok"
         )
     )
-    return PrunePlan(now, cutoff, keep_cutoff, finished)
+    return PrunePlan(cutoff, keep_cutoff, finished)
 
 
 def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneResult:
@@ -410,20 +408,16 @@ def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneRe
     cutoffs are recorded and committed (``prune_pass`` does)."""
     cutoff = plan.cutoff
     e = ArchivedEvent
-    # Events with an event row or a prop row in the window that aged out since the last
-    # prune that finished; of those, the ones whose rows have all aged out. The others
-    # are handled when their last row ages out, in a later pass. (The prop rows are in
-    # the window for the event that was left alone because of an open offer: it comes
-    # up again when that offer ages out.)
-    candidates: set[tuple[str, str]] = set()
-    for model in (e, ArchivedProp):
-        in_window = select(model.provider, model.event_id).where(model.captured_at < cutoff)
-        if plan.window_from is not None:
-            in_window = in_window.where(model.captured_at >= plan.window_from - WINDOW_OVERLAP)
-        candidates |= set(session.execute(in_window.distinct()).tuples())
+    # Events with a row in the window that aged out since the last prune that finished;
+    # of those, the ones whose rows have all aged out. The others are handled when their
+    # last row ages out, in a later pass.
+    in_window = select(e.provider, e.event_id).where(e.captured_at < cutoff)
+    if plan.window_from is not None:
+        in_window = in_window.where(e.captured_at >= plan.window_from - WINDOW_OVERLAP)
+    candidates = sorted(set(session.execute(in_window.distinct()).tuples()))
     session.commit()
     deleted = 0
-    for provider_name, event_id in sorted(candidates):
+    for provider_name, event_id in candidates:
         last = session.scalar(
             select(func.max(e.captured_at)).where(
                 e.provider == provider_name, e.event_id == event_id
@@ -431,8 +425,6 @@ def prune_rows(session: Session, settings: Settings, plan: PrunePlan) -> PruneRe
         )
         if last is None or last >= cutoff:
             continue
-        if open_offer_stored(session, provider_name, event_id, cutoff, plan.now) is not None:
-            continue  # a props capture has the game in scope: its rows are not all old
         deleted += _prune_event(session, provider_name, event_id, settings)
     deleted += keep_sweep(session, plan.keep_cutoff)
     return PruneResult(deleted, cutoff, plan.keep_cutoff)

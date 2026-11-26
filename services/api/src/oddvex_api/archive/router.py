@@ -62,8 +62,11 @@ _BUSY: dict[int | str, dict[str, Any]] = {
 
 def _read[T](read: Callable[[], T]) -> T:
     """An archive read gives up rather than answer from rows a prune changed under it
-    (``view.settled``). It is made several times first, so this is not expected in
-    operation: one prune can disturb a read three times at most."""
+    (``view.settled``). It is made four times first. For one game one prune can disturb
+    a read three times at most, so the odds and props reads do not give up in operation;
+    the placement prices of a parlay read every leg's game, and a prune that reduces a
+    different leg's game during each attempt can use the four up. The answer is then
+    this refusal with ``Retry-After``, never a price."""
     try:
         return read()
     except ArchiveBusy:
@@ -121,8 +124,11 @@ def get_archived_event_odds(
         "props coverage then. A game whose offers were all withdrawn or that had left "
         "scope is left out. A game the retention prune has reduced to its closing offers "
         "is served only where those are still the answer; otherwise its offers are left "
-        "out and its id is listed in `pruned_event_ids`. Behind the `snapshot_archive` "
-        "flag."
+        "out and its id is listed in `pruned_event_ids`: for any time from the game's "
+        "first capture to one look-back after its last, the times between two listings "
+        "of a game that was postponed and listed again included. A props capture holds "
+        "the games of the odds capture made in the same pass. Behind the "
+        "`snapshot_archive` flag."
     ),
     dependencies=_FLAG,
     responses=_BUSY,

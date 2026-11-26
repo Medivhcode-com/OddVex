@@ -7,9 +7,10 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import func, insert, select, text
+from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 
+from oddvex_api.archive import capture as capture_module
 from oddvex_api.archive.capture import (
     ADVISORY_LOCK_KEY,
     LIVE_GRACE_HOURS,
@@ -18,13 +19,15 @@ from oddvex_api.archive.capture import (
     StatusRecord,
     archive_bytes,
     capture_pass,
+    capture_props,
     capture_status,
     in_scope,
+    new_run,
 )
 from oddvex_api.archive.guard import ArchiveIsAppendOnly
 from oddvex_api.archive.prune import prune_archive
 from oddvex_api.archive.service import archived_odds, archived_props
-from oddvex_api.archive.view import prop_lookback, props_max_gap_seconds
+from oddvex_api.archive.view import coverage_at, prop_lookback, props_max_gap_seconds
 from oddvex_api.config import Settings
 from oddvex_api.db import (
     ARCHIVE_MODELS,
@@ -101,6 +104,115 @@ def test_capture_waits_for_its_interval_less_the_slack(archive_env: ArchiveEnv) 
     assert late.odds is not None and late.odds.status == "ok"
     assert late.props is not None and late.props.status == "ok"
     assert late.prune is None  # hourly
+
+
+def _open_props_without_an_event_row(env: ArchiveEnv) -> int:
+    """Open prop rows whose game has no event row of the same capture time."""
+    with env.session_factory() as db:
+        held = set(db.execute(select(ArchivedEvent.event_id, ArchivedEvent.captured_at)).tuples())
+        offers = db.execute(
+            select(ArchivedProp.event_id, ArchivedProp.captured_at).where(
+                ArchivedProp.status != "unavailable"
+            )
+        ).tuples()
+        return sum(1 for offer in offers if offer not in held)
+
+
+def test_when_props_are_due_the_pass_captures_odds_too(archive_env: ArchiveEnv) -> None:
+    """A props capture never runs without the odds capture of its pass (review round 5):
+    a pass in which the props interval has passed and the odds interval has not captures
+    odds as well, first, so every open prop row has its game's event row of the same
+    capture time. The next odds capture is then counted from that one."""
+    env = archive_env
+    env.settings = env.settings.model_copy(update={"snapshot_props_interval_seconds": 3600})
+    first = env.capture(T0, force=False)
+    assert first.odds is not None and first.props is not None
+    before_the_hour = env.capture(T0 + timedelta(seconds=3400), force=False)
+    assert before_the_hour.odds is not None and before_the_hour.props is None
+    # 200 s later the props are due (an hour since T0) and the odds are not (200 s).
+    hour = T0 + timedelta(seconds=3600)
+    report = env.capture(hour, force=False)
+    assert report.props is not None and report.props.status == "ok"
+    assert report.odds is not None and report.odds.status == "ok"
+    assert report.odds.events_in_scope == report.props.events_in_scope > 0
+    assert count(env, ArchivedEvent, ArchivedEvent.captured_at == hour) > 0
+    assert _open_props_without_an_event_row(env) == 0
+    # The odds interval now runs from that capture.
+    early = env.capture(hour + timedelta(seconds=240), force=False)
+    assert (early.odds, early.props) == (None, None)
+    late = env.capture(hour + timedelta(seconds=360), force=False)
+    assert late.odds is not None and late.props is None
+
+
+def test_a_props_capture_takes_only_the_games_its_odds_capture_holds(
+    archive_env: ArchiveEnv,
+) -> None:
+    """``capture_props`` itself stores an offer only for a game with an event row of the
+    same capture time. Called on its own, with no odds capture at that time, it has no
+    game: it stores no open offer (the offers stored before are tombstoned, as for games
+    that left scope). The pass never calls it that way."""
+    env = archive_env
+    first = env.capture(T0)
+    assert first.props is not None and first.props.rows_written > 0
+    later = T0 + timedelta(seconds=360)
+    env.provider.current = later
+    with env.session_factory() as db:
+        events = in_scope(env.provider, later, env.settings)
+        assert events
+        run = capture_props(db, env.provider, env.settings, later, events)
+        db.commit()
+        assert run.events_in_scope == 0
+    assert count(env, ArchivedEvent, ArchivedEvent.captured_at == later) == 0
+    assert count(env, ArchivedProp, ArchivedProp.captured_at == later) > 0
+    assert (
+        count(
+            env,
+            ArchivedProp,
+            ArchivedProp.captured_at == later,
+            ArchivedProp.status != "unavailable",
+        )
+        == 0
+    )
+    assert _open_props_without_an_event_row(env) == 0
+
+
+def test_a_read_that_straddles_a_captures_commit_answers_from_one_capture(
+    archive_env: ArchiveEnv,
+) -> None:
+    """Review round 5, a remark. A read as of "now" is several statements, and a capture
+    can commit between two of them. The coverage read looked for the game's row first
+    and for the covering capture second: with a capture committed in between, the row
+    was the older capture's and the covering capture the new one, and a game in scope
+    answered ``not_captured`` for that request. It now reads the covering capture first,
+    so the answer is the new capture's, whole."""
+    env = archive_env
+    env.capture(T0)
+    now = T0 + timedelta(seconds=360)
+    with env.session_factory() as db:
+        statements = 0
+        real_scalar, real_scalars = db.scalar, db.scalars
+
+        def capture_before_the_second_statement() -> None:
+            nonlocal statements
+            statements += 1
+            if statements == 2:
+                report = env.capture(now)  # on its own connection, committed
+                assert report.odds is not None and report.odds.status == "ok"
+
+        def scalar(*args: Any, **kwargs: Any) -> Any:
+            capture_before_the_second_statement()
+            return real_scalar(*args, **kwargs)
+
+        def scalars(*args: Any, **kwargs: Any) -> Any:
+            capture_before_the_second_statement()
+            return real_scalars(*args, **kwargs)
+
+        db.scalar, db.scalars = scalar, scalars  # type: ignore[method-assign]
+        coverage = coverage_at(
+            db, env.provider.name, PREGAME, now, env.settings, cutoffs=(None, None)
+        )
+        assert statements == 2
+    assert (coverage.status, coverage.captured_at) == ("captured", now)
 
 
 def test_an_unchanged_quote_is_not_written_again_and_a_vanished_one_is_tombstoned(
@@ -347,6 +459,42 @@ def test_two_passes_never_overlap_on_postgresql(archive_env: ArchiveEnv) -> None
     assert env.capture(T0).odds is not None
 
 
+@pytest.mark.skipif(not EXTERNAL_DATABASE_URL, reason="the advisory lock exists on PostgreSQL only")
+def test_a_pass_whose_database_session_was_ended_returns_without_a_traceback(
+    archive_env: ArchiveEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review round 5, operations. When the database ends the pass's own session (a
+    restart, or an administrator terminating every backend), the pass has nothing left
+    to unlock: the server released the advisory lock with the session. Sending the
+    unlock on the dead connection raised, and the script ended with a traceback. The
+    pass now returns what it did, and the next pass takes the lock as usual."""
+    env = archive_env
+    real = capture_module.run_pass
+
+    def run_then_lose_the_session(*args: Any, **kwargs: Any) -> Any:
+        report = real(*args, **kwargs)
+        with env.engine.connect() as other:
+            (pid,) = other.execute(
+                text(
+                    "SELECT l.pid FROM pg_locks l JOIN pg_database d ON d.oid = l.database "
+                    "WHERE l.locktype = 'advisory' AND l.objid = :key AND l.granted "
+                    "AND d.datname = current_database()"
+                ),
+                {"key": ADVISORY_LOCK_KEY},
+            ).scalars()
+            assert other.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid}).scalar()
+            other.commit()
+        return report
+
+    monkeypatch.setattr(capture_module, "run_pass", run_then_lose_the_session)
+    env.provider.current = T0
+    report = capture_pass(env.engine, env.provider, env.settings, force=True, reclaim=False)
+    assert report.odds is not None and report.odds.status == "ok"
+    monkeypatch.undo()
+    again = env.capture(T0 + timedelta(seconds=360))
+    assert again.locked is False and again.odds is not None and again.odds.status == "ok"
+
+
 def test_the_capture_script(archive_env: ArchiveEnv) -> None:
     env = archive_env
     enable_archive(env.session_factory, False)
@@ -376,6 +524,22 @@ def test_the_capture_script(archive_env: ArchiveEnv) -> None:
 
     stats = capture_script(env, "--stats")
     assert stats.returncode == 0 and "Snapshot archive on" in stats.stdout, stats.stderr
+    # ``--stats`` names what failed: a failed run's error class, and for a failed index
+    # rebuild the index and its error's class (nobody has a shell on the preview server,
+    # so the worker log and the statistics are all an operator sees).
+    with env.session_factory() as db:
+        failed = new_run(env.provider, env.settings, "status", T0, status="failed")
+        failed.detail = {"error": "ConnectionError"}
+        reclaim = new_run(env.provider, env.settings, "reclaim", T0, status="failed")
+        reclaim.detail = {"rebuilt": {}, "failed": {"uq_odds_snapshots_key": "QueryCanceled"}}
+        db.add_all([failed, reclaim])
+        db.commit()
+    stats = capture_script(env, "--stats")
+    assert "last status: failed (ConnectionError) at" in stats.stdout, stats.stdout
+    assert "1 failed (uq_odds_snapshots_key: QueryCanceled)" in stats.stdout, stats.stdout
+    with env.session_factory() as db:
+        db.execute(delete(SnapshotRun).where(SnapshotRun.status == "failed"))
+        db.commit()
     pruned = capture_script(env, "--prune-only", "--force")
     assert pruned.returncode == 0 and "prune ok" in pruned.stdout, pruned.stdout
     # ``--reclaim`` only checks the indexes (PostgreSQL), which are as small as they can

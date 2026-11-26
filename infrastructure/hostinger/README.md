@@ -171,6 +171,16 @@ with `KEY` and `VALUE` sets one of these and nothing else:
 It refuses every other key, including the two secrets, and never prints another value from the file. The running
 containers keep the old value until the next `deploy`.
 
+Every other setting of the application has the value written in the code and is not passed through `compose.yaml`:
+`setenv` cannot change it, and a line added to `/opt/oddvex/.env` by any other means would not reach the containers.
+That includes the snapshot archive's settings (`ODDVEX_SNAPSHOT_*`). To change one on the preview, add it to the
+`&api-env` block of `compose.yaml` (the API, the worker and the migration container share that block), commit, and
+send `ACTION=deploy` with that commit. Two of them an operator may need are named under "Limits of this setup":
+`ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS` and `ODDVEX_SNAPSHOT_MAX_DISK_BYTES`. The API checks the archive's settings
+when it starts, whether the `snapshot_archive` flag is on or off, and does not start with a combination that cannot
+work (a keep period no longer than the props look-back); a deploy with such a value fails its health check and puts
+the previous release back (step 8 of "What a deploy does").
+
 ## The first administrator
 
 `ODDVEX_ADMIN_EMAILS` lists the addresses that may hold the administrator role. Listing an address gives nobody the
@@ -226,19 +236,50 @@ the list holds an address: deploy a commit that has it, or empty the list first.
   times the largest counted size, and capture also stops at a ceiling of 2 GiB of files
   (`ODDVEX_SNAPSHOT_MAX_DISK_BYTES`). A rebuild needs extra disk while it runs: one new copy of the index, the
   sort's temporary files and as much write-ahead log, about 0.5 GiB and 0.2 GiB of log for the largest index with
-  the archive at its cap, for some seconds (14.5 s measured on the development machine, with the table in memory;
-  this server's database has 512 MB, so expect longer, and raise `ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS`, 120 by
-  default, if the statistics show rebuilds failing with `QueryCanceled`). Run `scripts/capture_snapshots.py
-  --reclaim` once by hand, timed, after the flag is first turned on: the rebuilds were run on PostgreSQL 16 only
-  and this server runs 17. A rebuild waits for older transactions, such as a dump in progress, for at most 10 s,
-  then gives up; the index is tried again after 6 hours (1 hour while the files are over the ceiling). While a
+  the archive at its cap, for some seconds (14.5 s measured on the development machine, with the table in memory).
+  On this server expect longer: its database has 512 MB for a table of about 1 GiB at the cap, so a rebuild of
+  the largest index reads and writes the disk. Review round 5 estimated 35 to 70 s at 50 to 100 MB/s; nobody has
+  timed it here, and the limit is 120 s (`ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS`). A rebuild that runs into the
+  limit is recorded as failed with the error class `QueryCanceled`; it is tried again after 6 hours and writes
+  and discards a copy of the index each time. A rebuild waits for older transactions, such as a dump in
+  progress, for at most 10 s, then gives up (error class `LockNotAvailable`); that index is tried again after 6
+  hours too (1 hour while the files are over the ceiling). While a
   dump holds the tables every pass therefore fails for 10 s and the worker logs `capture_snapshots failed` every
   two minutes until the dump ends, with one extra copy of the index on the disk meanwhile; captures go on. A
   rebuild that is cancelled, times out or loses its database session leaves an invalid index that the next pass
   drops. A deploy does not cut a rebuild short: replacing the worker kills the script, the database server
   finishes the rebuild on its own, and the next pass captures beside it. A pass that rebuilds delays that turn's
-  alert evaluation and pick grading by its length. `GET /v1/admin/archive/stats` shows the size of the files, the
-  ceiling and the last rebuild. Turning the flag off stops the growth, the prune and the rebuilds; the rows stay.
+  alert evaluation and pick grading by its length. Turning the flag off stops the growth, the prune and the
+  rebuilds; the rows stay.
+  - **What an operator can see, and the check to make.** No action runs a script in the worker, so nothing here
+    can be run by hand on the server: not `scripts/capture_snapshots.py --reclaim`, and not a query on the
+    database. The two windows are the worker's log (in the Hostinger panel; `capture_snapshots failed` on a turn
+    whose capture, prune or rebuild failed) and `GET /v1/admin/archive/stats` (administrators): the size of the
+    files and the ceiling, the row counts, and the latest run of each kind. A failed capture or prune shows the
+    class name of its error (`error`); the latest `reclaim` run shows `indexes_rebuilt`, `indexes_dropped`,
+    `bytes_freed`, and for each index whose rebuild failed its name and the class of the error
+    (`failed_indexes`, for example `{"uq_odds_snapshots_key": "QueryCanceled"}`). The statistics show the latest
+    run of each kind only, not a history, and no flag for "full" or "over the ceiling" (compare `disk_bytes` with
+    `max_disk_bytes`, and look for a latest odds run with status `skipped_full`).
+  - **The index rebuild has never run on PostgreSQL 17**, which this server runs: it was built and measured on 16,
+    the two manuals describe it in the same words, and the CI job "Snapshot archive on PostgreSQL 17" runs the
+    archive tests on 17 from the pull request on. Until that job has passed, 17 is covered by the manuals only.
+    The first real rebuild here happens by itself, after the first prune that deletes rows: a little over 7 days
+    after the flag is turned on (a rebuild is only started for an index that has grown past 1.3 times what its
+    rows need, which cannot be before then). The check: on day 8, read the `reclaim` entry of the statistics. It
+    should say `status: ok` and `indexes_rebuilt` above 0; `finished_at` less `captured_at` is how long the pass
+    took. No `reclaim` entry at all by day 9 means nothing was rebuilt: compare `disk_bytes` with `approx_bytes`
+    (the files should be within 1.25 times the largest counted size so far). A `failed` entry names the index
+    and the error class:
+    - `QueryCanceled`: the rebuild took longer than the limit. Raise `ODDVEX_SNAPSHOT_RECLAIM_TIMEOUT_SECONDS`
+      (at most 3600) as described under "Settings": a commit to `compose.yaml` and a deploy;
+    - `LockNotAvailable`: it waited for an older transaction (a dump). It clears by itself;
+    - `AdminShutdown`, or the key `connection`: the database session was lost (a restart); the next pass drops
+      what was left and the rebuild is tried again after the back-off;
+    - any other class is not one this item has seen: read it as the database's own error name.
+  - **Raising the ceiling** (`ODDVEX_SNAPSHOT_MAX_DISK_BYTES`, 2 GiB) is the same kind of change: a commit to
+    `compose.yaml` and a deploy. Keep it above the counted cap (1.5 GiB): set at or below the size of the table
+    files, capture stops for good (`skipped_full` on every pass) and no rebuild can release it.
   - A deploy replaces the worker in the middle of whatever it is doing. A capture or a prune is rolled back to its
     last commit (the prune commits game by game and records how far it will go before it deletes, so reads are
     right meanwhile) and the next pass finishes the work.
@@ -248,9 +289,10 @@ the list holds an address: deploy a commit that has it, or empty the list first.
     image runs again: stored rows then outlive their 7 and 400 days, and the time reads as an archive gap.
   - A restore (`ACTION=restore`) loads the dump into a new database, with dense tables and indexes; captures made
     after the dump are lost (an archive gap). The replaced database stays in the server as
-    `oddvex_replaced_<time>` and nothing drops it: with the archive at its cap that is up to about 1.9 GiB per
-    restore on the shared disk, outside the archive's own ceiling, plus the `prerestore-` dump. Drop it by hand
-    once the restore is confirmed.
+    `oddvex_replaced_<time>` and no action removes it (see "Going back"): with the archive at its cap that is up
+    to about 1.9 GiB per restore on the shared disk, outside the archive's own ceiling, plus the `prerestore-`
+    dump. `status` lists these databases. Nobody has a shell on the server, so removing one needs a new ops
+    action; there is none yet (owner question OQ-23).
 - The API container does not write uvicorn's access log. The application writes one line per request (time, method,
   path, status, duration, client address) and no query string. The API container that ran before this change did
   write uvicorn's access log, with query strings; the deploy that removes that container removes its log with it

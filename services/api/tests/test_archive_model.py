@@ -11,7 +11,12 @@ microsecond either side, in a gap or long after the last quote; the retention pr
 and the keep horizon, both shortened so that a scenario crosses them several times; and
 prunes that are cut short after any number of their deletes, by an error the pass
 records or by the worker being killed, with a bet recorded late on a pruned game before
-the next prune finishes the work.
+the next prune finishes the work. A second kind of scenario (``STAY_SEEDS``) has a keep
+period longer than five props look-backs plus the retention, and one game that is listed
+three times, each stay more than three look-backs after the one before: once the prune
+has reduced the third stay nothing of the second is left, and the props read has to know
+from the game's kept first and last captures that a time in the second stay is inside it
+(review round 5 found the read answering ``captured`` there without the game's offers).
 
 Beside the archive the scenario keeps a **truth log** that is never pruned: at every
 capture pass, a frozen copy of what the provider showed (:class:`Shot`).
@@ -63,7 +68,15 @@ from oddvex_api.archive.service import archived_odds, archived_props, archived_s
 from oddvex_api.board import Board
 from oddvex_api.cache import InMemoryTTLCache
 from oddvex_api.config import Settings
-from oddvex_api.db import Bet, BetLeg, SnapshotRun, User, new_id
+from oddvex_api.db import (
+    ArchivedEvent,
+    ArchivedProp,
+    Bet,
+    BetLeg,
+    SnapshotRun,
+    User,
+    new_id,
+)
 from oddvex_api.flags import service as flags
 from oddvex_api.providers import Event, OddsOutcome, OddsSnapshot, Player, PropOffer, Score
 from oddvex_api.schemas import price_out
@@ -87,12 +100,21 @@ __all__ = ["archive_env"]
 #: that a props capture had back in scope before any odds capture did.
 #: Three use the 36-hour horizon the product ships with: 12, 56 and 64.
 DEFAULT_SEEDS = (1, 3, 12, 40, 56, 64, 322, 368, 614)
+#: The default scenarios with a game listed three times (module docstring). Both catch
+#: the round-5 defect made on purpose in a copy of the source (the props read choosing
+#: the games to check by a row near T).
+DEFAULT_STAY_SEEDS = (1, 4)
 SCENARIOS = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SCENARIOS", "0"))
 FIRST_SEED = int(os.environ.get("ODDVEX_ARCHIVE_MODEL_SEED", "1"))
 SEEDS = (
     tuple(range(FIRST_SEED, FIRST_SEED + SCENARIOS))
     if SCENARIOS or "ODDVEX_ARCHIVE_MODEL_SEED" in os.environ
     else DEFAULT_SEEDS
+)
+STAY_SEEDS = (
+    tuple(range(FIRST_SEED, FIRST_SEED + SCENARIOS))
+    if SCENARIOS or "ODDVEX_ARCHIVE_MODEL_SEED" in os.environ
+    else DEFAULT_STAY_SEEDS
 )
 
 START = datetime(2026, 3, 14, 12, 0, tzinfo=UTC)
@@ -540,9 +562,11 @@ class StoredBet:
 
 
 class Scenario:
-    def __init__(self, seed: int, env: ArchiveEnv) -> None:
+    def __init__(self, seed: int, env: ArchiveEnv, *, stays: bool = False) -> None:
         self.seed = seed
-        self.rng = random.Random(seed)
+        #: The second kind of scenario: one game listed three times (``run_stays``).
+        self.stays = stays
+        self.rng = random.Random(f"stays of {seed}" if stays else seed)
         rng = self.rng
         self.env = env
         #: A second stream, for everything about cutting prunes short: the first one's
@@ -558,6 +582,11 @@ class Scenario:
             # past the keep horizon: a day more, so that it answers at all, and for
             # pruned games too.
             keep_days += 1
+        if stays:
+            # The shortest look-back (a day and the props gap limit), and a keep period
+            # of nine days: longer than five look-backs plus the retention, and longer
+            # than the scenario, so the game's first capture is never swept.
+            horizon_hours, keep_days = 12, 9
         self.base = env.settings.model_copy(
             update={
                 "snapshot_retention_days": 1,
@@ -578,6 +607,11 @@ class Scenario:
         #: Prunes cut short, by kind, and whether one still waits for a prune to finish.
         self.cut_short = {"dropped": 0, "killed": 0}
         self.unfinished = False
+        #: ``run_stays``: per stay of the game listed three times, the props captures that
+        #: had an offer of its first player on it; and what the reads of those moments
+        #: answered about the game after the last prune ("exact" or "named").
+        self.stay_captures: list[list[datetime]] = []
+        self.stay_answers: list[set[str]] = []
         with env.session_factory() as db:
             for i in range(len(USER_BOOKS)):
                 user = User(
@@ -601,9 +635,20 @@ class Scenario:
         """A props capture covers this long: two props intervals and one worker turn."""
         return timedelta(seconds=2 * self.settings.snapshot_props_interval_seconds + 120)
 
+    @property
+    def reach(self) -> timedelta:
+        """How far the props read looks back, stated here on its own: as far as an open
+        offer's latest row can be, which is the horizon and the game, and never less
+        than the age at which an unchanged offer is stored again plus the gap limit."""
+        return max(
+            timedelta(hours=self.settings.snapshot_horizon_hours + PROP_GAME_HOURS),
+            timedelta(hours=PROP_REFRESH_HOURS) + self.props_gap,
+        )
+
     def fail(self, where: str, as_of: datetime, message: str) -> Divergence:
+        kind = "stays seed" if self.stays else "seed"
         return Divergence(
-            f"seed {self.seed}, step {self.step}, now {self.now.isoformat()}, "
+            f"{kind} {self.seed}, step {self.step}, now {self.now.isoformat()}, "
             f"{where} as of {as_of.isoformat()}: {message}"
         )
 
@@ -639,6 +684,107 @@ class Scenario:
             world.current = later
         self.turn()
         self.sweep(last=True)
+
+    def run_stays(self) -> None:
+        """One game is listed three times: postponed twice and listed again under the
+        same id, the second stay more than three look-backs after the first and the
+        third more than two after the second, with capture down in between. Around it
+        the feed, the passes, the bets and the cut-short prunes go on as in ``run``.
+
+        The prune of the first pass back reduces the stay before; a day after the third
+        stay the game is reduced a last time and holds its first capture (first stay)
+        and its closing and last captures (third stay) only. After every stay, and at
+        the end, the props of the game's player are asked at the captures of every stay
+        so far, and the odds of the game around them."""
+        rng = self.rng
+        world = self.world
+        teams = world.teams
+        player = world.roster[0]
+        game = world.add_game(teams[0], teams[1], self.now + timedelta(hours=rng.randint(2, 4)))
+        world.add_game(teams[0], teams[2], self.now + timedelta(hours=rng.randint(6, 11)))
+        for stay in range(3):
+            if stay:
+                # Listed again: a new start time a few hours on, and offers on it.
+                world.hidden.discard(game)
+                world.games[game] = world.games[game].model_copy(
+                    update={"start_time": self.now + timedelta(hours=rng.randint(2, 4))}
+                )
+                for market in player.prop_markets[:2]:
+                    for book in rng.sample(world.book_ids, 2):
+                        world.set_offer(player.id, game, market, book)
+                home, away = rng.sample(teams, 2)
+                world.add_game(home, away, self.now + timedelta(hours=rng.randint(1, 30)))
+            began = self.now
+
+            def with_the_game(began: datetime = began) -> list[datetime]:
+                """This stay's props captures that had an offer of the player on the game."""
+                return [
+                    shot.at
+                    for shot in self.truth.props
+                    if shot.at > began
+                    and shot.in_scope(game) is not None
+                    and any(offer.event_id == game for offer in shot.offers[player.id])
+                ]
+
+            for _ in range(rng.randint(6, 12)):
+                self.turn()
+            # The feed may have hidden the game or withdrawn the offers, or the passes
+            # were missed: the stay lasts until one props capture has had them (at most
+            # an hour and a half more).
+            for _ in range(45):
+                if with_the_game():
+                    break
+                if world.freeze(self.settings).in_scope(game) is None:
+                    world.hidden.discard(game)
+                    world.games[game] = world.games[game].model_copy(
+                        update={"start_time": self.now + timedelta(hours=rng.randint(2, 4))}
+                    )
+                if not any(key[0] == game for key in world.offers[player.id]):
+                    world.set_offer(player.id, game, player.prop_markets[0], world.book_ids[0])
+                self.turn()
+            # Postponed: a start a month on is outside the window, listed or not.
+            world.games[game] = world.games[game].model_copy(
+                update={"start_time": self.now + timedelta(days=30)}
+            )
+            for _ in range(rng.randint(2, 4)):
+                self.turn()
+            self.stay_captures.append(with_the_game())
+            self.sweep()
+            self.ask_the_stays(game, player.id)
+            # Capture is down until the game is listed again (or, after the third stay,
+            # until its rows have aged out).
+            away_for = (3, 2, 1)[stay] * self.reach + timedelta(hours=rng.randint(2, 8))
+            world.current = self.now + away_for
+        for _ in range(rng.randint(2, 4)):
+            self.turn()
+        # Until a prune has run since (passes are missed, the flag is off for a while).
+        for _ in range(45):
+            if self.truth.reduced.get(game, START) > self.stay_captures[-1][-1]:
+                break
+            self.turn()
+        self.sweep(last=True)
+        self.stay_answers = self.ask_the_stays(game, player.id)
+
+    def ask_the_stays(self, game: str, player_id: str) -> list[set[str]]:
+        """The props of the game's player at the props captures of each stay (the capture
+        itself, a minute and a few minutes after it), and the game's odds then. Per stay,
+        what the props answers said about the game: "exact" (compared with the truth)
+        or "named" (as pruned)."""
+        said: list[set[str]] = []
+        for captures in self.stay_captures:
+            said.append(set())
+            for at in captures[:2] + captures[-1:]:
+                for seconds in (0, 60, 400):
+                    as_of = min(at + timedelta(seconds=seconds), self.now)
+                    with self.env.session_factory() as db:
+                        answer = archived_props(
+                            db, self.world, self.settings, player_id, None, as_of
+                        )
+                    if self.check_props(player_id, as_of) == "captured":
+                        named = game in answer.pruned_event_ids
+                        said[-1].add("named" if named else "exact")
+                    self.check_odds(game, self.rng.choice(MARKETS), as_of)
+        return said
 
     def turn(self) -> None:
         """One turn of the worker loop: the feed moves, sometimes something else happens,
@@ -731,6 +877,13 @@ class Scenario:
                     assert summary.status == "failed", (kind, summary)
                 if summary.status == "ok":
                     assert summary.captured_at == shot.at
+            # The capture rule, stated here on its own: a props capture never runs
+            # without the odds capture of its pass, so both froze the same list of games.
+            if report.props is not None:
+                assert report.odds is not None, "a props capture without an odds capture"
+                assert report.odds.status == report.props.status or (
+                    report.props.status == "failed" and report.odds.status == "ok"
+                ), (report.odds, report.props)
         for kind, shots in (("odds", self.truth.odds), ("props", self.truth.props)):
             if ran.get(kind) == ["ok"]:
                 shots.append(shot)
@@ -985,6 +1138,7 @@ class Scenario:
         status at a few more times, and the stored bets (all of them at the end)."""
         rng = self.rng
         world = self.world
+        self.offers_stand_beside_event_rows()
         asked = self.times(3)
         for event_id in sorted(world.games):
             mine = [shot.at for shot in self.truth.odds if shot.in_scope(event_id) is not None]
@@ -1004,6 +1158,26 @@ class Scenario:
         bets = self.bets if last else rng.sample(self.bets, min(len(self.bets), 6))
         for bet in bets:
             self.check_bet(bet)
+
+    def offers_stand_beside_event_rows(self) -> None:
+        """What the prune and the reads rely on: every stored open offer has its game's
+        event row of the same capture time (a props capture takes a game only together
+        with the odds capture of its pass)."""
+        with self.env.session_factory() as db:
+            held = set(db.execute(select(ArchivedEvent.event_id, ArchivedEvent.captured_at)))
+            alone = [
+                (event_id, at)
+                for event_id, at in db.execute(
+                    select(ArchivedProp.event_id, ArchivedProp.captured_at)
+                    .where(ArchivedProp.status != "unavailable")
+                    .distinct()
+                )
+                if (event_id, at) not in held and event_id not in self.truth.reduced
+            ]
+        if alone:
+            raise self.fail(
+                "stored offers", self.now, f"open offers with no event row beside them: {alone}"
+            )
 
     def may_say_pruned(self, event_id: str, shot: Shot | None, as_of: datetime) -> bool:
         """Whether ``archive_pruned`` is an honest answer for the event at T: T is within
@@ -1091,13 +1265,7 @@ class Scenario:
         else:
             expected = "captured"
         keep = self.truth.keep_cutoff
-        # The read looks back as far as an open offer's latest row can be: the horizon
-        # and the game, and never less than the age at which an unchanged offer is
-        # stored again plus the gap limit.
-        reach = max(
-            timedelta(hours=settings.snapshot_horizon_hours + PROP_GAME_HOURS),
-            timedelta(hours=PROP_REFRESH_HOURS, seconds=gap),
-        )
+        reach = self.reach
         if status != "captured":
             if status not in REFUSALS or answer.offers or answer.pruned_event_ids:
                 raise self.fail(where, as_of, f"refusal {status} with offers or no named reason")
@@ -1314,7 +1482,36 @@ def _without_gone_books(odds: dict[str, Any]) -> dict[str, Any]:
     return odds
 
 
-# -------------------------------------------------------------------- the test
+# ------------------------------------------------------------------- the tests
+@pytest.mark.parametrize("seed", STAY_SEEDS)
+def test_a_game_listed_three_times_agrees_with_the_reference_model(
+    archive_env: ArchiveEnv, seed: int
+) -> None:
+    scenario = Scenario(seed, archive_env, stays=True)
+    scenario.run_stays()
+    first, second, third = scenario.stay_captures
+    print(
+        f"stays seed {seed}: props captures with the game per stay "
+        f"{[len(stay) for stay in scenario.stay_captures]}, answers about the game after "
+        f"the last prune {[sorted(said) for said in scenario.stay_answers]}, "
+        f"prunes cut short {scenario.cut_short}, checks {scenario.checks}"
+    )
+    # The scenario reached its class: three stays captured with the player's offers, the
+    # second more than three look-backs after the first and more than two before the
+    # third, inside the keep period, and the prune has reduced the game after the third.
+    settings, truth = scenario.settings, scenario.truth
+    assert first and second and third
+    reach = scenario.reach
+    assert second[0] - first[-1] > 3 * reach and third[0] - second[-1] > 2 * reach
+    keep = timedelta(days=settings.snapshot_keep_days)
+    assert keep > 5 * reach + timedelta(days=settings.snapshot_retention_days)
+    assert truth.keep_cutoff is not None and truth.keep_cutoff + reach < first[0]
+    assert truth.reduced["model_game_1"] > third[-1]
+    # And the read answered ``captured`` for the second stay's captures, so the game's
+    # offers there were either compared with the truth or named as pruned.
+    assert scenario.stay_answers[1], scenario.stay_answers
+
+
 @pytest.mark.parametrize("seed", SEEDS)
 def test_the_archive_agrees_with_the_reference_model(archive_env: ArchiveEnv, seed: int) -> None:
     scenario = Scenario(seed, archive_env)

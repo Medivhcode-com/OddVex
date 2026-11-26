@@ -494,6 +494,7 @@ def test_a_reclaim_is_recorded_for_administrators(bloated: ArchiveEnv) -> None:
         0,
     )
     assert shown.bytes_freed == before - after and shown.finished_at == run.finished_at
+    assert shown.failed_indexes == {} and shown.error is None
     assert stats.disk_bytes is not None and stats.disk_bytes < stats.max_disk_bytes
     assert stats.max_disk_bytes == env.settings.snapshot_max_disk_bytes
     # Rebuilt a moment ago: the next check leaves it alone, whatever its size.
@@ -557,6 +558,7 @@ def test_a_rebuild_whose_database_session_is_ended_is_recorded_and_cleaned_up(
         with env.session_factory() as db:
             (shown,) = [r for r in archive_stats(db, env.settings).last_runs if r.kind == "reclaim"]
         assert (shown.status, shown.indexes_failed, shown.indexes_rebuilt) == ("failed", 1, 0)
+        assert shown.failed_indexes == {"uq_odds_snapshots_key": "AdminShutdown"}
         # The terminated rebuild left its invalid copy; the working index is untouched.
         (left,) = leftover_indexes(states(env))
         assert left.name.startswith("uq_odds_snapshots_key_cc") and not left.valid

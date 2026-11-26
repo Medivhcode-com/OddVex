@@ -2,8 +2,10 @@
 
 Each is bounded to one event and market (at most one row per book), one player (one row
 per market and book of each of the player's games with an offer in the look-back, 48
-hours by default, at most two or three games, plus a few small queries per game of the
-player near T for the prune check) or one event's status records (at most
+hours by default, at most two or three games; and, once a prune has run, the ids of the
+games the player has a prop row of, a few hundred over the keep period, with a few small
+queries for each of those whose captures span a time near T) or one event's status
+records (at most
 ``MAX_STATUS_ENTRIES``), so one request reads a few hundred rows at most. An odds, props
 or placement read that a prune changed the rows under is made again, at most
 ``view.READ_ATTEMPTS`` times in all, so the bound is that many times the above.
@@ -140,16 +142,7 @@ def archived_props(
     as_of: datetime,
 ) -> ArchivedPropsOut:
     refs = _book_refs(provider)
-    player = provider.get_player(player_id)
-    read = props_at(
-        session,
-        provider.name,
-        player_id,
-        market,
-        as_of,
-        settings,
-        team_id=player.team_id if player is not None else None,
-    )
+    read = props_at(session, provider.name, player_id, market, as_of, settings)
     offers = [
         ArchivedPropOut(
             sportsbook=_ref(refs, row.sportsbook_id),
@@ -290,13 +283,18 @@ def _run_out(run: SnapshotRun) -> ArchiveRunOut:
         finished_at=run.finished_at,
     )
     if run.kind != "reclaim":
-        return out
+        return out.model_copy(
+            update={
+                "error": (run.detail or {}).get("error") if run.status == "failed" else None,
+            }
+        )
     detail = run.detail or {}
     return out.model_copy(
         update={
             "indexes_rebuilt": len(detail.get("rebuilt") or {}),
             "indexes_dropped": len(detail.get("dropped") or {}),
             "indexes_failed": len(detail.get("failed") or {}),
+            "failed_indexes": dict(detail.get("failed") or {}),
             "bytes_freed": int(detail.get("freed_bytes") or 0),
         }
     )

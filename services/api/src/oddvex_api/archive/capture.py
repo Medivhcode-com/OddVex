@@ -7,7 +7,13 @@ One pass (``capture_pass``), run by ``scripts/capture_snapshots.py`` in the work
 3. Every timestamp is the provider's clock (``provider.now()``).
 4. Odds are captured when the last odds capture is at least
    ``snapshot_odds_interval_seconds`` old, less ``INTERVAL_SLACK_SECONDS`` for the drift of
-   the 120 s loop; props likewise with ``snapshot_props_interval_seconds``.
+   the 120 s loop; props likewise with ``snapshot_props_interval_seconds``. **Props are
+   never captured without the odds capture of the same pass:** when props are due the
+   pass captures odds too, first, and the props capture takes exactly the games that
+   odds capture wrote an event row for. So every open prop row has its game's event row
+   of the same capture time beside it, and the prune and the reads can tell from a
+   game's event rows alone when it had offers (review round 5: a game that only a props
+   capture had seen left prop rows the reads could not place).
 5. At ``snapshot_max_bytes`` capture stops with a ``skipped_full`` run; the prune goes on.
    The size is the rows held times measured bytes per row (``ROW_BYTES``), not the size
    of the files: on PostgreSQL a delete and a plain VACUUM make room for new rows but do
@@ -543,8 +549,20 @@ def capture_props(
 ) -> SnapshotRun:
     """One props run: every changed offer for an in-scope event, and a tombstone for every
     stored open offer that is gone, including all of a game's offers once it leaves
-    scope (so a finished game's last offers are never read back as open)."""
-    scope = {e.id for e in events}
+    scope (so a finished game's last offers are never read back as open).
+
+    In scope here are the games the odds capture of this pass holds: those of ``events``
+    with an event row captured at ``now``. A props capture never takes a game on its own
+    (module docstring, step 4), so a game with an open prop row always has an event row
+    of the same capture time."""
+    held = set(
+        session.scalars(
+            select(ArchivedEvent.event_id).where(
+                ArchivedEvent.provider == provider.name, ArchivedEvent.captured_at == now
+            )
+        )
+    )
+    scope = {e.id for e in events} & held
     current: dict[PropKey, dict[str, Any]] = {}
     for player in provider.list_players():
         for offer in provider.get_prop_offers(player.id):
@@ -584,7 +602,7 @@ def capture_props(
                 }
             )
     run = new_run(provider, settings, "props", now)
-    run.events_in_scope = len(events)
+    run.events_in_scope = len(scope)
     run.rows_written = len(rows)
     run.rows_unchanged = unchanged
     return _write_run(session, run, [(ArchivedProp, rows)])
@@ -703,7 +721,8 @@ def run_pass(
     force_prune: bool = False,
 ) -> PassReport:
     """One pass on an open session. ``force`` ignores the capture intervals and
-    ``force_prune`` the prune's; ``capture=False`` only prunes."""
+    ``force_prune`` the prune's; ``capture=False`` only prunes. When props are due, odds
+    are captured too, first: the props capture takes the games of that odds capture."""
     from .prune import prune_pass  # prune imports helpers from this module
 
     report = PassReport(enabled=flags.is_enabled(session, FLAG, settings))
@@ -717,6 +736,10 @@ def run_pass(
         "props": force
         or is_due(session, provider.name, "props", now, settings.snapshot_props_interval_seconds),
     }
+    # A props capture never runs without the odds capture of its pass (module docstring,
+    # step 4). The two intervals are multiples of the worker turn, so this seldom adds
+    # an odds capture: it moves the next one.
+    due["odds"] = due["odds"] or due["props"]
     if capture and any(due.values()):
         size = archive_bytes(session)
         disk = archive_disk_bytes(session)
@@ -759,6 +782,7 @@ def run_pass(
             summary = guarded(session, provider, settings, kind, now, work)
             setattr(report, kind, summary)
             if summary.status == "failed":
+                # A failed odds capture ends the pass: no props capture without it.
                 return report
     if prune:
         report.prune = prune_pass(session, provider, settings, force=force_prune)
@@ -848,11 +872,19 @@ def capture_pass(
             return report
         finally:
             if postgres:
-                connection.rollback()
-                connection.execute(
-                    text("SELECT pg_advisory_unlock(:key)"), {"key": ADVISORY_LOCK_KEY}
-                )
-                connection.commit()
+                try:
+                    connection.rollback()
+                    connection.execute(
+                        text("SELECT pg_advisory_unlock(:key)"), {"key": ADVISORY_LOCK_KEY}
+                    )
+                    connection.commit()
+                except SQLAlchemyError as exc:
+                    # The pass's database session is gone (the server restarted, or an
+                    # administrator ended it): the server released the lock with it.
+                    # What the pass did is already recorded; nothing is left to undo.
+                    logger.warning(
+                        "snapshot_advisory_unlock_skipped", extra={"error": type(exc).__name__}
+                    )
 
 
 __all__ = [

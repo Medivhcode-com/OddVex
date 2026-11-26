@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from oddvex_api.archive import view as view_module
-from oddvex_api.archive.capture import capture_pass
+from oddvex_api.archive.capture import capture_pass, new_run
 
 from .archive_support import (
     ARCHIVE_SETTINGS,
@@ -182,9 +182,10 @@ def test_a_read_the_prune_keeps_disturbing_answers_503_and_never_a_guess(
     archived: tuple[TestClient, FastAPI, ControlledProvider], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A read that a prune changes the rows under is made again; if that happens every
-    time (it cannot in operation: one prune disturbs a read three times at most), the
-    three reading routes answer 503 ``archive_busy`` with ``Retry-After``, not an answer
-    built from rows that were not there together."""
+    time (for a read of one game it cannot in operation: one prune disturbs it three
+    times at most; the placement prices of a parlay read several games), the three
+    reading routes answer 503 ``archive_busy`` with ``Retry-After``, not an answer built
+    from rows that were not there together."""
     client, _, provider = archived
     headers = auth_headers(client)
     bet_id = place(client, headers, bet_body("Summit"))
@@ -238,8 +239,10 @@ def test_admin_stats_show_the_archive_whatever_the_flag(
     assert {run["kind"] for run in body["last_runs"]} >= {"odds", "props", "prune"}
     for run in body["last_runs"]:
         assert run["finished_at"] is not None
+        assert run["error"] is None  # nothing failed
         if run["kind"] != "reclaim":
             assert run["indexes_rebuilt"] is None and run["bytes_freed"] is None
+            assert run["failed_indexes"] is None
     # The status read says what it covers.
     status = client.get(
         f"/v1/archive/events/{PREGAME}/status",
@@ -303,3 +306,38 @@ def test_a_suspended_account_is_refused_by_the_archive_routes_with_the_flag_on(
         response = client.get(url, params=params, headers=ada)
         assert response.status_code == 401, url
         assert response.json()["error"]["code"] == "account_suspended", url
+
+
+def test_admin_stats_name_what_failed(
+    archived: tuple[TestClient, FastAPI, ControlledProvider],
+) -> None:
+    """Review round 5, operations: nobody has a shell on the preview server, so the
+    statistics are the only place an operator can see why a run failed. A failed capture
+    or prune shows the class name of its error, and a failed index rebuild the index and
+    the class of its error (``QueryCanceled`` is the one that says "raise the rebuild's
+    time limit"). Names only, as the runs record them."""
+    client, app, provider = archived
+    settings = app.state.settings
+    with app.state.session_factory() as db:
+        failed = new_run(provider, settings, "odds", provider.now(), status="failed")
+        failed.detail = {"error": "ConnectionError"}
+        reclaim = new_run(provider, settings, "reclaim", provider.now(), status="failed")
+        reclaim.detail = {
+            "rebuilt": {"ix_odds_snapshots_captured_at": [3_000_000, 2_000_000, 50_000]},
+            "dropped": {},
+            "failed": {"uq_odds_snapshots_key": "QueryCanceled"},
+            "skipped": ["uq_prop_snapshots_key"],
+            "freed_bytes": 1_000_000,
+            "over_ceiling": False,
+        }
+        db.add_all([failed, reclaim])
+        db.commit()
+    stats = client.get("/v1/admin/archive/stats", headers=admin_headers(client))
+    assert stats.status_code == 200, stats.text
+    runs = {run["kind"]: run for run in stats.json()["last_runs"]}
+    assert (runs["odds"]["status"], runs["odds"]["error"]) == ("failed", "ConnectionError")
+    assert runs["odds"]["failed_indexes"] is None
+    assert runs["reclaim"]["status"] == "failed" and runs["reclaim"]["error"] is None
+    assert runs["reclaim"]["failed_indexes"] == {"uq_odds_snapshots_key": "QueryCanceled"}
+    assert (runs["reclaim"]["indexes_failed"], runs["reclaim"]["indexes_rebuilt"]) == (1, 1)
+    assert runs["props"]["error"] is None  # the latest props run did not fail

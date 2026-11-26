@@ -455,7 +455,7 @@ export interface paths {
         };
         /**
          * One player's archived prop offers as of a time
-         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the look-back before it (48 hours with the default settings), and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`. Behind the `snapshot_archive` flag.
+         * @description The latest offer per game, market and book captured at or before `as_of`, for each of the player's games with an offer in the look-back before it (48 hours with the default settings), and the props coverage then. A game whose offers were all withdrawn or that had left scope is left out. A game the retention prune has reduced to its closing offers is served only where those are still the answer; otherwise its offers are left out and its id is listed in `pruned_event_ids`: for any time from the game's first capture to one look-back after its last, the times between two listings of a game that was postponed and listed again included. A props capture holds the games of the odds capture made in the same pass. Behind the `snapshot_archive` flag.
          */
         get: operations["get_archived_player_props"];
         put?: never;
@@ -2309,6 +2309,18 @@ export interface components {
              * Format: date-time
              */
             captured_at: string;
+            /**
+             * Error
+             * @description A `failed` capture or prune run: the class name of the error that ended it (a name only, never a message).
+             */
+            error?: string | null;
+            /**
+             * Failed Indexes
+             * @description `reclaim` runs: per index whose rebuild or drop failed, the class name of the error (for example `QueryCanceled` when a rebuild ran into its time limit, `LockNotAvailable` when it waited too long for an older transaction). The key `connection` stands for the rebuild's database session being lost.
+             */
+            failed_indexes?: {
+                [key: string]: string;
+            } | null;
             /**
              * Finished At
              * @description Wall-clock time the run ended.

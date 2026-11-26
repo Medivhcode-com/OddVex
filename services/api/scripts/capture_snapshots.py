@@ -14,9 +14,12 @@ the flag off stops all storage growth. On PostgreSQL an advisory lock stops two 
 from overlapping, and after each prune the pass rebuilds bloated archive indexes and drops
 whatever an interrupted rebuild left (``oddvex_api/archive/reclaim.py``); ``--reclaim``
 does only that, now. It reads only the configured provider (synthetic unless set), never a
-sportsbook. Exit status 1 when a capture, prune or rebuild failed; the failure is recorded
-as a ``failed`` run with the exception's class name only (a rebuild whose database session
-was ended included; only a database that cannot be reached at all leaves no record). Exit
+sportsbook. Props are never captured without the odds capture of the same pass: when the
+props are due the pass captures odds too. Exit status 1 when a capture, prune or rebuild
+failed; the failure is recorded as a ``failed`` run with the exception's class name only
+(a rebuild whose database session was ended included; only a database that cannot be
+reached at all leaves no record), and the script's line and ``--stats`` show that name,
+with the index it belongs to for a rebuild. Exit
 status 2, with nothing done, when the archive settings cannot work together.
 """
 
@@ -26,7 +29,7 @@ import sys
 
 from sqlalchemy.orm import Session
 
-from oddvex_api.archive.capture import FLAG, capture_pass, in_scope, is_due
+from oddvex_api.archive.capture import FLAG, RunSummary, capture_pass, in_scope, is_due
 from oddvex_api.archive.guard import install_archive_guard
 from oddvex_api.archive.service import archive_stats
 from oddvex_api.config import Settings, get_settings
@@ -58,14 +61,30 @@ def _stats(settings: Settings) -> int:
             print(
                 f"  last reclaim: {run.status} at {run.captured_at.isoformat()}, "
                 f"{run.indexes_rebuilt} index(es) rebuilt, {run.indexes_dropped} dropped, "
-                f"{run.indexes_failed} failed, {run.bytes_freed or 0:,} bytes freed"
+                f"{run.indexes_failed} failed{_failed(run.failed_indexes)}, "
+                f"{run.bytes_freed or 0:,} bytes freed"
             )
             continue
         print(
-            f"  last {run.kind}: {run.status} at {run.captured_at.isoformat()}, "
-            f"{run.rows_written:,} written, {run.rows_deleted:,} deleted"
+            f"  last {run.kind}: {run.status}{f' ({run.error})' if run.error else ''} at "
+            f"{run.captured_at.isoformat()}, {run.rows_written:,} written, "
+            f"{run.rows_deleted:,} deleted"
         )
     return 0
+
+
+def _failed(indexes: dict[str, str] | None) -> str:
+    """The indexes whose rebuild or drop failed and the class of each error, for the
+    script's lines: `` (uq_odds_snapshots_key: QueryCanceled)``, or nothing."""
+    if not indexes:
+        return ""
+    return " (" + ", ".join(f"{name}: {error}" for name, error in sorted(indexes.items())) + ")"
+
+
+def _error(run: RunSummary) -> str:
+    """A failed run's error class, for the script's line: `` (ConnectionError)``."""
+    error = (run.detail or {}).get("error") if run.status == "failed" else None
+    return f" ({error})" if error else ""
 
 
 def _enabled(settings: Settings) -> bool:
@@ -96,7 +115,8 @@ def _dry_run(settings: Settings, provider: SportsDataProvider) -> int:
     quotes = sum(len(provider.get_odds(e.id, m)) for e in events for m in e.markets)
     print(
         f"Dry run, nothing saved: {len(events)} event(s) in scope with {quotes} quote(s); "
-        f"odds {'due' if odds_due else 'not due'}, props {'due' if props_due else 'not due'}."
+        f"odds {'due' if odds_due or props_due else 'not due'} (always with the props), "
+        f"props {'due' if props_due else 'not due'}."
     )
     return 0
 
@@ -144,17 +164,19 @@ def main(argv: list[str]) -> int:
         if run is None:
             parts.append(f"{name} not due")
         elif name == "prune":
-            parts.append(f"prune {run.status}, {run.rows_deleted} row(s) deleted")
+            parts.append(f"prune {run.status}{_error(run)}, {run.rows_deleted} row(s) deleted")
         else:
             parts.append(
-                f"{name} {run.status}, {run.rows_written} row(s) written, "
+                f"{name} {run.status}{_error(run)}, {run.rows_written} row(s) written, "
                 f"{run.rows_unchanged} unchanged"
             )
     if report.reclaim is not None:
         detail = report.reclaim.detail or {}
+        failed = detail.get("failed") or {}
         parts.append(
             f"reclaim {report.reclaim.status}, {len(detail.get('rebuilt') or {})} index(es) "
-            f"rebuilt, {int(detail.get('freed_bytes') or 0):,} bytes freed"
+            f"rebuilt, {len(failed)} failed{_failed(failed)}, "
+            f"{int(detail.get('freed_bytes') or 0):,} bytes freed"
         )
     elif reclaim_only:
         parts.append("reclaim: nothing to rebuild")

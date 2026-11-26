@@ -245,6 +245,13 @@ class ArchiveRunOut(BaseModel):
     rows_written: int
     rows_deleted: int
     finished_at: datetime | None = Field(default=None, description="Wall-clock time the run ended.")
+    error: str | None = Field(
+        default=None,
+        description=(
+            "A `failed` capture or prune run: the class name of the error that ended it "
+            "(a name only, never a message)."
+        ),
+    )
     indexes_rebuilt: int | None = Field(
         default=None, description="`reclaim` runs: indexes rebuilt to return space to the disk."
     )
@@ -255,6 +262,15 @@ class ArchiveRunOut(BaseModel):
     indexes_failed: int | None = Field(
         default=None,
         description="`reclaim` runs: rebuilds or drops that failed and wait for a later pass.",
+    )
+    failed_indexes: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "`reclaim` runs: per index whose rebuild or drop failed, the class name of the "
+            "error (for example `QueryCanceled` when a rebuild ran into its time limit, "
+            "`LockNotAvailable` when it waited too long for an older transaction). The key "
+            "`connection` stands for the rebuild's database session being lost."
+        ),
     )
     bytes_freed: int | None = Field(
         default=None, description="`reclaim` runs: bytes the run returned to the disk."
